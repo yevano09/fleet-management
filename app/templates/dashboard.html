@@ -148,6 +148,13 @@ input[type="checkbox"] { accent-color:#2563eb; width:1rem; height:1rem; cursor:p
 </tbody>
 </table>
 </div>
+
+<div class="ota-section">
+<h3>Agent Recommendations</h3>
+<div id="agent-panels" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:1rem;">
+<div class="stat-card" style="padding:1.25rem;"><div class="label">Loading agent recommendations...</div></div>
+</div>
+</div>
 </main>
 
 <div class="modal-overlay" id="ota-modal">
@@ -279,6 +286,71 @@ async function loadFirmware() {
   }
 }
 
+async function loadAgentRecommendations() {
+  try {
+    const res = await fetch('/agents/recommendations?notify=false');
+    const data = await res.json();
+    const panels = document.getElementById('agent-panels');
+    if (!data.agents || data.agents.length === 0) {
+      panels.innerHTML = '<div class="stat-card" style="padding:1.25rem;grid-column:1/-1;"><div class="label">Agent recommendations unavailable</div></div>';
+      return;
+    }
+    panels.innerHTML = data.agents.map(a => {
+      if (a.error) {
+        return `<div class="stat-card" style="padding:1.25rem;border-left:3px solid #f87171;">
+          <div class="label" style="margin-bottom:0.5rem;">${a.agent}</div>
+          <div style="color:#f87171;font-size:0.875rem;">Error: ${a.error}</div>
+        </div>`;
+      }
+      if (a.type === 'ota_campaign' && a.details) {
+        const d = a.details;
+        const phases = d.rollout_phases || [];
+        return `<div class="stat-card" style="padding:1.25rem;border-left:3px solid #38bdf8;">
+          <div class="label" style="margin-bottom:0.25rem;">${a.agent}</div>
+          <div style="font-size:0.875rem;margin-bottom:0.75rem;">${a.summary}</div>
+          <div style="font-size:0.75rem;color:#94a3b8;">
+            Firmware: ${d.firmware?.version || '?'} | Online: ${d.total_online_devices || 0}
+          </div>
+          <div style="font-size:0.75rem;color:#94a3b8;margin-top:0.25rem;">
+            Canary: ${d.canary_group?.device_count || 0} devices | Phases: ${phases.length}
+          </div>
+        </div>`;
+      }
+      if (a.type === 'anomaly_check') {
+        const anomalies = a.anomalies || [];
+        const criticalCount = anomalies.filter(x => x.severity === 'critical').length;
+        const warningCount = anomalies.filter(x => x.severity === 'warning').length;
+        const color = criticalCount > 0 ? '#f87171' : warningCount > 0 ? '#f59f00' : '#4ade80';
+        const icon = criticalCount > 0 ? '!' : warningCount > 0 ? '!' : '✓';
+        return `<div class="stat-card" style="padding:1.25rem;border-left:3px solid ${color};">
+          <div class="label" style="margin-bottom:0.25rem;">${a.agent}</div>
+          <div style="font-size:1.25rem;font-weight:700;color:${color};">${icon} ${a.status}</div>
+          <div style="font-size:0.875rem;margin-top:0.25rem;">${a.summary}</div>
+          ${anomalies.length > 0 ? `<div style="margin-top:0.5rem;font-size:0.75rem;">
+            ${anomalies.slice(0, 3).map(x => `<div style="color:${x.severity === 'critical' ? '#f87171' : '#f59f00'};padding:0.125rem 0;">${x.severity}: ${x.message.substring(0, 80)}${x.message.length > 80 ? '...' : ''}</div>`).join('')}
+          </div>` : ''}
+        </div>`;
+      }
+      if (a.type === 'device_groups') {
+        const groups = a.groups || [];
+        return `<div class="stat-card" style="padding:1.25rem;border-left:3px solid #c084fc;">
+          <div class="label" style="margin-bottom:0.25rem;">${a.agent}</div>
+          <div style="font-size:0.875rem;margin-bottom:0.5rem;">${a.summary}</div>
+          <div style="font-size:0.75rem;color:#94a3b8;">
+            ${groups.map(g => `<div style="margin-top:0.25rem;">• ${g.name} (${g.count} devices)</div>`).join('')}
+          </div>
+        </div>`;
+      }
+      return `<div class="stat-card" style="padding:1.25rem;border-left:3px solid #94a3b8;">
+        <div class="label" style="margin-bottom:0.25rem;">${a.agent}</div>
+        <div style="font-size:0.875rem;">${a.summary || 'No data'}</div>
+      </div>`;
+    }).join('');
+  } catch (err) {
+    console.error('Agent recommendations error:', err);
+  }
+}
+
 async function checkMqttStatus() {
   try {
     const res = await fetch('/devices');
@@ -350,8 +422,10 @@ document.getElementById('ota-form').addEventListener('submit', async (e) => {
 
 loadDashboard();
 checkMqttStatus();
+loadAgentRecommendations();
 setInterval(loadDashboard, 5000);
 setInterval(checkMqttStatus, 10000);
+setInterval(loadAgentRecommendations, 30000);
 </script>
 </body>
 </html>

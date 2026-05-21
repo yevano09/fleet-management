@@ -208,6 +208,79 @@ Navigate to http://localhost:3000 (admin/admin). Open the "Fleet Commander Overv
 - **API Latency** show request duration histograms
 - **MQTT Message Throughput** graph spike with each OTA command
 
+### 9. Agent Recommendations (Phase 1)
+
+The dashboard now includes three AI agent panels at the bottom, auto-refreshing every 30 seconds.
+
+#### OTA Campaign Agent
+
+After uploading a firmware:
+```bash
+curl -X POST http://localhost:8000/ota/upload \
+  -F "version=2.0.0" \
+  -F "file=@/path/to/firmware.bin"
+```
+
+The OTA Campaign panel shows:
+- **Canary group** size and device IDs (10% of online fleet)
+- **Rollout phases** with device counts and gate criteria
+- **Risk assessment** level and recommendation summary
+
+The agent recommends a phased rollout: canary → Phase 1 (30%) → Phase 2 (60%) → Phase 3 (100%), with pass/fail gates between each phase.
+
+#### Anomaly Detection Agent
+
+The Fleet Health panel shows:
+- **Status** (healthy / anomalies found) with color coding
+- **Critical alerts** (stuck OTAs, failure spikes, mass offline)
+- **Warning alerts** (weak signals, degrading devices)
+
+To see anomalies in action, stop a device or trigger a high-failure-rate OTA:
+```bash
+curl -X POST http://localhost:8000/ota/trigger \
+  -H "Content-Type: application/json" \
+  -d '{"firmware_id": "<FW_ID>", "all_devices": true}'
+```
+After OTA failures, the anomaly panel will show failure rate spikes.
+
+#### Device Group Manager
+
+The Device Groups panel shows:
+- **Firmware version cohorts** (e.g., "Firmware 1.0.0 Cohort" — 5 devices)
+- **Signal strength buckets** (Good / Moderate / Poor)
+- Each group includes device count, device IDs, and rationale
+
+Use these groups for targeted OTA rollouts or health comparisons.
+
+#### REST API
+
+```bash
+# Full recommendation report (JSON)
+curl http://localhost:8000/agents/recommendations?notify=false
+
+# OTA campaign for a specific firmware
+curl 'http://localhost:8000/agents/ota-campaign?firmware_version=2.0.0'
+
+# Anomaly check only
+curl 'http://localhost:8000/agents/anomaly-check?notify=false'
+
+# Device groupings
+curl 'http://localhost:8000/agents/device-groups'
+```
+
+#### CLI Runner
+
+```bash
+# Run all agents
+python run_agents.py
+
+# OTA campaign only
+python run_agents.py --ota
+
+# JSON output for scripting
+python run_agents.py --json | jq .
+```
+
 ### Cleanup
 
 ```bash

@@ -13,6 +13,7 @@ from app.config import settings
 from app.database import init_db, async_session_factory
 from app.mqtt_client import mqtt_client
 from app.routers import devices, ota, dashboard
+from agents.routers import router as agents_router
 from app.ota_manager import OtaStateMachine
 from app.metrics import metrics_middleware, active_devices, mqtt_messages_received
 from app.models import Device, DeviceStatus
@@ -88,6 +89,7 @@ app.middleware("http")(metrics_middleware)
 app.include_router(devices.router)
 app.include_router(ota.router)
 app.include_router(dashboard.router)
+app.include_router(agents_router)
 
 os.makedirs(settings.firmware_storage_path, exist_ok=True)
 

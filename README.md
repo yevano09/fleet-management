@@ -116,6 +116,26 @@ docker compose --profile testing run --build --rm tests
 |---|---|---|
 | `GET` | `/` | Fleet UI Dashboard |
 
+### Agent Recommendations (Phase 1 — Assisted Mode)
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/agents/recommendations` | Run all three agents (OTA, anomaly, groups) |
+| `GET` | `/agents/ota-campaign` | Canary-based rollout plan for a firmware version |
+| `GET` | `/agents/anomaly-check` | Fleet health scan: weak signals, stuck OTAs, failure spikes |
+| `GET` | `/agents/device-groups` | Device groupings by firmware version and signal strength |
+
+All agent endpoints return structured JSON with agent name, type, summary, and details. OTA and group agents mark `"human_input_required": true`.
+
+**CLI runner:**
+```bash
+python run_agents.py --ota --firmware 2.0.0
+python run_agents.py --anomaly
+python run_agents.py --json
+```
+
+**Dashboard:** Agent recommendation panels auto-refresh every 30 seconds at the bottom of `http://localhost:8000`.
+
 ## Configuration
 
 All configuration is via environment variables (see `.env.example`):
@@ -170,10 +190,17 @@ fleet-management/
 │   │   └── dashboard.py      # Dashboard HTML serving
 │   └── templates/            # Jinja2 templates
 │       └── dashboard.html    # Fleet UI dashboard
+├── agents/                   # Phase 1 Crew AI agents
+│   ├── __init__.py            # Package init
+│   ├── tools.py               # HTTP-based tools (CLI mode)
+│   ├── async_tools.py         # Async DB-backed tools (in-backend mode)
+│   ├── phase1_crew.py         # Crew AI agent definitions + fallbacks
+│   └── routers.py             # FastAPI router (/agents/*)
 ├── simulator/
 │   └── simulator.py          # Virtual device simulator
 ├── tests/
 │   └── test_e2e.py           # End-to-end integration tests
+├── run_agents.py             # CLI runner for Phase 1 agents
 ├── docker/
 │   ├── prometheus/           # Prometheus scrape config
 │   ├── grafana/              # Grafana provisioning + dashboards
