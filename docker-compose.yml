@@ -1,0 +1,163 @@
+services:
+  # ============================================================
+  # Mosquitto MQTT Broker
+  # ============================================================
+  mosquitto:
+    image: eclipse-mosquitto:2
+    container_name: fleet-mosquitto
+    ports:
+      - "1883:1883"
+    volumes:
+      - ./docker/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "mosquitto_pub", "-p", "1883", "-t", "healthcheck", "-m", "ok", "-q", "0"]
+      interval: 10s
+      retries: 5
+      start_period: 15s
+
+  # ============================================================
+  # PostgreSQL Database (production) — also works with SQLite for dev
+  # ============================================================
+  postgres:
+    image: postgres:16-alpine
+    container_name: fleet-postgres
+    environment:
+      POSTGRES_USER: fleet
+      POSTGRES_PASSWORD: fleet_password
+      POSTGRES_DB: fleet
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U fleet"]
+      interval: 10s
+      retries: 5
+      start_period: 15s
+    profiles:
+      - production
+
+  # ============================================================
+  # Fleet Commander Backend (FastAPI)
+  # ============================================================
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: fleet-backend
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=${DATABASE_URL:-sqlite+aiosqlite:///./data/fleet.db}
+      - MQTT_BROKER_HOST=mosquitto
+      - MQTT_BROKER_PORT=1883
+      - LOG_LEVEL=INFO
+      - FIRMWARE_STORAGE_PATH=/app/firmware
+      - OTA_TIMEOUT_SECONDS=120
+      - MAX_RETRY_COUNT=3
+    volumes:
+      - firmware_data:/app/firmware
+      - sqlite_data:/app/data
+    depends_on:
+      mosquitto:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/devices')"]
+      interval: 15s
+      retries: 5
+      start_period: 20s
+
+  # ============================================================
+  # Device Simulator (spawns virtual IoT devices)
+  # ============================================================
+  simulator:
+    build:
+      context: .
+      dockerfile: Dockerfile.simulator
+    container_name: fleet-simulator
+    environment:
+      - MQTT_BROKER_HOST=mosquitto
+      - MQTT_BROKER_PORT=1883
+      - BACKEND_URL=http://backend:8000
+      - SIMULATOR_DEVICE_COUNT=${SIMULATOR_DEVICE_COUNT:-5}
+      - SIMULATOR_HEARTBEAT_INTERVAL=10
+      - SIMULATOR_OTA_FAILURE_RATE=0.2
+    depends_on:
+      backend:
+        condition: service_started
+      mosquitto:
+        condition: service_healthy
+    restart: unless-stopped
+    profiles:
+      - demo
+
+  # ============================================================
+  # Prometheus (Metrics Collection)
+  # ============================================================
+  prometheus:
+    image: prom/prometheus:v2.53.0
+    container_name: fleet-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./docker/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=7d"
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_started
+
+  # ============================================================
+  # Grafana (Visualization)
+  # ============================================================
+  grafana:
+    image: grafana/grafana:11.1.0
+    container_name: fleet-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_INSTALL_PLUGINS=
+    volumes:
+      - ./docker/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./docker/grafana/dashboards:/etc/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    restart: unless-stopped
+    depends_on:
+      prometheus:
+        condition: service_started
+
+  # ============================================================
+  # E2E Tests (run once, then exit)
+  # ============================================================
+  tests:
+    build:
+      context: .
+      dockerfile: Dockerfile.tests
+    container_name: fleet-tests
+    environment:
+      - BASE_URL=http://backend:8000
+      - TEST_DEVICE_COUNT=3
+      - TEST_TIMEOUT=60
+    depends_on:
+      backend:
+        condition: service_healthy
+      mosquitto:
+        condition: service_healthy
+    profiles:
+      - testing
+
+volumes:
+  pgdata:
+  firmware_data:
+  sqlite_data:
+  prometheus_data:
+  grafana_data:

@@ -1,0 +1,14 @@
+FROM python:3.12-slim
+
+WORKDIR /app
+
+RUN pip install --no-cache-dir pytest requests httpx
+
+COPY tests/ ./tests/
+COPY requirements.txt .
+COPY .env.example .env
+
+ENV PYTHONPATH=/app
+ENV BASE_URL=http://backend:8000
+
+CMD ["pytest", "tests/test_e2e.py", "-v", "--tb=short"]

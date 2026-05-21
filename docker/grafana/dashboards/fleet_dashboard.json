@@ -1,0 +1,132 @@
+{
+  "title": "Fleet Commander Overview",
+  "uid": "fleet-commander-overview",
+  "version": 1,
+  "timezone": "browser",
+  "panels": [
+    {
+      "title": "Active Devices",
+      "type": "stat",
+      "gridPos": {"x": 0, "y": 0, "w": 4, "h": 4},
+      "targets": [
+        {
+          "expr": "fleet_active_devices",
+          "legendFormat": "Online"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "thresholds"},
+          "thresholds": {"steps": [{"value": 0, "color": "red"}, {"value": 1, "color": "green"}]}
+        }
+      }
+    },
+    {
+      "title": "Total Devices",
+      "type": "stat",
+      "gridPos": {"x": 4, "y": 0, "w": 4, "h": 4},
+      "targets": [
+        {
+          "expr": "fleet_total_devices",
+          "legendFormat": "Total"
+        }
+      ]
+    },
+    {
+      "title": "OTA In Progress",
+      "type": "stat",
+      "gridPos": {"x": 8, "y": 0, "w": 4, "h": 4},
+      "targets": [
+        {
+          "expr": "fleet_ota_in_progress",
+          "legendFormat": "In Progress"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "thresholds"},
+          "thresholds": {"steps": [{"value": 0, "color": "green"}, {"value": 1, "color": "orange"}, {"value": 5, "color": "red"}]}
+        }
+      }
+    },
+    {
+      "title": "OTA Success Rate",
+      "type": "stat",
+      "gridPos": {"x": 12, "y": 0, "w": 4, "h": 4},
+      "targets": [
+        {
+          "expr": "rate(fleet_ota_deployments_total{status=\"success\"}[5m]) / rate(fleet_ota_deployments_total[5m]) * 100",
+          "legendFormat": "Success Rate"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "color": {"mode": "thresholds"},
+          "thresholds": {"steps": [{"value": 0, "color": "red"}, {"value": 50, "color": "orange"}, {"value": 80, "color": "green"}]}
+        }
+      }
+    },
+    {
+      "title": "API Request Latency (P95)",
+      "type": "graph",
+      "gridPos": {"x": 0, "y": 4, "w": 8, "h": 8},
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(fleet_api_request_latency_seconds_bucket[5m])) by (le))",
+          "legendFormat": "P95 Latency"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        }
+      }
+    },
+    {
+      "title": "OTA Deployments by Status",
+      "type": "piechart",
+      "gridPos": {"x": 8, "y": 4, "w": 8, "h": 8},
+      "targets": [
+        {
+          "expr": "fleet_ota_deployments_total",
+          "legendFormat": "{{status}}"
+        }
+      ]
+    },
+    {
+      "title": "MQTT Message Throughput",
+      "type": "graph",
+      "gridPos": {"x": 0, "y": 12, "w": 12, "h": 8},
+      "targets": [
+        {
+          "expr": "rate(fleet_mqtt_messages_published_total[5m])",
+          "legendFormat": "Published"
+        },
+        {
+          "expr": "rate(fleet_mqtt_messages_received_total[5m])",
+          "legendFormat": "Received"
+        }
+      ]
+    },
+    {
+      "title": "Device Uptime Distribution",
+      "type": "bargauge",
+      "gridPos": {"x": 12, "y": 12, "w": 4, "h": 8},
+      "targets": [
+        {
+          "expr": "fleet_active_devices",
+          "legendFormat": "Online"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "min": 0,
+          "max": 100,
+          "unit": "percent"
+        }
+      }
+    }
+  ],
+  "schemaVersion": 38
+}

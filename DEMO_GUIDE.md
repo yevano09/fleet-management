@@ -1,0 +1,215 @@
+# Fleet Commander — Demo Guide
+
+Three presentation styles for showcasing the Fleet Commander IoT device management module.
+
+---
+
+## Short Style (~2 minutes) — Elevator Pitch
+
+**Goal:** Show the bulk OTA update and a rollback in real time.
+
+### Steps
+
+1. **Start the environment** (pre-staged):
+   ```bash
+   docker compose --profile demo up -d
+   ```
+
+2. **Open the Fleet Dashboard** at http://localhost:8000
+
+3. **Point out** the device table showing 5 online devices (Device-001 through Device-005) with firmware version `1.0.0`, green status badges, and varying signal strength.
+
+4. **Trigger a bulk OTA:**
+   - Click **"Trigger OTA Update"**
+   - Select a firmware (e.g., `2.0.0` — pre-uploaded)
+   - Keep "All online devices" checked
+   - Click **"Trigger Update"**
+
+5. **Watch the dashboard auto-refresh** (every 5 seconds). Within 10–15 seconds:
+   - Some devices show `success` (green badge)
+   - At least one shows `rolled_back` (yellow badge) — the 20% failure rate simulates a hash mismatch
+   - The rolled-back device stayed on firmware `1.0.0`
+
+6. **Call out:** *"That's it. In under 30 seconds we pushed a firmware update to our entire fleet, and the system automatically handled a failed device with a safe rollback. No manual intervention needed."*
+
+### Key Talking Points
+
+- Device auto-registration on first heartbeat
+- MQTT-based command and control
+- Automatic rollback on hash mismatch
+- Real-time dashboard visibility
+
+---
+
+## Detailed Style (~10 minutes) — Architecture Deep Dive
+
+**Goal:** Explain the backend architecture, MQTT topics, and Grafana observability.
+
+### 1. System Overview (2 min)
+
+Open the architecture diagram (README.md) and explain the data flow:
+
+- **Devices** talk to **Mosquitto** (MQTT broker) over `iot/fleet/` topics
+- **Backend** (FastAPI) subscribes to device status topics, publishes OTA commands
+- **Prometheus** scrapes `/metrics` from the backend every 10 seconds
+- **Grafana** visualizes fleet health from Prometheus data
+
+### 2. MQTT Topic Structure (2 min)
+
+Open `app/mqtt_client.py` and walk through:
+
+| Topic | Purpose |
+|---|---|
+| `iot/fleet/{id}/command/ota` | Backend publishes firmware URL + SHA256 |
+| `iot/fleet/{id}/status/ota` | Device reports download→apply→verify→success/fail |
+| `iot/fleet/{id}/heartbeat` | Periodic uptime + signal strength |
+| `iot/fleet/register` | Auto-registration on first connect |
+
+Show the subscription setup in `mqtt_client.py:_on_connect()`.
+
+### 3. OTA State Machine & Rollback (3 min)
+
+Open `app/ota_manager.py:OtaStateMachine` and trace the flow:
+
+```
+pending → downloading → applying → verifying → success
+                                         → hash_mismatch → rollback → rolled_back
+```
+
+Demo on the dashboard:
+1. Upload a firmware binary via Swagger at `/docs` → `/ota/upload`
+2. Trigger via dashboard or API
+3. Watch the state transitions in real-time
+4. When a device reports `hash_mismatch`, the state machine:
+   - Logs the error
+   - Updates the deployment to `rolled_back`
+   - Reverts the device's `firmware_version` to `previous_firmware_version`
+
+### 4. Grafana Observability (3 min)
+
+Open Grafana at http://localhost:3000 (admin/admin).
+
+Point out each panel:
+- **Active / Total Devices** — gauge showing online count
+- **OTA In Progress** — current deployments
+- **OTA Success Rate** — `rate()` query showing success percentage
+- **API Latency P95** — histogram quantile from Prometheus
+- **OTA Deployments by Status** — pie chart of success/fail/rollback
+- **MQTT Throughput** — rate of published/received messages
+
+Run an OTA trigger and watch the graphs update live.
+
+---
+
+## All-Features Step-by-Step (~20 minutes) — Exhaustive Walkthrough
+
+**Goal:** Manually trigger every feature.
+
+### Prerequisites
+
+```bash
+docker compose --profile demo up -d
+# Wait for all services to be healthy
+docker compose ps
+```
+
+### 1. Device Auto-Registration
+
+```bash
+# Register a device manually via API
+curl -X POST http://localhost:8000/devices/register \
+  -H "Content-Type: application/json" \
+  -d '{"name": "Demo-Device-001", "firmware_version": "1.0.0", "ip_address": "10.0.0.42"}'
+```
+
+Verify on the dashboard — it appears in the device table with status `Online`.
+
+### 2. Heartbeat Updates
+
+```bash
+curl -X POST http://localhost:8000/devices/{DEVICE_ID}/heartbeat \
+  -H "Content-Type: application/json" \
+  -d '{"uptime_percentage": 99.2, "signal_strength": -58}'
+```
+
+The dashboard updates the uptime % and signal strength columns.
+
+### 3. Remote Config Push (via MQTT)
+
+Check the simulator logs:
+```bash
+docker compose logs simulator
+```
+
+When the backend publishes to `iot/fleet/{id}/command/config`, the simulator logs: `"Received remote config: {...}"`.
+
+### 4. Successful OTA
+
+```bash
+# Upload firmware
+curl -X POST http://localhost:8000/ota/upload \
+  -F "version=2.0.0" \
+  -F "file=@/path/to/firmware.bin"
+
+# Get the firmware ID from response, then:
+curl -X POST http://localhost:8000/ota/trigger \
+  -H "Content-Type: application/json" \
+  -d '{"firmware_id": "<FW_ID>", "device_ids": ["<DEVICE_ID>"]}'
+```
+
+On the dashboard, watch the device's OTA status column go through: `downloading → applying → verifying → success`.
+
+### 5. Failed OTA with Rollback
+
+With the simulator's `SIMULATOR_OTA_FAILURE_RATE=0.2`, approximately 1 in 5 OTA attempts will fail. When it does:
+
+1. Device reports `hash_mismatch`
+2. Backend sets deployment status to `rolled_back`
+3. Device firmware version reverts to `previous_firmware_version`
+4. Dashboard shows a yellow `rolled_back` badge
+
+Force a failure by adjusting the env var:
+```bash
+SIMULATOR_OTA_FAILURE_RATE=1.0 docker compose --profile demo up -d simulator
+```
+
+### 6. Offline Queueing
+
+Stop the simulator to simulate devices going offline:
+```bash
+docker compose stop simulator
+```
+
+After 60 seconds, the device appears `Offline` on the dashboard. When the simulator comes back, it re-registers and the status returns to `Online`.
+
+### 7. Review Prometheus Metrics
+
+```bash
+# Note: the metrics endpoint requires a trailing slash
+curl -s http://localhost:8000/metrics/ | grep fleet_
+```
+
+Sample output:
+```
+# HELP fleet_active_devices Number of currently online devices
+# TYPE fleet_active_devices gauge
+fleet_active_devices 5.0
+# HELP fleet_ota_deployments_total Total OTA deployment attempts
+# TYPE fleet_ota_deployments_total counter
+fleet_ota_deployments_total{status="success"} 4.0
+fleet_ota_deployments_total{status="triggered"} 5.0
+```
+
+### 8. Grafana Dashboard
+
+Navigate to http://localhost:3000 (admin/admin). Open the "Fleet Commander Overview" dashboard. Run multiple OTA triggers and watch:
+- The **Active Devices** stat update
+- **OTA Deployments by Status** pie chart reflect successes vs failures
+- **API Latency** show request duration histograms
+- **MQTT Message Throughput** graph spike with each OTA command
+
+### Cleanup
+
+```bash
+docker compose down -v
+```
