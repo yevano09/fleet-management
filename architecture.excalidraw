@@ -1,16 +1,16 @@
 {
   "type": "excalidraw",
   "version": 2,
-  "source": "https://excalidraw.com",
+  "source": "https://marketplace.visualstudio.com/items?itemName=pomdtr.excalidraw-editor",
   "elements": [
     {
       "id": "title",
       "type": "text",
-      "x": 380,
-      "y": 20,
-      "width": 700,
-      "height": 50,
-      "text": "Fleet Commander — Architecture & Deployment Comparison",
+      "x": 329,
+      "y": -48,
+      "width": 793,
+      "height": 100,
+      "text": "Fleet Commander — Architecture & Deployment\nComparison",
       "fontSize": 28,
       "fontFamily": 1,
       "textAlign": "center",
@@ -20,7 +20,25 @@
       "strokeWidth": 2,
       "roundness": null,
       "roughness": 0,
-      "opacity": 100
+      "opacity": 100,
+      "version": 71,
+      "versionNonce": 1880566329,
+      "index": "a0",
+      "isDeleted": false,
+      "strokeStyle": "solid",
+      "angle": 0,
+      "seed": 1,
+      "groupIds": [],
+      "frameId": null,
+      "boundElements": [],
+      "updated": 1779468853873,
+      "link": null,
+      "locked": false,
+      "verticalAlign": "top",
+      "containerId": null,
+      "originalText": "Fleet Commander — Architecture & Deployment Comparison",
+      "autoResize": false,
+      "lineHeight": 1.7857142857142858
     },
     {
       "id": "demo-box",
@@ -33,9 +51,24 @@
       "backgroundColor": "#d3f9d8",
       "fillStyle": "solid",
       "strokeWidth": 2,
-      "roundness": { "type": 3 },
+      "roundness": {
+        "type": 3
+      },
       "roughness": 0,
-      "opacity": 40
+      "opacity": 40,
+      "version": 2,
+      "versionNonce": 287205145,
+      "index": "a1",
+      "isDeleted": false,
+      "strokeStyle": "solid",
+      "angle": 0,
+      "seed": 1,
+      "groupIds": [],
+      "frameId": null,
+      "boundElements": [],
+      "updated": 1779468834483,
+      "link": null,
+      "locked": false
     },
     {
       "id": "demo-label",
@@ -53,7 +86,26 @@
       "fillStyle": "solid",
       "strokeWidth": 1,
       "roughness": 0,
-      "opacity": 100
+      "opacity": 100,
+      "version": 2,
+      "versionNonce": 1672606455,
+      "index": "a2",
+      "isDeleted": false,
+      "strokeStyle": "solid",
+      "angle": 0,
+      "seed": 1,
+      "groupIds": [],
+      "frameId": null,
+      "roundness": null,
+      "boundElements": [],
+      "updated": 1779468834483,
+      "link": null,
+      "locked": false,
+      "verticalAlign": "top",
+      "containerId": null,
+      "originalText": "🏠  DEMO ENVIRONMENT (Laptop / WSL)",
+      "autoResize": true,
+      "lineHeight": 1.3888888888888888
     },
     {
       "id": "prod-box",
@@ -66,9 +118,24 @@
       "backgroundColor": "#ffe3e3",
       "fillStyle": "solid",
       "strokeWidth": 2,
-      "roundness": { "type": 3 },
+      "roundness": {
+        "type": 3
+      },
       "roughness": 0,
-      "opacity": 40
+      "opacity": 40,
+      "version": 2,
+      "versionNonce": 1590959097,
+      "index": "a3",
+      "isDeleted": false,
+      "strokeStyle": "solid",
+      "angle": 0,
+      "seed": 1,
+      "groupIds": [],
+      "frameId": null,
+      "boundElements": [],
+      "updated": 1779468834483,
+      "link": null,
+      "locked": false
     },
     {
       "id": "prod-label",
@@ -86,7 +153,26 @@
       "fillStyle": "solid",
       "strokeWidth": 1,
       "roughness": 0,
-      "opacity": 100
+      "opacity": 100,
+      "version": 2,
+      "versionNonce": 1023835159,
+      "index": "a4",
+      "isDeleted": false,
+      "strokeStyle": "solid",
+      "angle": 0,
+      "seed": 1,
+      "groupIds": [],
+      "frameId": null,
+      "roundness": null,
+      "boundElements": [],
+      "updated": 1779468834483,
+      "link": null,
+      "locked": false,
+      "verticalAlign": "top",
+      "containerId": null,
+      "originalText": "🏭  PRODUCTION DEPLOYMENT",
+      "autoResize": true,
+      "lineHeight": 1.3888888888888888
     },
     {
       "id": "devices-box",
@@ -99,9 +185,24 @@
       "backgroundColor": "#a5d8ff",
       "fillStyle": "solid",
       "strokeWidth": 2,
-      "roundness": { "type": 3 },
+      "roundness": {
+        "type": 3
+      },
       "roughness": 0,
-      "opacity": 100
+      "opacity": 100,
+      "version": 2,
+      "versionNonce": 1505768665,
+      "index": "a5",
+      "isDeleted": false,
+      "strokeStyle": "solid",
+      "angle": 0,
+      "seed": 1,
+      "groupIds": [],
+      "frameId": null,
+      "boundElements": [],
+      "updated": 1779468834483,
+      "link": null,
+      "locked": false
     },
     {
       "id": "devices-text",
@@ -119,7 +220,26 @@
       "fillStyle": "solid",
       "strokeWidth": 1,
       "roughness": 0,
-      "opacity": 100
+      "opacity": 100,
+      "version": 2,
+      "versionNonce": 1227678007,
+      "index": "a6",
+      "isDeleted": false,
+      "strokeStyle": "solid",
+      "angle": 0,
+      "seed": 1,
+      "groupIds": [],
+      "frameId": null,
+      "roundness": null,
+      "boundElements": [],
+      "updated": 1779468834483,
+      "link": null,
+      "locked": false,
+      "verticalAlign": "top",
+      "containerId": null,
+      "originalText": "Device\nSimulator\n(x5 virtual)",
+      "autoResize": true,
+      "lineHeight": 1.25
     },
     {
       "id": "devices-real-box",
@@ -132,9 +252,24 @@
       "backgroundColor": "#a5d8ff",
       "fillStyle": "solid",
       "strokeWidth": 2,
-      "roundness": { "type": 3 },
+      "roundness": {
+        "type": 3
+      },
       "roughness": 0,
-      "opacity": 100
+      "opacity": 100,
+      "version": 2,
+      "versionNonce": 1433809337,
+      "index": "a7",
+      "isDeleted": false,
+      "strokeStyle": "solid",
+      "angle": 0,
+      "seed": 1,
+      "groupIds": [],
+      "frameId": null,
+      "boundElements": [],
+      "updated": 1779468834483,
+      "link": null,
+      "locked": false
     },
     {
       "id": "devices-real-text",
@@ -152,7 +287,26 @@
       "fillStyle": "solid",
       "strokeWidth": 1,
       "roughness": 0,
-      "opacity": 100
+      "opacity": 100,
+      "version": 2,
+      "versionNonce": 160014935,
+      "index": "a8",
+      "isDeleted": false,
+      "strokeStyle": "solid",
+      "angle": 0,
+      "seed": 1,
+      "groupIds": [],
+      "frameId": null,
+      "roundness": null,
+      "boundElements": [],
+      "updated": 1779468834483,
+      "link": null,
+      "locked": false,
+      "verticalAlign": "top",
+      "containerId": null,
+      "originalText": "Real IoT\nDevices\n(1000s, geo-distributed)",
+      "autoResize": true,
+      "lineHeight": 1.9047619047619049
     },
     {
       "id": "mqtt-demo",
@@ -165,9 +319,24 @@
       "backgroundColor": "#ffec99",
       "fillStyle": "solid",
       "strokeWidth": 2,
-      "roundness": { "type": 3 },
+      "roundness": {
+        "type": 3
+      },
       "roughness": 0,
-      "opacity": 100
+      "opacity": 100,
+      "version": 2,
+      "versionNonce": 1729729177,
+      "index": "a9",
+      "isDeleted": false,
+      "strokeStyle": "solid",
+      "angle": 0,
+      "seed": 1,
+      "groupIds": [],
+      "frameId": null,
+      "boundElements": [],
+      "updated": 1779468834483,
+      "link": null,
+      "locked": false
     },
     {
       "id": "mqtt-demo-text",
@@ -185,7 +354,26 @@
       "fillStyle": "solid",
       "strokeWidth": 1,
       "roughness": 0,
-      "opacity": 100
+      "opacity": 100,
+      "version": 2,
+      "versionNonce": 1592868727,
+      "index": "aA",
+      "isDeleted": false,
+      "strokeStyle": "solid",
+      "angle": 0,
+      "seed": 1,
+      "groupIds": [],
+      "frameId": null,
+      "roundness": null,
+      "boundElements": [],
+      "updated": 1779468834483,
+      "link": null,
+      "locked": false,
+      "verticalAlign": "top",
+      "containerId": null,
+      "originalText": "Mosquitto\nMQTT Broker\n(single node)",
+      "autoResize": true,
+      "lineHeight": 1.4285714285714286
     },
     {
       "id": "mqtt-prod",
@@ -198,9 +386,24 @@
       "backgroundColor": "#ffec99",
       "fillStyle": "solid",
       "strokeWidth": 2,
-      "roundness": { "type": 3 },
+      "roundness": {
+        "type": 3
+      },
       "roughness": 0,
-      "opacity": 100
+      "opacity": 100,
+      "version": 2,
+      "versionNonce": 861788025,
+      "index": "aB",
+      "isDeleted": false,
+      "strokeStyle": "solid",
+      "angle": 0,
+      "seed": 1,
+      "groupIds": [],
+      "frameId": null,
+      "boundElements": [],
+      "updated": 1779468834483,
+      "link": null,
+      "locked": false
     },
     {
       "id": "mqtt-prod-text",
@@ -218,7 +421,26 @@
       "fillStyle": "solid",
       "strokeWidth": 1,
       "roughness": 0,
-      "opacity": 100
+      "opacity": 100,
+      "version": 2,
+      "versionNonce": 464009367,
+      "index": "aC",
+      "isDeleted": false,
+      "strokeStyle": "solid",
+      "angle": 0,
+      "seed": 1,
+      "groupIds": [],
+      "frameId": null,
+      "roundness": null,
+      "boundElements": [],
+      "updated": 1779468834483,
+      "link": null,
+      "locked": false,
+      "verticalAlign": "top",
+      "containerId": null,
+      "originalText": "Mosquitto Cluster\n(or managed:\nAWS IoT / HiveMQ)",
+      "autoResize": true,
+      "lineHeight": 1.7948717948717947
     },
     {
       "id": "backend-center",
@@ -231,9 +453,24 @@
       "backgroundColor": "#d0bfff",
       "fillStyle": "solid",
       "strokeWidth": 2,
-      "roundness": { "type": 3 },
+      "roundness": {
+        "type": 3
+      },
       "roughness": 0,
-      "opacity": 100
+      "opacity": 100,
+      "version": 2,
+      "versionNonce": 2089189465,
+      "index": "aD",
+      "isDeleted": false,
+      "strokeStyle": "solid",
+      "angle": 0,
+      "seed": 1,
+      "groupIds": [],
+      "frameId": null,
+      "boundElements": [],
+      "updated": 1779468834483,
+      "link": null,
+      "locked": false
     },
     {
       "id": "backend-center-text",
@@ -251,7 +488,26 @@
       "fillStyle": "solid",
       "strokeWidth": 1,
       "roughness": 0,
-      "opacity": 100
+      "opacity": 100,
+      "version": 2,
+      "versionNonce": 1432554935,
+      "index": "aE",
+      "isDeleted": false,
+      "strokeStyle": "solid",
+      "angle": 0,
+      "seed": 1,
+      "groupIds": [],
+      "frameId": null,
+      "roundness": null,
+      "boundElements": [],
+      "updated": 1779468834483,
+      "link": null,
+      "locked": false,
+      "verticalAlign": "top",
+      "containerId": null,
+      "originalText": "FastAPI Backend\n(1 container)\nREST API + MQTT",
+      "autoResize": true,
+      "lineHeight": 1.4285714285714286
     },
     {
       "id": "backend-prod",
@@ -264,9 +520,24 @@
       "backgroundColor": "#d0bfff",
       "fillStyle": "solid",
       "strokeWidth": 2,
-      "roundness": { "type": 3 },
+      "roundness": {
+        "type": 3
+      },
       "roughness": 0,
-      "opacity": 100
+      "opacity": 100,
+      "version": 2,
+      "versionNonce": 1885801785,
+      "index": "aF",
+      "isDeleted": false,
+      "strokeStyle": "solid",
+      "angle": 0,
+      "seed": 1,
+      "groupIds": [],
+      "frameId": null,
+      "boundElements": [],
+      "updated": 1779468834483,
+      "link": null,
+      "locked": false
     },
     {
       "id": "backend-prod-text",
@@ -284,7 +555,26 @@
       "fillStyle": "solid",
       "strokeWidth": 1,
       "roughness": 0,
-      "opacity": 100
+      "opacity": 100,
+      "version": 2,
+      "versionNonce": 2001092311,
+      "index": "aG",
+      "isDeleted": false,
+      "strokeStyle": "solid",
+      "angle": 0,
+      "seed": 1,
+      "groupIds": [],
+      "frameId": null,
+      "roundness": null,
+      "boundElements": [],
+      "updated": 1779468834483,
+      "link": null,
+      "locked": false,
+      "verticalAlign": "top",
+      "containerId": null,
+      "originalText": "FastAPI Backend\n(x3-10 replicas,\nbehind nginx/ALB)",
+      "autoResize": true,
+      "lineHeight": 1.4285714285714286
     },
     {
       "id": "db-demo",
@@ -299,7 +589,20 @@
       "strokeWidth": 2,
       "roundness": null,
       "roughness": 0,
-      "opacity": 100
+      "opacity": 100,
+      "version": 2,
+      "versionNonce": 912457241,
+      "index": "aH",
+      "isDeleted": false,
+      "strokeStyle": "solid",
+      "angle": 0,
+      "seed": 1,
+      "groupIds": [],
+      "frameId": null,
+      "boundElements": [],
+      "updated": 1779468834483,
+      "link": null,
+      "locked": false
     },
     {
       "id": "db-demo-text",
@@ -317,7 +620,26 @@
       "fillStyle": "solid",
       "strokeWidth": 1,
       "roughness": 0,
-      "opacity": 100
+      "opacity": 100,
+      "version": 2,
+      "versionNonce": 333859831,
+      "index": "aI",
+      "isDeleted": false,
+      "strokeStyle": "solid",
+      "angle": 0,
+      "seed": 1,
+      "groupIds": [],
+      "frameId": null,
+      "roundness": null,
+      "boundElements": [],
+      "updated": 1779468834483,
+      "link": null,
+      "locked": false,
+      "verticalAlign": "top",
+      "containerId": null,
+      "originalText": "SQLite\n(file-based,\nno install needed)",
+      "autoResize": true,
+      "lineHeight": 1.2820512820512822
     },
     {
       "id": "db-prod",
@@ -332,7 +654,20 @@
       "strokeWidth": 2,
       "roundness": null,
       "roughness": 0,
-      "opacity": 100
+      "opacity": 100,
+      "version": 2,
+      "versionNonce": 1030607609,
+      "index": "aJ",
+      "isDeleted": false,
+      "strokeStyle": "solid",
+      "angle": 0,
+      "seed": 1,
+      "groupIds": [],
+      "frameId": null,
+      "boundElements": [],
+      "updated": 1779468834483,
+      "link": null,
+      "locked": false
     },
     {
       "id": "db-prod-text",
@@ -350,7 +685,26 @@
       "fillStyle": "solid",
       "strokeWidth": 1,
       "roughness": 0,
-      "opacity": 100
+      "opacity": 100,
+      "version": 2,
+      "versionNonce": 2001188119,
+      "index": "aK",
+      "isDeleted": false,
+      "strokeStyle": "solid",
+      "angle": 0,
+      "seed": 1,
+      "groupIds": [],
+      "frameId": null,
+      "roundness": null,
+      "boundElements": [],
+      "updated": 1779468834483,
+      "link": null,
+      "locked": false,
+      "verticalAlign": "top",
+      "containerId": null,
+      "originalText": "PostgreSQL\n(managed RDS\nwith read replicas)",
+      "autoResize": true,
+      "lineHeight": 1.2820512820512822
     },
     {
       "id": "storage-demo",
@@ -363,9 +717,24 @@
       "backgroundColor": "#c5f6fa",
       "fillStyle": "solid",
       "strokeWidth": 2,
-      "roundness": { "type": 3 },
+      "roundness": {
+        "type": 3
+      },
       "roughness": 0,
-      "opacity": 100
+      "opacity": 100,
+      "version": 2,
+      "versionNonce": 1242237913,
+      "index": "aL",
+      "isDeleted": false,
+      "strokeStyle": "solid",
+      "angle": 0,
+      "seed": 1,
+      "groupIds": [],
+      "frameId": null,
+      "boundElements": [],
+      "updated": 1779468834483,
+      "link": null,
+      "locked": false
     },
     {
       "id": "storage-demo-text",
@@ -383,7 +752,26 @@
       "fillStyle": "solid",
       "strokeWidth": 1,
       "roughness": 0,
-      "opacity": 100
+      "opacity": 100,
+      "version": 2,
+      "versionNonce": 2027878967,
+      "index": "aM",
+      "isDeleted": false,
+      "strokeStyle": "solid",
+      "angle": 0,
+      "seed": 1,
+      "groupIds": [],
+      "frameId": null,
+      "roundness": null,
+      "boundElements": [],
+      "updated": 1779468834483,
+      "link": null,
+      "locked": false,
+      "verticalAlign": "top",
+      "containerId": null,
+      "originalText": "Firmware Storage\n(local volume\n./firmware/)",
+      "autoResize": true,
+      "lineHeight": 1.2820512820512822
     },
     {
       "id": "storage-prod",
@@ -396,9 +784,24 @@
       "backgroundColor": "#c5f6fa",
       "fillStyle": "solid",
       "strokeWidth": 2,
-      "roundness": { "type": 3 },
+      "roundness": {
+        "type": 3
+      },
       "roughness": 0,
-      "opacity": 100
+      "opacity": 100,
+      "version": 2,
+      "versionNonce": 1145972921,
+      "index": "aN",
+      "isDeleted": false,
+      "strokeStyle": "solid",
+      "angle": 0,
+      "seed": 1,
+      "groupIds": [],
+      "frameId": null,
+      "boundElements": [],
+      "updated": 1779468834483,
+      "link": null,
+      "locked": false
     },
     {
       "id": "storage-prod-text",
@@ -416,7 +819,26 @@
       "fillStyle": "solid",
       "strokeWidth": 1,
       "roughness": 0,
-      "opacity": 100
+      "opacity": 100,
+      "version": 2,
+      "versionNonce": 227580759,
+      "index": "aO",
+      "isDeleted": false,
+      "strokeStyle": "solid",
+      "angle": 0,
+      "seed": 1,
+      "groupIds": [],
+      "frameId": null,
+      "roundness": null,
+      "boundElements": [],
+      "updated": 1779468834483,
+      "link": null,
+      "locked": false,
+      "verticalAlign": "top",
+      "containerId": null,
+      "originalText": "Firmware Storage\n(S3 / GCS\nCDN-backed)",
+      "autoResize": true,
+      "lineHeight": 1.2820512820512822
     },
     {
       "id": "prom-box",
@@ -429,9 +851,24 @@
       "backgroundColor": "#fcc2d7",
       "fillStyle": "solid",
       "strokeWidth": 2,
-      "roundness": { "type": 3 },
+      "roundness": {
+        "type": 3
+      },
       "roughness": 0,
-      "opacity": 100
+      "opacity": 100,
+      "version": 2,
+      "versionNonce": 1171958169,
+      "index": "aP",
+      "isDeleted": false,
+      "strokeStyle": "solid",
+      "angle": 0,
+      "seed": 1,
+      "groupIds": [],
+      "frameId": null,
+      "boundElements": [],
+      "updated": 1779468834483,
+      "link": null,
+      "locked": false
     },
     {
       "id": "prom-text",
@@ -449,7 +886,26 @@
       "fillStyle": "solid",
       "strokeWidth": 1,
       "roughness": 0,
-      "opacity": 100
+      "opacity": 100,
+      "version": 2,
+      "versionNonce": 431036535,
+      "index": "aQ",
+      "isDeleted": false,
+      "strokeStyle": "solid",
+      "angle": 0,
+      "seed": 1,
+      "groupIds": [],
+      "frameId": null,
+      "roundness": null,
+      "boundElements": [],
+      "updated": 1779468834483,
+      "link": null,
+      "locked": false,
+      "verticalAlign": "top",
+      "containerId": null,
+      "originalText": "Prometheus\n(:9090)",
+      "autoResize": true,
+      "lineHeight": 1.25
     },
     {
       "id": "grafana-box",
@@ -462,9 +918,24 @@
       "backgroundColor": "#ffec99",
       "fillStyle": "solid",
       "strokeWidth": 2,
-      "roundness": { "type": 3 },
+      "roundness": {
+        "type": 3
+      },
       "roughness": 0,
-      "opacity": 100
+      "opacity": 100,
+      "version": 2,
+      "versionNonce": 1742999161,
+      "index": "aR",
+      "isDeleted": false,
+      "strokeStyle": "solid",
+      "angle": 0,
+      "seed": 1,
+      "groupIds": [],
+      "frameId": null,
+      "boundElements": [],
+      "updated": 1779468834483,
+      "link": null,
+      "locked": false
     },
     {
       "id": "grafana-text",
@@ -482,7 +953,26 @@
       "fillStyle": "solid",
       "strokeWidth": 1,
       "roughness": 0,
-      "opacity": 100
+      "opacity": 100,
+      "version": 2,
+      "versionNonce": 50655639,
+      "index": "aS",
+      "isDeleted": false,
+      "strokeStyle": "solid",
+      "angle": 0,
+      "seed": 1,
+      "groupIds": [],
+      "frameId": null,
+      "roundness": null,
+      "boundElements": [],
+      "updated": 1779468834483,
+      "link": null,
+      "locked": false,
+      "verticalAlign": "top",
+      "containerId": null,
+      "originalText": "Grafana\n(:3000)",
+      "autoResize": true,
+      "lineHeight": 1.25
     },
     {
       "id": "dashboard-box",
@@ -495,9 +985,24 @@
       "backgroundColor": "#e9ecef",
       "fillStyle": "solid",
       "strokeWidth": 2,
-      "roundness": { "type": 3 },
+      "roundness": {
+        "type": 3
+      },
       "roughness": 0,
-      "opacity": 100
+      "opacity": 100,
+      "version": 2,
+      "versionNonce": 1361958745,
+      "index": "aT",
+      "isDeleted": false,
+      "strokeStyle": "solid",
+      "angle": 0,
+      "seed": 1,
+      "groupIds": [],
+      "frameId": null,
+      "boundElements": [],
+      "updated": 1779468834483,
+      "link": null,
+      "locked": false
     },
     {
       "id": "dashboard-text",
@@ -515,7 +1020,26 @@
       "fillStyle": "solid",
       "strokeWidth": 1,
       "roughness": 0,
-      "opacity": 100
+      "opacity": 100,
+      "version": 2,
+      "versionNonce": 46180023,
+      "index": "aU",
+      "isDeleted": false,
+      "strokeStyle": "solid",
+      "angle": 0,
+      "seed": 1,
+      "groupIds": [],
+      "frameId": null,
+      "roundness": null,
+      "boundElements": [],
+      "updated": 1779468834483,
+      "link": null,
+      "locked": false,
+      "verticalAlign": "top",
+      "containerId": null,
+      "originalText": "Fleet UI\nDashboard\n(HTMX + HTML)",
+      "autoResize": true,
+      "lineHeight": 1.4285714285714286
     },
     {
       "id": "demo-note",
@@ -533,7 +1057,26 @@
       "fillStyle": "solid",
       "strokeWidth": 1,
       "roughness": 0,
-      "opacity": 100
+      "opacity": 100,
+      "version": 2,
+      "versionNonce": 67863609,
+      "index": "aV",
+      "isDeleted": false,
+      "strokeStyle": "solid",
+      "angle": 0,
+      "seed": 1,
+      "groupIds": [],
+      "frameId": null,
+      "roundness": null,
+      "boundElements": [],
+      "updated": 1779468834483,
+      "link": null,
+      "locked": false,
+      "verticalAlign": "top",
+      "containerId": null,
+      "originalText": "⚠️ Demo Notes:\n- All in Docker Compose\n- Single machine (WSL)\n- SQLite (no Postgres needed)\n- 5 simulated devices\n- 20% OTA failure rate\n- Auto-rollback visible in ~30s\n- Simulator waits for backend healthy\n  (fixes MQTT race on startup)",
+      "autoResize": true,
+      "lineHeight": 1.2820512820512822
     },
     {
       "id": "prod-note",
@@ -551,7 +1094,26 @@
       "fillStyle": "solid",
       "strokeWidth": 1,
       "roughness": 0,
-      "opacity": 100
+      "opacity": 100,
+      "version": 2,
+      "versionNonce": 931706839,
+      "index": "aW",
+      "isDeleted": false,
+      "strokeStyle": "solid",
+      "angle": 0,
+      "seed": 1,
+      "groupIds": [],
+      "frameId": null,
+      "roundness": null,
+      "boundElements": [],
+      "updated": 1779468834483,
+      "link": null,
+      "locked": false,
+      "verticalAlign": "top",
+      "containerId": null,
+      "originalText": "🔧 Production Changes:\n- PostgreSQL with RDS\n- Backend auto-scaled\n- MQTT cluster / managed\n- S3 for firmware files\n- Prometheus retention 30d\n- Alertmanager + pager\n- Startup: health check gates\n  between all services",
+      "autoResize": true,
+      "lineHeight": 1.2820512820512822
     },
     {
       "id": "arrow-sim-mqtt",
@@ -564,12 +1126,47 @@
       "backgroundColor": "transparent",
       "fillStyle": "solid",
       "strokeWidth": 2,
-      "roundness": { "type": 2 },
+      "roundness": {
+        "type": 2
+      },
       "roughness": 0,
       "opacity": 100,
-      "points": [[0, 0], [0, 35]],
-      "startBinding": { "elementId": "devices-box", "focus": 0, "gap": 1 },
-      "endBinding": { "elementId": "mqtt-demo", "focus": 0, "gap": 5 }
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          35
+        ]
+      ],
+      "startBinding": {
+        "elementId": "devices-box",
+        "focus": 0,
+        "gap": 1
+      },
+      "endBinding": {
+        "elementId": "mqtt-demo",
+        "focus": 0,
+        "gap": 5
+      },
+      "lastCommittedPoint": null,
+      "version": 2,
+      "versionNonce": 1818268953,
+      "index": "aX",
+      "isDeleted": false,
+      "strokeStyle": "solid",
+      "angle": 0,
+      "seed": 1,
+      "groupIds": [],
+      "frameId": null,
+      "boundElements": [],
+      "updated": 1779468834483,
+      "link": null,
+      "locked": false,
+      "startArrowhead": null,
+      "endArrowhead": "arrow"
     },
     {
       "id": "arrow-real-mqtt",
@@ -582,12 +1179,47 @@
       "backgroundColor": "transparent",
       "fillStyle": "solid",
       "strokeWidth": 2,
-      "roundness": { "type": 2 },
+      "roundness": {
+        "type": 2
+      },
       "roughness": 0,
       "opacity": 100,
-      "points": [[0, 0], [0, 35]],
-      "startBinding": { "elementId": "devices-real-box", "focus": 0, "gap": 1 },
-      "endBinding": { "elementId": "mqtt-prod", "focus": 0, "gap": 5 }
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          35
+        ]
+      ],
+      "startBinding": {
+        "elementId": "devices-real-box",
+        "focus": 0,
+        "gap": 1
+      },
+      "endBinding": {
+        "elementId": "mqtt-prod",
+        "focus": 0,
+        "gap": 5
+      },
+      "lastCommittedPoint": null,
+      "version": 2,
+      "versionNonce": 2003936503,
+      "index": "aY",
+      "isDeleted": false,
+      "strokeStyle": "solid",
+      "angle": 0,
+      "seed": 1,
+      "groupIds": [],
+      "frameId": null,
+      "boundElements": [],
+      "updated": 1779468834483,
+      "link": null,
+      "locked": false,
+      "startArrowhead": null,
+      "endArrowhead": "arrow"
     },
     {
       "id": "arrow-mqtt-backend",
@@ -600,12 +1232,47 @@
       "backgroundColor": "transparent",
       "fillStyle": "solid",
       "strokeWidth": 2,
-      "roundness": { "type": 2 },
+      "roundness": {
+        "type": 2
+      },
       "roughness": 0,
       "opacity": 100,
-      "points": [[0, 0], [45, 0]],
-      "startBinding": { "elementId": "mqtt-demo", "focus": 0, "gap": 1 },
-      "endBinding": { "elementId": "backend-center", "focus": 0, "gap": 5 }
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          45,
+          0
+        ]
+      ],
+      "startBinding": {
+        "elementId": "mqtt-demo",
+        "focus": 0,
+        "gap": 1
+      },
+      "endBinding": {
+        "elementId": "backend-center",
+        "focus": 0,
+        "gap": 5
+      },
+      "lastCommittedPoint": null,
+      "version": 2,
+      "versionNonce": 765495801,
+      "index": "aZ",
+      "isDeleted": false,
+      "strokeStyle": "solid",
+      "angle": 0,
+      "seed": 1,
+      "groupIds": [],
+      "frameId": null,
+      "boundElements": [],
+      "updated": 1779468834483,
+      "link": null,
+      "locked": false,
+      "startArrowhead": null,
+      "endArrowhead": "arrow"
     },
     {
       "id": "arrow-mqtt-backend-prod",
@@ -618,12 +1285,47 @@
       "backgroundColor": "transparent",
       "fillStyle": "solid",
       "strokeWidth": 2,
-      "roundness": { "type": 2 },
+      "roundness": {
+        "type": 2
+      },
       "roughness": 0,
       "opacity": 100,
-      "points": [[0, 0], [55, 0]],
-      "startBinding": { "elementId": "mqtt-prod", "focus": 0, "gap": 1 },
-      "endBinding": { "elementId": "backend-prod", "focus": 0, "gap": 5 }
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          55,
+          0
+        ]
+      ],
+      "startBinding": {
+        "elementId": "mqtt-prod",
+        "focus": 0,
+        "gap": 1
+      },
+      "endBinding": {
+        "elementId": "backend-prod",
+        "focus": 0,
+        "gap": 5
+      },
+      "lastCommittedPoint": null,
+      "version": 2,
+      "versionNonce": 1644162583,
+      "index": "aa",
+      "isDeleted": false,
+      "strokeStyle": "solid",
+      "angle": 0,
+      "seed": 1,
+      "groupIds": [],
+      "frameId": null,
+      "boundElements": [],
+      "updated": 1779468834483,
+      "link": null,
+      "locked": false,
+      "startArrowhead": null,
+      "endArrowhead": "arrow"
     },
     {
       "id": "arrow-backend-db",
@@ -631,17 +1333,52 @@
       "x": 405,
       "y": 315,
       "width": 0,
-      "height": -55,
+      "height": 55,
       "strokeColor": "#1e1e1e",
       "backgroundColor": "transparent",
       "fillStyle": "solid",
       "strokeWidth": 2,
-      "roundness": { "type": 2 },
+      "roundness": {
+        "type": 2
+      },
       "roughness": 0,
       "opacity": 100,
-      "points": [[0, 0], [0, -55]],
-      "startBinding": { "elementId": "backend-center", "focus": 0, "gap": 5 },
-      "endBinding": { "elementId": "db-demo", "focus": 0, "gap": 5 }
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          -55
+        ]
+      ],
+      "startBinding": {
+        "elementId": "backend-center",
+        "focus": 0,
+        "gap": 5
+      },
+      "endBinding": {
+        "elementId": "db-demo",
+        "focus": 0,
+        "gap": 5
+      },
+      "lastCommittedPoint": null,
+      "version": 2,
+      "versionNonce": 818864857,
+      "index": "ab",
+      "isDeleted": false,
+      "strokeStyle": "solid",
+      "angle": 0,
+      "seed": 1,
+      "groupIds": [],
+      "frameId": null,
+      "boundElements": [],
+      "updated": 1779468834483,
+      "link": null,
+      "locked": false,
+      "startArrowhead": null,
+      "endArrowhead": "arrow"
     },
     {
       "id": "arrow-backend-db-prod",
@@ -649,17 +1386,52 @@
       "x": 1175,
       "y": 315,
       "width": 0,
-      "height": -55,
+      "height": 55,
       "strokeColor": "#1e1e1e",
       "backgroundColor": "transparent",
       "fillStyle": "solid",
       "strokeWidth": 2,
-      "roundness": { "type": 2 },
+      "roundness": {
+        "type": 2
+      },
       "roughness": 0,
       "opacity": 100,
-      "points": [[0, 0], [0, -55]],
-      "startBinding": { "elementId": "backend-prod", "focus": 0, "gap": 5 },
-      "endBinding": { "elementId": "db-prod", "focus": 0, "gap": 5 }
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          -55
+        ]
+      ],
+      "startBinding": {
+        "elementId": "backend-prod",
+        "focus": 0,
+        "gap": 5
+      },
+      "endBinding": {
+        "elementId": "db-prod",
+        "focus": 0,
+        "gap": 5
+      },
+      "lastCommittedPoint": null,
+      "version": 2,
+      "versionNonce": 841487159,
+      "index": "ac",
+      "isDeleted": false,
+      "strokeStyle": "solid",
+      "angle": 0,
+      "seed": 1,
+      "groupIds": [],
+      "frameId": null,
+      "boundElements": [],
+      "updated": 1779468834483,
+      "link": null,
+      "locked": false,
+      "startArrowhead": null,
+      "endArrowhead": "arrow"
     },
     {
       "id": "arrow-backend-storage",
@@ -667,17 +1439,52 @@
       "x": 500,
       "y": 340,
       "width": 35,
-      "height": -110,
+      "height": 110,
       "strokeColor": "#1e1e1e",
       "backgroundColor": "transparent",
       "fillStyle": "solid",
       "strokeWidth": 2,
-      "roundness": { "type": 2 },
+      "roundness": {
+        "type": 2
+      },
       "roughness": 0,
       "opacity": 100,
-      "points": [[0, 0], [35, -110]],
-      "startBinding": { "elementId": "backend-center", "focus": 0, "gap": 5 },
-      "endBinding": { "elementId": "storage-demo", "focus": 0, "gap": 5 }
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          35,
+          -110
+        ]
+      ],
+      "startBinding": {
+        "elementId": "backend-center",
+        "focus": 0,
+        "gap": 5
+      },
+      "endBinding": {
+        "elementId": "storage-demo",
+        "focus": 0,
+        "gap": 5
+      },
+      "lastCommittedPoint": null,
+      "version": 2,
+      "versionNonce": 1920933817,
+      "index": "ad",
+      "isDeleted": false,
+      "strokeStyle": "solid",
+      "angle": 0,
+      "seed": 1,
+      "groupIds": [],
+      "frameId": null,
+      "boundElements": [],
+      "updated": 1779468834483,
+      "link": null,
+      "locked": false,
+      "startArrowhead": null,
+      "endArrowhead": "arrow"
     },
     {
       "id": "arrow-backend-storage-prod",
@@ -685,17 +1492,52 @@
       "x": 1270,
       "y": 340,
       "width": 35,
-      "height": -110,
+      "height": 110,
       "strokeColor": "#1e1e1e",
       "backgroundColor": "transparent",
       "fillStyle": "solid",
       "strokeWidth": 2,
-      "roundness": { "type": 2 },
+      "roundness": {
+        "type": 2
+      },
       "roughness": 0,
       "opacity": 100,
-      "points": [[0, 0], [35, -110]],
-      "startBinding": { "elementId": "backend-prod", "focus": 0, "gap": 5 },
-      "endBinding": { "elementId": "storage-prod", "focus": 0, "gap": 5 }
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          35,
+          -110
+        ]
+      ],
+      "startBinding": {
+        "elementId": "backend-prod",
+        "focus": 0,
+        "gap": 5
+      },
+      "endBinding": {
+        "elementId": "storage-prod",
+        "focus": 0,
+        "gap": 5
+      },
+      "lastCommittedPoint": null,
+      "version": 2,
+      "versionNonce": 1347327063,
+      "index": "ae",
+      "isDeleted": false,
+      "strokeStyle": "solid",
+      "angle": 0,
+      "seed": 1,
+      "groupIds": [],
+      "frameId": null,
+      "boundElements": [],
+      "updated": 1779468834483,
+      "link": null,
+      "locked": false,
+      "startArrowhead": null,
+      "endArrowhead": "arrow"
     },
     {
       "id": "arrow-backend-dash",
@@ -708,12 +1550,47 @@
       "backgroundColor": "transparent",
       "fillStyle": "solid",
       "strokeWidth": 2,
-      "roundness": { "type": 2 },
+      "roundness": {
+        "type": 2
+      },
       "roughness": 0,
       "opacity": 100,
-      "points": [[0, 0], [35, 0]],
-      "startBinding": { "elementId": "backend-center", "focus": 0, "gap": 5 },
-      "endBinding": { "elementId": "dashboard-box", "focus": 0, "gap": 5 }
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          35,
+          0
+        ]
+      ],
+      "startBinding": {
+        "elementId": "backend-center",
+        "focus": 0,
+        "gap": 5
+      },
+      "endBinding": {
+        "elementId": "dashboard-box",
+        "focus": 0,
+        "gap": 5
+      },
+      "lastCommittedPoint": null,
+      "version": 2,
+      "versionNonce": 282378393,
+      "index": "af",
+      "isDeleted": false,
+      "strokeStyle": "solid",
+      "angle": 0,
+      "seed": 1,
+      "groupIds": [],
+      "frameId": null,
+      "boundElements": [],
+      "updated": 1779468834483,
+      "link": null,
+      "locked": false,
+      "startArrowhead": null,
+      "endArrowhead": "arrow"
     },
     {
       "id": "arrow-backend-prom",
@@ -726,12 +1603,47 @@
       "backgroundColor": "transparent",
       "fillStyle": "solid",
       "strokeWidth": 2,
-      "roundness": { "type": 2 },
+      "roundness": {
+        "type": 2
+      },
       "roughness": 0,
       "opacity": 100,
-      "points": [[0, 0], [0, 30]],
-      "startBinding": { "elementId": "backend-center", "focus": 0, "gap": 5 },
-      "endBinding": { "elementId": "prom-box", "focus": 0, "gap": 5 }
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          30
+        ]
+      ],
+      "startBinding": {
+        "elementId": "backend-center",
+        "focus": 0,
+        "gap": 5
+      },
+      "endBinding": {
+        "elementId": "prom-box",
+        "focus": 0,
+        "gap": 5
+      },
+      "lastCommittedPoint": null,
+      "version": 2,
+      "versionNonce": 608694647,
+      "index": "ag",
+      "isDeleted": false,
+      "strokeStyle": "solid",
+      "angle": 0,
+      "seed": 1,
+      "groupIds": [],
+      "frameId": null,
+      "boundElements": [],
+      "updated": 1779468834483,
+      "link": null,
+      "locked": false,
+      "startArrowhead": null,
+      "endArrowhead": "arrow"
     },
     {
       "id": "arrow-prom-grafana",
@@ -744,12 +1656,47 @@
       "backgroundColor": "transparent",
       "fillStyle": "solid",
       "strokeWidth": 2,
-      "roundness": { "type": 2 },
+      "roundness": {
+        "type": 2
+      },
       "roughness": 0,
       "opacity": 100,
-      "points": [[0, 0], [35, 0]],
-      "startBinding": { "elementId": "prom-box", "focus": 0, "gap": 5 },
-      "endBinding": { "elementId": "grafana-box", "focus": 0, "gap": 5 }
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          35,
+          0
+        ]
+      ],
+      "startBinding": {
+        "elementId": "prom-box",
+        "focus": 0,
+        "gap": 5
+      },
+      "endBinding": {
+        "elementId": "grafana-box",
+        "focus": 0,
+        "gap": 5
+      },
+      "lastCommittedPoint": null,
+      "version": 2,
+      "versionNonce": 428033401,
+      "index": "ah",
+      "isDeleted": false,
+      "strokeStyle": "solid",
+      "angle": 0,
+      "seed": 1,
+      "groupIds": [],
+      "frameId": null,
+      "boundElements": [],
+      "updated": 1779468834483,
+      "link": null,
+      "locked": false,
+      "startArrowhead": null,
+      "endArrowhead": "arrow"
     },
     {
       "id": "legend-same",
@@ -767,7 +1714,26 @@
       "fillStyle": "solid",
       "strokeWidth": 1,
       "roughness": 0,
-      "opacity": 100
+      "opacity": 100,
+      "version": 2,
+      "versionNonce": 660122263,
+      "index": "ai",
+      "isDeleted": false,
+      "strokeStyle": "solid",
+      "angle": 0,
+      "seed": 1,
+      "groupIds": [],
+      "frameId": null,
+      "roundness": null,
+      "boundElements": [],
+      "updated": 1779468834483,
+      "link": null,
+      "locked": false,
+      "verticalAlign": "top",
+      "containerId": null,
+      "originalText": "🔄 Same code, same API, same MQTT topics.\nConfig-driven — swap DATABASE_URL\nand scale out. Zero code changes.",
+      "autoResize": true,
+      "lineHeight": 2.0512820512820515
     },
     {
       "id": "mqtt-label",
@@ -785,7 +1751,26 @@
       "fillStyle": "solid",
       "strokeWidth": 1,
       "roughness": 0,
-      "opacity": 100
+      "opacity": 100,
+      "version": 2,
+      "versionNonce": 399388249,
+      "index": "aj",
+      "isDeleted": false,
+      "strokeStyle": "solid",
+      "angle": 0,
+      "seed": 1,
+      "groupIds": [],
+      "frameId": null,
+      "roundness": null,
+      "boundElements": [],
+      "updated": 1779468834483,
+      "link": null,
+      "locked": false,
+      "verticalAlign": "top",
+      "containerId": null,
+      "originalText": "iot/fleet/{id}/...",
+      "autoResize": true,
+      "lineHeight": 1.8181818181818181
     },
     {
       "id": "http-label",
@@ -803,7 +1788,26 @@
       "fillStyle": "solid",
       "strokeWidth": 1,
       "roughness": 0,
-      "opacity": 100
+      "opacity": 100,
+      "version": 2,
+      "versionNonce": 909459383,
+      "index": "ak",
+      "isDeleted": false,
+      "strokeStyle": "solid",
+      "angle": 0,
+      "seed": 1,
+      "groupIds": [],
+      "frameId": null,
+      "roundness": null,
+      "boundElements": [],
+      "updated": 1779468834483,
+      "link": null,
+      "locked": false,
+      "verticalAlign": "top",
+      "containerId": null,
+      "originalText": "MQTT",
+      "autoResize": true,
+      "lineHeight": 1.8181818181818181
     },
     {
       "id": "key-title",
@@ -821,7 +1825,26 @@
       "fillStyle": "solid",
       "strokeWidth": 2,
       "roughness": 0,
-      "opacity": 100
+      "opacity": 100,
+      "version": 2,
+      "versionNonce": 1653144377,
+      "index": "al",
+      "isDeleted": false,
+      "strokeStyle": "solid",
+      "angle": 0,
+      "seed": 1,
+      "groupIds": [],
+      "frameId": null,
+      "roundness": null,
+      "boundElements": [],
+      "updated": 1779468834483,
+      "link": null,
+      "locked": false,
+      "verticalAlign": "top",
+      "containerId": null,
+      "originalText": "Key Takeaway:",
+      "autoResize": true,
+      "lineHeight": 1.5625
     },
     {
       "id": "middle-divider",
@@ -837,11 +1860,41 @@
       "roundness": null,
       "roughness": 0,
       "opacity": 50,
-      "points": [[0, 0], [0, 520]]
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          520
+        ]
+      ],
+      "lastCommittedPoint": null,
+      "version": 2,
+      "versionNonce": 587346135,
+      "index": "am",
+      "isDeleted": false,
+      "strokeStyle": "solid",
+      "angle": 0,
+      "seed": 1,
+      "groupIds": [],
+      "frameId": null,
+      "boundElements": [],
+      "updated": 1779468834483,
+      "link": null,
+      "locked": false,
+      "startBinding": null,
+      "endBinding": null,
+      "startArrowhead": null,
+      "endArrowhead": null
     }
   ],
   "appState": {
-    "gridSize": null,
+    "gridSize": 20,
+    "gridStep": 5,
+    "gridModeEnabled": false,
     "viewBackgroundColor": "#ffffff"
-  }
+  },
+  "files": {}
 }
