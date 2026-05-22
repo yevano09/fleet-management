@@ -93,9 +93,10 @@ Point out each panel:
 - **Active / Total Devices** — gauge showing online count
 - **OTA In Progress** — current deployments
 - **OTA Success Rate** — `rate()` query showing success percentage
-- **API Latency P95** — histogram quantile from Prometheus
-- **OTA Deployments by Status** — pie chart of success/fail/rollback
-- **MQTT Throughput** — rate of published/received messages
+- **API Request Latency (P95)** — histogram quantile as timeseries
+- **OTA Deployments by Status** — pie chart by deployment status
+- **MQTT Message Throughput** — rate of published/received messages
+- **Online Devices** — bar gauge of active percentage
 
 Run an OTA trigger and watch the graphs update live.
 
@@ -185,8 +186,8 @@ After 60 seconds, the device appears `Offline` on the dashboard. When the simula
 ### 7. Review Prometheus Metrics
 
 ```bash
-# Note: the metrics endpoint requires a trailing slash
-curl -s http://localhost:8000/metrics/ | grep fleet_
+# Metrics exposed at /metrics (no trailing slash needed)
+curl -s http://localhost:8000/metrics | grep fleet_
 ```
 
 Sample output:

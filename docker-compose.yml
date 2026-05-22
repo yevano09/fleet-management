@@ -87,7 +87,7 @@ services:
       - SIMULATOR_OTA_FAILURE_RATE=0.2
     depends_on:
       backend:
-        condition: service_started
+        condition: service_healthy
       mosquitto:
         condition: service_healthy
     restart: unless-stopped

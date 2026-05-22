@@ -6,7 +6,8 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
-from prometheus_client import make_asgi_app
+from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
+from fastapi.responses import Response
 from sqlalchemy import select
 
 from app.config import settings
@@ -15,7 +16,7 @@ from app.mqtt_client import mqtt_client
 from app.routers import devices, ota, dashboard
 from agents.routers import router as agents_router
 from app.ota_manager import OtaStateMachine
-from app.metrics import metrics_middleware, active_devices, mqtt_messages_received
+from app.metrics import metrics_middleware, active_devices, total_devices, mqtt_messages_received
 from app.models import Device, DeviceStatus
 
 logging.basicConfig(level=getattr(logging, settings.log_level.upper()))
@@ -32,8 +33,11 @@ async def handle_mqtt_register(payload: dict):
         result = await db.execute(select(Device).where(Device.name == name))
         existing = result.scalar_one_or_none()
         if existing:
+            was_offline = existing.status == DeviceStatus.offline
             existing.status = DeviceStatus.online
             existing.last_seen = _utcnow()
+            if was_offline:
+                active_devices.inc()
         else:
             device = Device(
                 name=name,
@@ -44,6 +48,7 @@ async def handle_mqtt_register(payload: dict):
             )
             db.add(device)
             active_devices.inc()
+            total_devices.inc()
             logger.info(f"MQTT auto-registered device: {name}")
         await db.commit()
     mqtt_messages_received.labels(topic="register").inc()
@@ -102,5 +107,6 @@ async def serve_firmware(filename: str):
     return FileResponse(file_path, media_type="application/octet-stream", filename=filename)
 
 
-metrics_app = make_asgi_app()
-app.mount("/metrics", metrics_app)
+@app.get("/metrics")
+async def metrics():
+    return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)

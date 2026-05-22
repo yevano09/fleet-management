@@ -22,7 +22,7 @@ These existing Fleet Commander features provide the data surfaces and action pri
 | OTA status tracking | `GET /ota/status` — state machine transitions | OTA Manager Agent |
 | Automatic rollback on hash mismatch | State machine: `hash_mismatch → rollback → rolled_back` | Self-Healing Agent |
 | MQTT command publishing | `iot/fleet/{id}/command/ota` | Any agent with backend access |
-| Prometheus metrics | `/metrics/` — active devices, OTA rates, latency | Monitoring Agent |
+| Prometheus metrics | `/metrics` — active devices, OTA rates, latency | Monitoring Agent |
 | Grafana dashboards | JSON dashboard model | Reporting Agent |
 | **Agent Recommendations** | `GET /agents/*` — OTA plans, anomaly checks, device groups | Human-in-loop interface |
 
@@ -195,7 +195,7 @@ Crew: OTA Campaign Crew
 │
 ├── Agent: Canary Analyzer
 │   Role: Monitors canary group health
-│   Tools: GET /devices, GET /ota/status, /metrics/
+│   Tools: GET /devices, GET /ota/status, /metrics
 │   Goal: After canary deploy, analyze for N minutes.
 │          Signal: if failure_rate > threshold → abort + rollback
 │          Signal: if all success → proceed to full rollout
@@ -221,7 +221,7 @@ Crew: OTA Campaign Crew
 Crew: Fleet Health Crew
 ├── Agent: Real-Time Monitor
 │   Role: Watches live fleet metrics
-│   Triggers: Every 30s via /metrics/
+│   Triggers: Every 30s via /metrics
 │   Signals: Device goes offline, OTA failure spike,
 │            signal strength drops across cohort
 │   Action: Alert → escalate to Diagnostician Agent
@@ -445,7 +445,7 @@ def get_ota_status() -> dict:
 @tool("Query Metrics")
 def query_metrics(query: str) -> list:
     """Run a PromQL query against the /metrics endpoint"""
-    resp = requests.get(f"{BASE}/metrics/")
+    resp = requests.get(f"{BASE}/metrics")
     text = resp.text
     results = []
     for line in text.splitlines():
@@ -605,7 +605,7 @@ When `CREWAI_ENABLED=1`, the `run_ota_agent_llm()`, `run_anomaly_agent_llm()`, a
 | `trigger_ota` | `POST /ota/trigger` | OTA, Security |
 | `get_ota_status` | `GET /ota/status` | OTA, Health |
 | `list_firmware` | `GET /ota/firmware` | OTA |
-| `query_metrics` | `GET /metrics/` | All crews |
+| `query_metrics` | `GET /metrics` | All crews |
 | `query_prometheus` | Prometheus HTTP API (`:9090/api/v1/query`) | Health |
 | `push_mqtt_config` | MQTT `iot/fleet/{id}/command/config` | Lifecycle, Security |
 | `send_slack_alert` | External Slack webhook | All crews |

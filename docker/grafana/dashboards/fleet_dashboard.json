@@ -5,13 +5,15 @@
   "timezone": "browser",
   "panels": [
     {
+      "id": 1,
       "title": "Active Devices",
       "type": "stat",
       "gridPos": {"x": 0, "y": 0, "w": 4, "h": 4},
       "targets": [
         {
           "expr": "fleet_active_devices",
-          "legendFormat": "Online"
+          "legendFormat": "Online",
+          "datasource": {"type": "prometheus", "uid": "prometheus"}
         }
       ],
       "fieldConfig": {
@@ -22,24 +24,28 @@
       }
     },
     {
+      "id": 2,
       "title": "Total Devices",
       "type": "stat",
       "gridPos": {"x": 4, "y": 0, "w": 4, "h": 4},
       "targets": [
         {
           "expr": "fleet_total_devices",
-          "legendFormat": "Total"
+          "legendFormat": "Total",
+          "datasource": {"type": "prometheus", "uid": "prometheus"}
         }
       ]
     },
     {
+      "id": 3,
       "title": "OTA In Progress",
       "type": "stat",
       "gridPos": {"x": 8, "y": 0, "w": 4, "h": 4},
       "targets": [
         {
           "expr": "fleet_ota_in_progress",
-          "legendFormat": "In Progress"
+          "legendFormat": "In Progress",
+          "datasource": {"type": "prometheus", "uid": "prometheus"}
         }
       ],
       "fieldConfig": {
@@ -50,13 +56,15 @@
       }
     },
     {
+      "id": 4,
       "title": "OTA Success Rate",
       "type": "stat",
       "gridPos": {"x": 12, "y": 0, "w": 4, "h": 4},
       "targets": [
         {
           "expr": "rate(fleet_ota_deployments_total{status=\"success\"}[5m]) / rate(fleet_ota_deployments_total[5m]) * 100",
-          "legendFormat": "Success Rate"
+          "legendFormat": "Success Rate",
+          "datasource": {"type": "prometheus", "uid": "prometheus"}
         }
       ],
       "fieldConfig": {
@@ -68,13 +76,15 @@
       }
     },
     {
+      "id": 5,
       "title": "API Request Latency (P95)",
-      "type": "graph",
+      "type": "timeseries",
       "gridPos": {"x": 0, "y": 4, "w": 8, "h": 8},
       "targets": [
         {
           "expr": "histogram_quantile(0.95, sum(rate(fleet_api_request_latency_seconds_bucket[5m])) by (le))",
-          "legendFormat": "P95 Latency"
+          "legendFormat": "P95 Latency",
+          "datasource": {"type": "prometheus", "uid": "prometheus"}
         }
       ],
       "fieldConfig": {
@@ -84,39 +94,46 @@
       }
     },
     {
+      "id": 6,
       "title": "OTA Deployments by Status",
       "type": "piechart",
       "gridPos": {"x": 8, "y": 4, "w": 8, "h": 8},
       "targets": [
         {
           "expr": "fleet_ota_deployments_total",
-          "legendFormat": "{{status}}"
+          "legendFormat": "{{status}}",
+          "datasource": {"type": "prometheus", "uid": "prometheus"}
         }
       ]
     },
     {
+      "id": 7,
       "title": "MQTT Message Throughput",
-      "type": "graph",
+      "type": "timeseries",
       "gridPos": {"x": 0, "y": 12, "w": 12, "h": 8},
       "targets": [
         {
           "expr": "rate(fleet_mqtt_messages_published_total[5m])",
-          "legendFormat": "Published"
+          "legendFormat": "Published",
+          "datasource": {"type": "prometheus", "uid": "prometheus"}
         },
         {
           "expr": "rate(fleet_mqtt_messages_received_total[5m])",
-          "legendFormat": "Received"
+          "legendFormat": "Received",
+          "datasource": {"type": "prometheus", "uid": "prometheus"}
         }
       ]
     },
     {
-      "title": "Device Uptime Distribution",
+      "id": 8,
+      "title": "Online Devices",
       "type": "bargauge",
       "gridPos": {"x": 12, "y": 12, "w": 4, "h": 8},
       "targets": [
         {
-          "expr": "fleet_active_devices",
-          "legendFormat": "Online"
+          "expr": "fleet_active_devices / fleet_total_devices * 100",
+          "legendFormat": "Online %",
+          "datasource": {"type": "prometheus", "uid": "prometheus"}
         }
       ],
       "fieldConfig": {
@@ -128,5 +145,5 @@
       }
     }
   ],
-  "schemaVersion": 38
+  "schemaVersion": 39
 }

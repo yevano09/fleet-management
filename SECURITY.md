@@ -170,7 +170,7 @@ topic read iot/fleet/register
 |-----------|----------|
 | Prometheus | Bind to `127.0.0.1:9090` or monitoring VLAN only. No auth — use reverse proxy with basic auth. |
 | Grafana | Default `admin/admin` — **must change immediately in production**. Enable OAuth or LDAP. |
-| Metrics | `/metrics/` exposes request latencies, OTA counts — no PII or secrets. Still, restrict to monitoring network. |
+| Metrics | `/metrics` exposes request latencies, OTA counts — no PII or secrets. Still, restrict to monitoring network. |
 
 ### 6. API Authentication (Production)
 

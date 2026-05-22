@@ -67,7 +67,7 @@ docker compose ps
 
 This spins up: backend (FastAPI :8000), Mosquitto (:1883), Prometheus (:9090), Grafana (:3000), and a device simulator (5 virtual devices with 20% OTA failure rate).
 
-**Note:** The simulator and tests are behind Docker Compose profiles. Use `--profile demo` to include the simulator, and `--profile testing` to run tests.
+**Note:** The simulator and tests are behind Docker Compose profiles. Use `--profile demo` to include the simulator, and `--profile testing` to run tests. The simulator waits for the backend health check to pass before starting, ensuring MQTT subscriptions are registered before devices send messages.
 
 ### Access the Interfaces
 

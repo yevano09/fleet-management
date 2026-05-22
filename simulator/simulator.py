@@ -155,11 +155,16 @@ class SimulatedDevice:
         self._client.loop_stop()
         self._client.disconnect()
 
+    async def register_with_retry(self, retries=3, gap=3):
+        for attempt in range(retries):
+            if attempt > 0:
+                await asyncio.sleep(gap)
+            await self.register()
+
     async def run(self):
         self._running = True
         self.connect(asyncio.get_event_loop())
-        await asyncio.sleep(1)
-        await self.register()
+        await self.register_with_retry()
 
         while self._running:
             await asyncio.sleep(HEARTBEAT_INTERVAL)

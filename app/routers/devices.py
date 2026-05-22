@@ -28,9 +28,12 @@ async def register_device(req: DeviceRegisterRequest, db: AsyncSession = Depends
     existing = result.scalar_one_or_none()
 
     if existing:
+        was_offline = existing.status == DeviceStatus.offline
         existing.status = DeviceStatus.online
         existing.last_seen = _utcnow()
         existing.ip_address = req.ip_address or existing.ip_address
+        if was_offline:
+            active_devices.inc()
         await db.commit()
         await db.refresh(existing)
         logger.info(f"Device re-registered: {existing.id} ({existing.name})")
