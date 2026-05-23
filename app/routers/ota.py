@@ -4,7 +4,7 @@ import logging
 from datetime import datetime, timezone
 from typing import List
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Request
 from sqlalchemy import select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -61,11 +61,15 @@ async def upload_firmware(
 
 
 @router.post("/trigger")
-async def trigger_ota(req: OtaTriggerRequest, db: AsyncSession = Depends(get_db)):
+async def trigger_ota(request: Request, req: OtaTriggerRequest, db: AsyncSession = Depends(get_db)):
     firmware_result = await db.execute(select(Firmware).where(Firmware.id == req.firmware_id))
     firmware = firmware_result.scalar_one_or_none()
     if not firmware:
         raise HTTPException(status_code=404, detail="Firmware not found")
+
+    if not mqtt_client.is_connected:
+        logger.error("MQTT not connected - cannot trigger OTA")
+        raise HTTPException(status_code=503, detail="MQTT broker not connected")
 
     if req.all_devices:
         device_result = await db.execute(
@@ -84,40 +88,53 @@ async def trigger_ota(req: OtaTriggerRequest, db: AsyncSession = Depends(get_db)
         raise HTTPException(status_code=404, detail="No devices found for OTA update")
 
     deployment_ids = []
-    firmware_url = f"http://backend:8000/firmware/{firmware.filename}"
+    base_url = str(request.url).rstrip("/").rsplit("/ota", 1)[0]
+    firmware_url = f"{base_url}/firmware/{firmware.filename}"
+    mqtt_failures = []
 
     for device in devices:
         deployment = OtaDeployment(
             firmware_id=firmware.id,
             device_id=device.id,
+            firmware_url=firmware_url,
             status=OtaStatus.pending,
         )
         db.add(deployment)
         await db.flush()
         await db.refresh(deployment)
 
+        mqtt_topic_id = device.mqtt_client_id or device.id
         device.current_ota_id = deployment.id
         device.previous_firmware_version = device.firmware_version
 
         success = mqtt_client.publish_ota_command(
-            device.id, firmware_url, firmware.sha256_hash, deployment.id
+            mqtt_topic_id, firmware_url, firmware.sha256_hash, deployment.id
         )
 
         if success:
             deployment.status = OtaStatus.downloading
             ota_deployments_in_progress.inc()
-            ota_timeout_watcher.start_watch(deployment.id, device.id)
+            ota_timeout_watcher.start_watch(deployment.id, mqtt_topic_id)
+            logger.info(f"OTA command published to device {device.id} ({device.name}) via MQTT id {mqtt_topic_id}, deployment {deployment.id}")
+        else:
+            mqtt_failures.append(device.id)
+            logger.error(f"Failed to publish OTA command to device {device.id} ({device.name})")
 
         deployment_ids.append(deployment.id)
 
     await db.commit()
 
-    ota_deployments_total.labels(status="triggered").inc(len(deployment_ids))
+    if mqtt_failures:
+        ota_deployments_total.labels(status="mqtt_failed").inc(len(mqtt_failures))
+        logger.warning(f"OTA partially failed: {len(mqtt_failures)}/{len(devices)} devices got no MQTT message")
+
+    ota_deployments_total.labels(status="triggered").inc(len(deployment_ids) - len(mqtt_failures))
 
     logger.info(f"OTA triggered for {len(devices)} devices with firmware {firmware.version}")
     return {
         "message": f"OTA update triggered for {len(devices)} devices",
         "deployment_ids": deployment_ids,
+        "mqtt_failures": mqtt_failures,
         "firmware_version": firmware.version,
     }
 

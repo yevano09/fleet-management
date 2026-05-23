@@ -104,8 +104,8 @@ async def list_devices(
             elapsed = (now - device.last_seen).total_seconds()
             if elapsed > 60:
                 device.status = DeviceStatus.offline
-                active_devices.dec()
-    await db.commit()
+    # No DB commit — offline is a transient display signal, not a persisted state.
+    # The heartbeat handler keeps the device online while it's active.
 
     return DeviceListResponse(
         devices=[DeviceResponse.model_validate(d) for d in devices],

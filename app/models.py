@@ -45,6 +45,7 @@ class Device(Base):
     ip_address = Column(String, default="")
     previous_firmware_version = Column(String, nullable=True)
     current_ota_id = Column(String, nullable=True)
+    mqtt_client_id = Column(String, nullable=True)
 
     # V2G / EV battery fields
     soc = Column(Float, default=80.0)       # state of charge percent
@@ -92,6 +93,7 @@ class OtaDeployment(Base):
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     firmware_id = Column(String, ForeignKey("firmware.id"), nullable=False)
     device_id = Column(String, ForeignKey("devices.id"), nullable=False)
+    firmware_url = Column(String, nullable=True)
     status = Column(SAEnum(OtaStatus), default=OtaStatus.pending)
     retry_count = Column(Integer, default=0)
     error_message = Column(Text, nullable=True)

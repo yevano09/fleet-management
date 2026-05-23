@@ -57,6 +57,7 @@ services:
       - FIRMWARE_STORAGE_PATH=/app/firmware
       - OTA_TIMEOUT_SECONDS=120
       - MAX_RETRY_COUNT=3
+      - OTA_FIRMWARE_BASE_URL=${OTA_FIRMWARE_BASE_URL:-http://localhost:8000}
     volumes:
       - firmware_data:/app/firmware
       - sqlite_data:/app/data

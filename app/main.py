@@ -31,9 +31,13 @@ async def handle_mqtt_register(payload: dict):
     async with async_session_factory() as db:
         name = payload.get("name", "unknown")
         device_id = payload.get("device_id")
-        # Look up by device_id first, then by name
+        mqtt_id = payload.get("device_id")  # the MQTT client's identifier (MAC for ESP32)
+        # Look up by mqtt_client_id first, then by device.id, then by name
         existing = None
-        if device_id:
+        if mqtt_id:
+            result = await db.execute(select(Device).where(Device.mqtt_client_id == mqtt_id))
+            existing = result.scalar_one_or_none()
+        if not existing and device_id:
             result = await db.execute(select(Device).where(Device.id == device_id))
             existing = result.scalar_one_or_none()
         if not existing:
@@ -44,6 +48,7 @@ async def handle_mqtt_register(payload: dict):
             existing.status = DeviceStatus.online
             existing.last_seen = _utcnow()
             existing.name = name
+            existing.mqtt_client_id = mqtt_id or existing.mqtt_client_id
             existing.ip_address = payload.get("ip_address", existing.ip_address)
             existing.firmware_version = payload.get("firmware_version", existing.firmware_version)
             if was_offline:
@@ -52,6 +57,7 @@ async def handle_mqtt_register(payload: dict):
             device = Device(
                 id=device_id,
                 name=name,
+                mqtt_client_id=mqtt_id,
                 firmware_version=payload.get("firmware_version", "1.0.0"),
                 status=DeviceStatus.online,
                 last_seen=_utcnow(),
@@ -60,7 +66,7 @@ async def handle_mqtt_register(payload: dict):
             db.add(device)
             active_devices.inc()
             total_devices.inc()
-            logger.info(f"MQTT auto-registered device: {name} (id={device_id})")
+            logger.info(f"MQTT auto-registered device: {name} (id={device_id}, mqtt_id={mqtt_id})")
         await db.commit()
     mqtt_messages_received.labels(topic="register").inc()
 
@@ -132,6 +138,11 @@ async def serve_firmware(filename: str):
     if not os.path.exists(file_path):
         raise HTTPException(status_code=404, detail="Firmware file not found")
     return FileResponse(file_path, media_type="application/octet-stream", filename=filename)
+
+
+@app.get("/health/mqtt")
+async def health_mqtt():
+    return {"connected": mqtt_client._connected}
 
 
 @app.get("/metrics")

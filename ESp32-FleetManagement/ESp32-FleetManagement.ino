@@ -1,45 +1,5 @@
-# Connecting an ESP32 to Fleet Commander
+#include <ArduinoOTA.h>
 
-This guide explains how to connect a real ESP32 device to the Fleet Commander backend via MQTT, covering registration, heartbeats, and OTA firmware updates.
-
-## MQTT Protocol Reference
-
-All communication uses JSON payloads over MQTT v5 with **QoS 1** (at-least-once delivery).
-
-### Topics
-
-| Topic | Direction | Payload | Frequency |
-|---|---|---|---|
-| `iot/fleet/register` | Device → Backend | `{device_id, name, firmware_version, ip_address}` | On boot + reconnection |
-| `iot/fleet/{device_id}/heartbeat` | Device → Backend | `{uptime_percentage, signal_strength}` | Every 10–60s |
-| `iot/fleet/{device_id}/status/ota` | Device → Backend | `{status, deployment_id, device_id, timestamp, error?}` | During OTA lifecycle |
-| `iot/fleet/{device_id}/command/ota` | Backend → Device | `{firmware_url, sha256_hash, timestamp}` | On OTA trigger |
-| `iot/fleet/{device_id}/command/config` | Backend → Device | `{config: {...}, timestamp}` | On config push |
-
-### OTA Status States
-
-```
-downloading → applying → verifying → success
-                                   → hash_mismatch → rollback → rolled_back
-                         → failed
-```
-
-## ESP32 Arduino Sketch
-
-Below is a complete sketch. It uses the ESP32's native `Update` class for real OTA flashing.
-
-### Requirements
-
-- Arduino IDE or PlatformIO
-- Board: ESP32 Dev Module (or any ESP32 variant)
-- Libraries (install via Library Manager):
-  - `PubSubClient` by Nick O'Leary (for MQTT)
-  - `ArduinoJson` by Benoit Blanchon (for JSON parsing)
-  - `WiFi` (built-in)
-
-### Full Sketch
-
-```cpp
 #include <WiFi.h>
 #include <PubSubClient.h>
 #include <ArduinoJson.h>
@@ -47,20 +7,20 @@ Below is a complete sketch. It uses the ESP32's native `Update` class for real O
 #include <HTTPClient.h>
 
 // ===== CONFIGURATION =====
-const char* WIFI_SSID     = "your-ssid";
-const char* WIFI_PASSWORD = "your-password";
+const char* WIFI_SSID     = "";
+const char* WIFI_PASSWORD = "";
 
-const char* MQTT_BROKER   = "192.168.1.100";  // IP or hostname of Mosquitto
+const char* MQTT_BROKER   = "192.168.0.135";  // IP or hostname of Mosquitto
 const int   MQTT_PORT     = 1883;
 const char* MQTT_USER     = "";                // leave empty if anonymous
 const char* MQTT_PASS     = "";
 
 // Device identity — set these per device
-const char* DEVICE_NAME   = "ESP32-Garage-001";
-const char* FW_VERSION    = "1.0.0";
+const char* DEVICE_NAME   = "ESP32-Garage-001-REAL";
+const char* FW_VERSION    = "1.0.2";
 
 // ===== GLOBALS =====
-WiFiClient   wifiClient;
+WiFiClient  wifiClient;
 PubSubClient mqtt(wifiClient);
 
 String deviceId;          // assigned once at boot (MAC-based)
@@ -83,15 +43,16 @@ String getDeviceId() {
 
 // ===== MQTT CALLBACK =====
 void mqttCallback(char* topic, byte* payload, unsigned int length) {
+  String topicStr = String(topic);
+  Serial.printf("Topic is : %s\n", topicStr.c_str());
+  
   StaticJsonDocument<512> doc;
   DeserializationError err = deserializeJson(doc, payload, length);
   if (err) {
     Serial.printf("MQTT JSON parse error: %s\n", err.c_str());
     return;
   }
-
-  String topicStr = String(topic);
-
+  
   if (topicStr.endsWith("/command/ota")) {
     const char* url   = doc["firmware_url"];
     const char* hash  = doc["sha256_hash"];
@@ -119,6 +80,9 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
       String level = doc["config"]["log_level"].as<String>();
       Serial.printf("  -> Setting log level to: %s\n", level.c_str());
     }
+  } else {
+    Serial.println("not proper syntax:");
+    Serial.println();
   }
 }
 
@@ -158,7 +122,10 @@ void registerDevice() {
 
   char buffer[256];
   size_t n = serializeJson(doc, buffer);
-  mqtt.publish("iot/fleet/register", buffer, n, false, 1);
+  
+  // FIX APPLIED HERE
+  mqtt.publish("iot/fleet/register", (const uint8_t*)buffer, n, false);
+  
   Serial.printf("Registered: %s\n", buffer);
 }
 
@@ -178,7 +145,9 @@ void sendHeartbeat() {
   char buffer[128];
   size_t n = serializeJson(doc, buffer);
   String topic = "iot/fleet/" + deviceId + "/heartbeat";
-  mqtt.publish(topic.c_str(), buffer, n, false, 1);
+  
+  // FIX APPLIED HERE
+  mqtt.publish(topic.c_str(), (const uint8_t*)buffer, n, false);
 }
 
 // ===== OTA STATUS REPORT =====
@@ -195,7 +164,10 @@ void reportOtaStatus(const char* status, const char* error = nullptr) {
   char buffer[256];
   size_t n = serializeJson(doc, buffer);
   String topic = "iot/fleet/" + deviceId + "/status/ota";
-  mqtt.publish(topic.c_str(), buffer, n, false, 1);
+  
+  // FIX APPLIED HERE
+  mqtt.publish(topic.c_str(), (const uint8_t*)buffer, n, false);
+  
   Serial.printf("OTA status: %s\n", status);
 }
 
@@ -276,7 +248,7 @@ void startOtaUpdate() {
 void setup() {
   Serial.begin(115200);
   delay(100);
-  Serial.println("\n\nFleet Commander ESP32 Client");
+  Serial.println("\n\nFleet Commander ESP32 Client - via OTA update");
 
   // Connect WiFi
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
@@ -312,88 +284,3 @@ void loop() {
     sendHeartbeat();
   }
 }
-```
-
-## Network Setup
-
-### 1. Find the MQTT Broker Address
-
-When running the demo stack, the Mosquitto broker is exposed on `localhost:1883` of the host machine. Your ESP32 needs to reach it over your LAN:
-
-```bash
-# On the host machine, find its LAN IP
-ip addr show   # Linux / WSL
-ipconfig       # Windows — look for IPv4 on your active adapter
-```
-
-Set `MQTT_BROKER` in the sketch to that IP.
-
-### 2. Mosquitto Configuration
-
-The default `docker/mosquitto/mosquitto.conf` allows anonymous access on port 1883. This is fine for a local LAN. For production, add credentials:
-
-```conf
-listener 1883 0.0.0.0
-allow_anonymous false
-password_file /mosquitto/config/passwords
-```
-
-Generate the password file:
-```bash
-docker compose exec mosquitto mosquitto_passwd -c /mosquitto/config/passwords esp32-device
-```
-
-Then update the sketch with `MQTT_USER` and `MQTT_PASS`.
-
-### 3. Assign a Persistent Device ID
-
-The sketch derives the ID from the MAC address. If you want a human-friendly name instead, hardcode `deviceId` to match the name you register with:
-
-```cpp
-const char* DEVICE_ID = "esp32-garage-sensor-001";
-```
-
-The `DEVICE_NAME` field in the registration payload is what appears in the Fleet Commander dashboard.
-
-## Testing the Connection
-
-1. Upload the sketch to your ESP32
-2. Open the Serial Monitor (115200 baud)
-3. Verify:
-   ```
-   WiFi connected: 192.168.1.42
-   Device ID: aabbccddeeff
-   Connecting to MQTT... connected
-   Registered: {"device_id":"aabbccddeeff",...
-   ```
-4. Check the backend API:
-   ```bash
-   curl http://localhost:8000/devices
-   ```
-   Your ESP32 should appear in the device list.
-
-## Triggering an OTA Update
-
-1. Upload a new firmware binary via the dashboard or API:
-   ```bash
-   curl -X POST http://localhost:8000/ota/upload \
-     -F "version=2.0.0" \
-     -F "file=@firmware.esp32.bin"
-   ```
-   Note the returned firmware ID.
-
-2. Trigger the OTA for your ESP32:
-   ```bash
-   curl -X POST http://localhost:8000/ota/trigger \
-     -H "Content-Type: application/json" \
-     -d '{"firmware_id": "<FW_ID>", "device_ids": ["<DEVICE_ID>"]}'
-   ```
-
-3. Watch the Serial Monitor — the ESP32 will download the firmware, flash itself, and reboot.
-
-## Important Notes
-
-- **SHA256 verification**: The backend sends `sha256_hash` in the OTA command. The example sketch skips verification for brevity. For production, compute the SHA256 of the downloaded binary and compare before calling `Update.end()`.
-- **MQTT broker address**: When running in Docker, the broker is on the Docker host's IP. Your ESP32 connects to that IP, not `localhost`.
-- **QoS**: All topics use QoS 1. Ensure your MQTT library supports QoS 1 for both publish and subscribe.
-- **Backend health check**: After a backend restart, the ESP32 will reconnect to MQTT and re-subscribe. It should re-register via `iot/fleet/register` on reconnect to update `active_devices` and `total_devices` gauges in Prometheus.

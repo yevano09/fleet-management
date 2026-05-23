@@ -152,16 +152,42 @@ class OtaTimeoutWatcher:
                     deployment.retry_count += 1
                     deployment.status = OtaStatus.pending
                     await session.commit()
-                    firmware_result = await session.execute(
-                        select(Firmware).where(Firmware.id == deployment.firmware_id)
-                    )
-                    firmware = firmware_result.scalar_one_or_none()
-                    if firmware:
-                        mqtt_client.publish_ota_command(
-                            device_id,
-                            f"http://backend:8000/firmware/{firmware.filename}",
-                            firmware.sha256_hash,
+
+                    firmware_url = deployment.firmware_url
+                    sha256 = ""
+                    if firmware_url:
+                        # Extract hash from firmware record if available
+                        fw_result = await session.execute(
+                            select(Firmware).where(Firmware.id == deployment.firmware_id)
                         )
+                        fw = fw_result.scalar_one_or_none()
+                        if fw:
+                            sha256 = fw.sha256_hash
+                    else:
+                        # Fallback: rebuild from firmware record (legacy deployments)
+                        fw_result = await session.execute(
+                            select(Firmware).where(Firmware.id == deployment.firmware_id)
+                        )
+                        fw = fw_result.scalar_one_or_none()
+                        if fw:
+                            firmware_url = f"{settings.ota_firmware_base_url}/firmware/{fw.filename}"
+                            sha256 = fw.sha256_hash
+
+                    if firmware_url:
+                        success = mqtt_client.publish_ota_command(
+                            device_id,
+                            firmware_url,
+                            sha256,
+                            deployment_id,
+                        )
+                        if success:
+                            async with async_session_factory() as retry_session:
+                                dep = await retry_session.get(OtaDeployment, deployment_id)
+                                if dep:
+                                    dep.status = OtaStatus.downloading
+                                    await retry_session.commit()
+                            # Restart the watch for this retry attempt
+                            self.start_watch(deployment_id, device_id)
                 else:
                     await OtaStateMachine.update_deployment_status(
                         deployment_id, OtaStatus.failed, "Timeout after max retries"

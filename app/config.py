@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     ota_timeout_seconds: int = 120
     firmware_storage_path: str = "./firmware"
     max_retry_count: int = 3
+    ota_firmware_base_url: str = "http://localhost:8000"
 
     # V2G / battery degradation settings
     battery_replacement_cost_dollars: float = 35000.0

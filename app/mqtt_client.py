@@ -54,6 +54,10 @@ class MqttClient:
             logger.error(f"Failed to connect to MQTT broker, rc={reason_code}")
             self._connected = False
 
+    def _on_disconnect(self, client, userdata, flags, reason_code, properties=None):
+        logger.warning(f"Disconnected from MQTT broker, rc={reason_code}")
+        self._connected = False
+
     def _on_message(self, client, userdata, msg):
         try:
             payload = json.loads(msg.payload.decode())
@@ -101,6 +105,7 @@ class MqttClient:
             self.client.username_pw_set(settings.mqtt_username, settings.mqtt_password)
 
         self.client.on_connect = self._on_connect
+        self.client.on_disconnect = self._on_disconnect
         self.client.on_message = self._on_message
         self.client.reconnect_delay_set(min_delay=1, max_delay=60)
 
