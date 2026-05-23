@@ -43,6 +43,9 @@ async def handle_mqtt_register(payload: dict):
             was_offline = existing.status == DeviceStatus.offline
             existing.status = DeviceStatus.online
             existing.last_seen = _utcnow()
+            existing.name = name
+            existing.ip_address = payload.get("ip_address", existing.ip_address)
+            existing.firmware_version = payload.get("firmware_version", existing.firmware_version)
             if was_offline:
                 active_devices.inc()
         else:
