@@ -100,7 +100,7 @@ async def trigger_ota(req: OtaTriggerRequest, db: AsyncSession = Depends(get_db)
         device.previous_firmware_version = device.firmware_version
 
         success = mqtt_client.publish_ota_command(
-            device.id, firmware_url, firmware.sha256_hash
+            device.id, firmware_url, firmware.sha256_hash, deployment.id
         )
 
         if success:

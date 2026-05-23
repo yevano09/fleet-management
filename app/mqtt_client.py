@@ -116,16 +116,19 @@ class MqttClient:
             self.client.disconnect()
             self._connected = False
 
-    def publish_ota_command(self, device_id: str, firmware_url: str, sha256_hash: str):
+    def publish_ota_command(self, device_id: str, firmware_url: str, sha256_hash: str, deployment_id: str = ""):
         if not self._connected:
             logger.warning("MQTT not connected, cannot publish OTA command")
             return False
         topic = MQTT_TOPIC_COMMAND_OTA.format(device_id=device_id)
-        payload = json.dumps({
+        payload_dict = {
             "firmware_url": firmware_url,
             "sha256_hash": sha256_hash,
             "timestamp": datetime.now(timezone.utc).isoformat(),
-        })
+        }
+        if deployment_id:
+            payload_dict["deployment_id"] = deployment_id
+        payload = json.dumps(payload_dict)
         result = self.client.publish(topic, payload, qos=1)
         logger.info(f"Published OTA command to {topic}: result={result.rc}")
         return result.rc == 0
