@@ -60,7 +60,7 @@ const char* DEVICE_NAME   = "ESP32-Garage-001";
 const char* FW_VERSION    = "1.0.0";
 
 // ===== GLOBALS =====
-WiFiClient   wifiClient;
+WiFiClient  wifiClient;
 PubSubClient mqtt(wifiClient);
 
 String deviceId;          // assigned once at boot (MAC-based)
@@ -158,7 +158,10 @@ void registerDevice() {
 
   char buffer[256];
   size_t n = serializeJson(doc, buffer);
-  mqtt.publish("iot/fleet/register", buffer, n, false, 1);
+  
+  // FIX APPLIED HERE
+  mqtt.publish("iot/fleet/register", (const uint8_t*)buffer, n, false);
+  
   Serial.printf("Registered: %s\n", buffer);
 }
 
@@ -178,7 +181,9 @@ void sendHeartbeat() {
   char buffer[128];
   size_t n = serializeJson(doc, buffer);
   String topic = "iot/fleet/" + deviceId + "/heartbeat";
-  mqtt.publish(topic.c_str(), buffer, n, false, 1);
+  
+  // FIX APPLIED HERE
+  mqtt.publish(topic.c_str(), (const uint8_t*)buffer, n, false);
 }
 
 // ===== OTA STATUS REPORT =====
@@ -195,7 +200,10 @@ void reportOtaStatus(const char* status, const char* error = nullptr) {
   char buffer[256];
   size_t n = serializeJson(doc, buffer);
   String topic = "iot/fleet/" + deviceId + "/status/ota";
-  mqtt.publish(topic.c_str(), buffer, n, false, 1);
+  
+  // FIX APPLIED HERE
+  mqtt.publish(topic.c_str(), (const uint8_t*)buffer, n, false);
+  
   Serial.printf("OTA status: %s\n", status);
 }
 
