@@ -16,7 +16,7 @@ from app.mqtt_client import mqtt_client
 from app.routers import devices, ota, dashboard
 from agents.routers import router as agents_router
 from app.ota_manager import OtaStateMachine
-from app.metrics import metrics_middleware, active_devices, total_devices, mqtt_messages_received
+from app.metrics import metrics_middleware, active_devices, total_devices, mqtt_messages_received, v2g_active_discharges, device_soc
 from app.models import Device, DeviceStatus
 
 logging.basicConfig(level=getattr(logging, settings.log_level.upper()))
@@ -30,8 +30,15 @@ def _utcnow():
 async def handle_mqtt_register(payload: dict):
     async with async_session_factory() as db:
         name = payload.get("name", "unknown")
-        result = await db.execute(select(Device).where(Device.name == name))
-        existing = result.scalar_one_or_none()
+        device_id = payload.get("device_id")
+        # Look up by device_id first, then by name
+        existing = None
+        if device_id:
+            result = await db.execute(select(Device).where(Device.id == device_id))
+            existing = result.scalar_one_or_none()
+        if not existing:
+            result = await db.execute(select(Device).where(Device.name == name))
+            existing = result.scalar_one_or_none()
         if existing:
             was_offline = existing.status == DeviceStatus.offline
             existing.status = DeviceStatus.online
@@ -40,6 +47,7 @@ async def handle_mqtt_register(payload: dict):
                 active_devices.inc()
         else:
             device = Device(
+                id=device_id,
                 name=name,
                 firmware_version=payload.get("firmware_version", "1.0.0"),
                 status=DeviceStatus.online,
@@ -49,7 +57,7 @@ async def handle_mqtt_register(payload: dict):
             db.add(device)
             active_devices.inc()
             total_devices.inc()
-            logger.info(f"MQTT auto-registered device: {name}")
+            logger.info(f"MQTT auto-registered device: {name} (id={device_id})")
         await db.commit()
     mqtt_messages_received.labels(topic="register").inc()
 
@@ -63,6 +71,20 @@ async def handle_mqtt_heartbeat(device_id: str, payload: dict):
             device.uptime_percentage = payload.get("uptime_percentage", 100.0)
             device.signal_strength = payload.get("signal_strength", 0)
             device.status = DeviceStatus.online
+            if "soc" in payload:
+                device.soc = float(payload["soc"])
+                device_soc.labels(device=device.name).set(float(payload["soc"]))
+            if "soh" in payload:
+                device.soh = float(payload["soh"])
+            if "battery_temp" in payload:
+                device.battery_temp = float(payload["battery_temp"])
+            if "plug_status" in payload:
+                old_plug = device.plug_status
+                device.plug_status = payload["plug_status"]
+                if payload["plug_status"] == "discharging" and old_plug != "discharging":
+                    v2g_active_discharges.inc()
+                elif old_plug == "discharging" and payload["plug_status"] != "discharging":
+                    v2g_active_discharges.dec()
             await db.commit()
     mqtt_messages_received.labels(topic="heartbeat").inc()
 
@@ -77,6 +99,8 @@ async def lifespan(app: FastAPI):
     mqtt_client.on_heartbeat(handle_mqtt_heartbeat)
     mqtt_client.on_register(handle_mqtt_register)
     mqtt_client.connect()
+
+    logger.info("Fleet Commander backend started.")
     yield
     mqtt_client.disconnect()
     logger.info("Fleet Commander backend shut down.")

@@ -24,6 +24,7 @@ class MqttClient:
         self._on_ota_status: Optional[Callable] = None
         self._on_heartbeat: Optional[Callable] = None
         self._on_register: Optional[Callable] = None
+        self._on_v2g_status: Optional[Callable] = None
         self._loop: Optional[asyncio.AbstractEventLoop] = None
 
     def set_event_loop(self, loop: asyncio.AbstractEventLoop):
@@ -38,6 +39,9 @@ class MqttClient:
     def on_register(self, callback: Callable):
         self._on_register = callback
 
+    def on_v2g_status(self, callback: Callable):
+        self._on_v2g_status = callback
+
     def _on_connect(self, client, userdata, flags, reason_code, properties=None):
         if reason_code == 0:
             logger.info("Connected to MQTT broker")
@@ -45,6 +49,7 @@ class MqttClient:
             client.subscribe("iot/fleet/+/status/ota", qos=1)
             client.subscribe("iot/fleet/+/heartbeat", qos=1)
             client.subscribe("iot/fleet/register", qos=1)
+            client.subscribe("iot/fleet/+/status/v2g", qos=1)
         else:
             logger.error(f"Failed to connect to MQTT broker, rc={reason_code}")
             self._connected = False
@@ -53,6 +58,7 @@ class MqttClient:
         try:
             payload = json.loads(msg.payload.decode())
             topic_parts = msg.topic.split("/")
+            logger.debug(f"MQTT message received: topic={msg.topic}, parts={len(topic_parts)}")
 
             if msg.topic.endswith("/status/ota") and len(topic_parts) >= 5:
                 device_id = topic_parts[2]
@@ -61,12 +67,19 @@ class MqttClient:
                         asyncio.run_coroutine_threadsafe(
                             self._on_ota_status(device_id, payload), self._loop
                         )
-            elif msg.topic.endswith("/heartbeat") and len(topic_parts) >= 5:
+            elif msg.topic.endswith("/heartbeat") and len(topic_parts) >= 4:
                 device_id = topic_parts[2]
                 if self._on_heartbeat:
                     if self._loop and self._loop.is_running():
                         asyncio.run_coroutine_threadsafe(
                             self._on_heartbeat(device_id, payload), self._loop
+                        )
+            elif msg.topic.endswith("/status/v2g") and len(topic_parts) >= 5:
+                device_id = topic_parts[2]
+                if self._on_v2g_status:
+                    if self._loop and self._loop.is_running():
+                        asyncio.run_coroutine_threadsafe(
+                            self._on_v2g_status(device_id, payload), self._loop
                         )
             elif msg.topic.endswith("/register"):
                 if self._on_register:
@@ -115,6 +128,21 @@ class MqttClient:
         })
         result = self.client.publish(topic, payload, qos=1)
         logger.info(f"Published OTA command to {topic}: result={result.rc}")
+        return result.rc == 0
+
+    def publish_v2g_command(self, device_id: str, action: str, power_kw: float, duration_minutes: int):
+        if not self._connected:
+            logger.warning("MQTT not connected, cannot publish V2G command")
+            return False
+        topic = f"iot/fleet/{device_id}/command/v2g"
+        payload = json.dumps({
+            "action": action,
+            "power_kw": power_kw,
+            "duration_minutes": duration_minutes,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        })
+        result = self.client.publish(topic, payload, qos=1)
+        logger.info(f"Published V2G command to {topic}: action={action}, rc={result.rc}")
         return result.rc == 0
 
     def publish_remote_config(self, device_id: str, config: dict):

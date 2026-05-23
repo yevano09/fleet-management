@@ -269,6 +269,126 @@ curl 'http://localhost:8000/agents/anomaly-check?notify=false'
 curl 'http://localhost:8000/agents/device-groups'
 ```
 
+### 10. V2G Arbitrage with Battery Degradation Pricing
+
+The system includes a V2G (Vehicle-to-Grid) arbitrage optimizer that schedules EV battery charge/discharge to maximise net revenue, accounting for battery degradation cost.
+
+#### Battery Degradation Model
+
+The degradation cost per kWh cycled is:
+
+`C_deg = replacement_cost × base_fade_per_cycle / capacity × SOH_factor × temp_factor`
+
+- **SOH_factor**: `(80% / SOH)²` when SOH < 80%, otherwise 1.0
+- **Temp_factor**: Arrhenius model — doubles every 10°C above 25°C
+- **No discharge allowed** when SOH < 70%
+- Default replacement cost: $35,000 (configurable via `BATTERY_REPLACEMENT_COST_DOLLARS`)
+
+#### Heuristic Optimizer
+
+The optimizer generates a 24-horizon schedule (configurable via `V2G_HORIZON_HOURS`) that decides charge/discharge/idle per hour:
+
+- **Charge** when spot price < $0.05/kWh (cheap)
+- **Discharge** when spot price > degradation cost AND SOC > 25%
+- **Prioritise pre-departure charging** to meet departure SOC target
+- Respects SOC bounds (20%–90%) and no simultaneous charge/discharge
+
+#### V2G API
+
+```bash
+# Get V2G dispatch schedule for all devices
+curl 'http://localhost:8000/agents/v2g-dispatch'
+
+# Get V2G schedule for specific devices
+curl 'http://localhost:8000/agents/v2g-dispatch?device_ids=DEVICE_ID_1&device_ids=DEVICE_ID_2'
+
+# With custom horizon
+curl 'http://localhost:8000/agents/v2g-dispatch?horizon_hours=12'
+```
+
+Sample response (truncated):
+```json
+{
+  "agent": "V2G Arbitrage Optimizer",
+  "summary": "V2G arbitrage schedule generated for 1 device(s). Projected revenue: $12.45, degradation cost: $0.08, net: $12.37.",
+  "total_projected_revenue_dollars": 12.45,
+  "total_deg_cost_dollars": 0.08,
+  "schedule": [
+    {
+      "start_time": "2025-01-15T03:00:00",
+      "end_time": "2025-01-15T04:00:00",
+      "action": "charge",
+      "power_kw": 7.2,
+      "energy_kwh": 7.2,
+      "spot_price_per_kwh": 0.04,
+      "deg_cost_per_kwh": 0.0,
+      "net_revenue_dollars": -0.29
+    },
+    {
+      "start_time": "2025-01-15T18:00:00",
+      "end_time": "2025-01-15T19:00:00",
+      "action": "discharge",
+      "power_kw": 7.2,
+      "energy_kwh": 7.2,
+      "spot_price_per_kwh": 0.35,
+      "deg_cost_per_kwh": 0.0105,
+      "net_revenue_dollars": 2.44
+    }
+  ],
+  "devices_used": 1
+}
+```
+
+#### MQTT V2G Topics
+
+| Topic | Direction | Payload |
+|---|---|---|
+| `iot/fleet/{id}/command/v2g` | Backend → Device | `{"action": "discharge", "power_kw": 7.2, "duration_minutes": 60}` |
+| `iot/fleet/{id}/status/v2g` | Device → Backend | `{"status": "discharging", "power_kw": 7.2, "soc": 45.0}` |
+
+Heartbeats now include EV battery fields:
+```json
+{
+  "uptime_percentage": 99.1,
+  "signal_strength": -58,
+  "soc": 72.3,
+  "soh": 99.8,
+  "battery_temp": 27.1,
+  "plug_status": "connected"
+}
+```
+
+#### Demoing V2G
+
+1. Start the system: `docker compose --profile demo up -d`
+2. Wait for devices to register (first 3 are EVs with battery simulation)
+3. Call the V2G optimizer:
+   ```bash
+   curl -s http://localhost:8000/agents/v2g-dispatch | python -m json.tool
+   ```
+4. Check Grafana at http://localhost:3000 — new V2G panels show:
+   - **V2G Active Discharges** — count of discharging devices
+   - **Projected V2G Revenue** — total arbitrage revenue
+   - **Battery Degradation Cost** — accumulated wear cost
+   - **Spot Price vs Degradation Cost** — timeseries comparison
+   - **Fleet SOC over Time** — per-device state of charge
+5. Check Prometheus metrics:
+   ```bash
+   curl -s http://localhost:8000/metrics | grep -E "v2g|battery_deg"
+   ```
+6. Simulator logs show V2G command execution:
+   ```bash
+   docker compose logs simulator | grep -i v2g
+   ```
+
+#### Scaling Strategy
+
+See `SCALING.md` for details on:
+- **ML models**: LSTM/Transformer for spot price forecasting
+- **Protocols**: OCPP 2.0.1 for EVSE integration, OpenADR 2.0b for DERMS
+- **Database**: TimescaleDB hypertables for time-series battery/SOC data
+- **Optimization**: MILP via PuLP/OR-Tools with stochastic price scenarios
+
 #### CLI Runner
 
 ```bash
@@ -277,6 +397,9 @@ python run_agents.py
 
 # OTA campaign only
 python run_agents.py --ota
+
+# V2G dispatch
+python run_agents.py --v2g
 
 # JSON output for scripting
 python run_agents.py --json | jq .

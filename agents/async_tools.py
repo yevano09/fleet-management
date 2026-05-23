@@ -17,7 +17,7 @@ from datetime import datetime, timezone
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Device, DeviceStatus, Firmware, OtaDeployment, OtaStatus
+from app.models import Device, DeviceStatus, Firmware, OtaDeployment, OtaStatus, V2gSchedule
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +57,10 @@ async def async_list_devices(db: AsyncSession, status: str | None = None) -> dic
                 "last_seen": d.last_seen.isoformat() if d.last_seen else None,
                 "ip_address": d.ip_address or "",
                 "previous_firmware_version": d.previous_firmware_version or "",
+                "soc": d.soc,
+                "soh": d.soh,
+                "battery_temp": d.battery_temp,
+                "plug_status": d.plug_status or "disconnected",
             }
             for d in devices
         ],
@@ -316,4 +320,33 @@ async def async_plan_ota_campaign(db: AsyncSession, firmware_version: str) -> di
             f"through {len(phases)} rollout phases. "
             f"Estimated completion: ~15 minutes."
         ),
+    }
+
+
+async def async_list_v2g_schedules(db: AsyncSession) -> dict:
+    """Fetch active V2G schedules from DB.
+
+    Returns: {schedules: [...], total: N}
+    """
+    result = await db.execute(
+        select(V2gSchedule).order_by(V2gSchedule.created_at.desc())
+    )
+    schedules = result.scalars().all()
+    return {
+        "schedules": [
+            {
+                "id": s.id,
+                "device_id": s.device_id,
+                "action": s.action.value,
+                "start_time": s.start_time.isoformat() if s.start_time else None,
+                "end_time": s.end_time.isoformat() if s.end_time else None,
+                "power_kw": s.power_kw,
+                "energy_kwh": s.energy_kwh,
+                "spot_price_per_kwh": s.spot_price_per_kwh,
+                "deg_cost_per_kwh": s.deg_cost_per_kwh,
+                "projected_revenue_dollars": s.projected_revenue_dollars,
+            }
+            for s in schedules
+        ],
+        "total": len(schedules),
     }

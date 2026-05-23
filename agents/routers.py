@@ -21,7 +21,12 @@ from agents.async_tools import (
     async_suggest_device_groups,
     async_list_devices,
     async_list_firmware,
+    async_list_v2g_schedules,
 )
+from app.v2g_optimizer import heuristic_optimize, mock_spot_prices, degradation_cost_per_kwh, DegradationParams
+from app.schemas import V2gDispatchRequest, V2gDispatchResponse, V2gDispatchSlot
+from app.metrics import v2g_projected_revenue_dollars, battery_degradation_cost_dollars
+from app.mqtt_client import mqtt_client
 from agents import tools as http_tools
 
 logger = logging.getLogger(__name__)
@@ -180,3 +185,98 @@ async def get_device_groups(
     """Run the Device Group Manager agent: suggest device groupings."""
     result = await _run_group_agent(db, min_group_size=min_group_size)
     return result
+
+
+@router.get("/v2g-dispatch", response_model=V2gDispatchResponse)
+async def get_v2g_dispatch(
+    req: V2gDispatchRequest = Depends(),
+    db: AsyncSession = Depends(get_db),
+):
+    """Run the V2G Arbitrage Optimizer agent.
+
+    Produces a charge/discharge schedule for the fleet maximizing
+    net revenue (spot price - degradation cost).
+    """
+    devices_data = await async_list_devices(db)
+    all_devices = devices_data.get("devices", [])
+
+    if req.device_ids:
+        target_devices = [d for d in all_devices if d["id"] in req.device_ids]
+    else:
+        target_devices = all_devices
+
+    if not target_devices:
+        return V2gDispatchResponse(
+            summary="No devices available for V2G dispatch.",
+            total_projected_revenue_dollars=0.0,
+            total_deg_cost_dollars=0.0,
+            schedule=[],
+            devices_used=0,
+        )
+
+    spot_prices = mock_spot_prices(hours=req.horizon_hours)
+
+    full_schedule: list[V2gDispatchSlot] = []
+    total_revenue = 0.0
+    total_deg = 0.0
+    devices_used = 0
+
+    for device in target_devices:
+        soc = device.get("soc", 80.0)
+        soh = device.get("soh", 100.0)
+        battery_temp = device.get("battery_temp", 25.0)
+        plug_status = device.get("plug_status", "disconnected")
+
+        schedule, rev, deg = heuristic_optimize(
+            soc_current=soc,
+            soh=soh,
+            battery_temp=battery_temp,
+            plug_status=plug_status,
+            horizon_hours=req.horizon_hours,
+            spot_prices=spot_prices,
+        )
+        if schedule:
+            devices_used += 1
+            total_revenue += rev
+            total_deg += deg
+            for slot in schedule:
+                full_schedule.append(V2gDispatchSlot(
+                    start_time=slot.start_time,
+                    end_time=slot.end_time,
+                    action=slot.action,
+                    power_kw=slot.power_kw,
+                    energy_kwh=slot.energy_kwh,
+                    spot_price_per_kwh=slot.spot_price_per_kwh,
+                    deg_cost_per_kwh=slot.deg_cost_per_kwh,
+                    net_revenue_dollars=slot.net_revenue_dollars,
+                ))
+
+    # Publish V2G commands for non-idle slots (first device only for demo)
+    if full_schedule and target_devices:
+        first_device = target_devices[0]
+        for slot in full_schedule[:6]:  # first 6 slots
+            if slot.action in ("charge", "discharge"):
+                mqtt_client.publish_v2g_command(
+                    device_id=first_device["id"],
+                    action=slot.action,
+                    power_kw=slot.power_kw,
+                    duration_minutes=60,
+                )
+
+    v2g_projected_revenue_dollars.set(total_revenue)
+    battery_degradation_cost_dollars.set(total_deg)
+
+    summary = (
+        f"V2G arbitrage schedule generated for {devices_used} device(s). "
+        f"Projected revenue: ${total_revenue:.2f}, "
+        f"degradation cost: ${total_deg:.2f}, "
+        f"net: ${total_revenue - total_deg:.2f}."
+    )
+
+    return V2gDispatchResponse(
+        summary=summary,
+        total_projected_revenue_dollars=total_revenue,
+        total_deg_cost_dollars=total_deg,
+        schedule=full_schedule,
+        devices_used=devices_used,
+    )

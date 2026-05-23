@@ -143,6 +143,108 @@
           "unit": "percent"
         }
       }
+    },
+    {
+      "id": 9,
+      "title": "V2G Active Discharges",
+      "type": "stat",
+      "gridPos": {"x": 0, "y": 20, "w": 4, "h": 4},
+      "targets": [
+        {
+          "expr": "fleet_v2g_active_discharges",
+          "legendFormat": "Discharging",
+          "datasource": {"type": "prometheus", "uid": "prometheus"}
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "thresholds"},
+          "thresholds": {"steps": [{"value": 0, "color": "green"}, {"value": 1, "color": "orange"}]}
+        }
+      }
+    },
+    {
+      "id": 10,
+      "title": "Projected V2G Revenue",
+      "type": "stat",
+      "gridPos": {"x": 4, "y": 20, "w": 4, "h": 4},
+      "targets": [
+        {
+          "expr": "fleet_v2g_projected_revenue_dollars",
+          "legendFormat": "Revenue $",
+          "datasource": {"type": "prometheus", "uid": "prometheus"}
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "color": {"mode": "thresholds"},
+          "thresholds": {"steps": [{"value": 0, "color": "red"}, {"value": 1, "color": "green"}]}
+        }
+      }
+    },
+    {
+      "id": 11,
+      "title": "Battery Degradation Cost",
+      "type": "stat",
+      "gridPos": {"x": 8, "y": 20, "w": 4, "h": 4},
+      "targets": [
+        {
+          "expr": "fleet_battery_degradation_cost_dollars",
+          "legendFormat": "Deg Cost $",
+          "datasource": {"type": "prometheus", "uid": "prometheus"}
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "color": {"mode": "thresholds"},
+          "thresholds": {"steps": [{"value": 0, "color": "green"}, {"value": 10, "color": "orange"}, {"value": 50, "color": "red"}]}
+        }
+      }
+    },
+    {
+      "id": 12,
+      "title": "Spot Price vs Degradation Cost",
+      "type": "timeseries",
+      "gridPos": {"x": 0, "y": 24, "w": 8, "h": 8},
+      "targets": [
+        {
+          "expr": "fleet_v2g_projected_revenue_dollars",
+          "legendFormat": "Revenue",
+          "datasource": {"type": "prometheus", "uid": "prometheus"}
+        },
+        {
+          "expr": "fleet_battery_degradation_cost_dollars",
+          "legendFormat": "Degradation Cost",
+          "datasource": {"type": "prometheus", "uid": "prometheus"}
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD"
+        }
+      }
+    },
+    {
+      "id": 13,
+      "title": "Fleet SOC over Time",
+      "type": "timeseries",
+      "gridPos": {"x": 8, "y": 24, "w": 8, "h": 8},
+      "targets": [
+        {
+          "expr": "avg by (device) (fleet_device_soc)",
+          "legendFormat": "{{device}}",
+          "datasource": {"type": "prometheus", "uid": "prometheus"}
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100
+        }
+      }
     }
   ],
   "schemaVersion": 39

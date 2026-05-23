@@ -21,6 +21,12 @@ api_request_latency = Histogram(
     buckets=(0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0),
 )
 
+# V2G metrics
+v2g_active_discharges = Gauge("fleet_v2g_active_discharges", "Number of devices currently discharging V2G")
+v2g_projected_revenue_dollars = Gauge("fleet_v2g_projected_revenue_dollars", "Total projected V2G arbitrage revenue")
+battery_degradation_cost_dollars = Gauge("fleet_battery_degradation_cost_dollars", "Accumulated battery degradation cost")
+device_soc = Gauge("fleet_device_soc", "Per-device state of charge", ["device"])
+
 # MQTT metrics
 mqtt_messages_published = Counter(
     "fleet_mqtt_messages_published_total", "MQTT messages published", ["topic"]

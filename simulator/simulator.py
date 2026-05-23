@@ -6,6 +6,8 @@ Simulates IoT devices that:
   - Send periodic heartbeats
   - Receive OTA commands and simulate the update lifecycle
   - Handle SHA256 hash mismatches with automatic rollback
+  - Simulate EV battery behaviour for V2G (SOC, SOH, temp, plug status)
+  - Respond to V2G discharge/charge commands
 """
 
 import asyncio
@@ -32,8 +34,12 @@ OTA_FAILURE_RATE = float(os.environ.get("SIMULATOR_OTA_FAILURE_RATE", "0.2"))
 INITIAL_FIRMWARE = "1.0.0"
 
 
+V2G_POWER_KW = 7.2
+BATTERY_CAPACITY_KWH = 60.0
+
+
 class SimulatedDevice:
-    def __init__(self, device_id: str, name: str):
+    def __init__(self, device_id: str, name: str, is_ev: bool = False):
         self.id = device_id
         self.name = name
         self.firmware_version = INITIAL_FIRMWARE
@@ -42,6 +48,15 @@ class SimulatedDevice:
         self.signal_strength = random.randint(-90, -40)
         self.uptime = 100.0
         self.start_time = time.time()
+
+        # EV battery simulation
+        self.is_ev = is_ev
+        self.soc = 80.0  # percent
+        self.soh = 100.0  # percent
+        self.battery_temp = 25.0  # celsius
+        self.plug_status = "connected"
+        self._v2g_action = "idle"
+        self._v2g_end_time = 0.0
 
         self._client = mqtt.Client(
             client_id=f"sim-{device_id[:8]}",
@@ -61,6 +76,8 @@ class SimulatedDevice:
             client.subscribe(topic, qos=1)
             config_topic = f"iot/fleet/{self.id}/command/config"
             client.subscribe(config_topic, qos=1)
+            v2g_topic = f"iot/fleet/{self.id}/command/v2g"
+            client.subscribe(v2g_topic, qos=1)
         else:
             logger.error(f"[{self.name}] MQTT connection failed: rc={reason_code}")
 
@@ -74,6 +91,9 @@ class SimulatedDevice:
                 )
             elif msg.topic.endswith("/command/config"):
                 logger.info(f"[{self.name}] Received remote config: {payload.get('config', {})}")
+            elif msg.topic.endswith("/command/v2g"):
+                logger.info(f"[{self.name}] Received V2G command: {payload.get('action', '')}")
+                self._handle_v2g_command(payload)
         except Exception as e:
             logger.error(f"[{self.name}] Error processing command: {e}")
 
@@ -122,6 +142,49 @@ class SimulatedDevice:
         if result.rc != 0:
             logger.warning(f"[{self.name}] Failed to publish OTA status: {status}")
 
+    def _handle_v2g_command(self, payload: dict):
+        action = payload.get("action", "idle")
+        power_kw = float(payload.get("power_kw", V2G_POWER_KW))
+        duration_min = int(payload.get("duration_minutes", 60))
+        self._v2g_action = action
+        self._v2g_end_time = time.time() + duration_min * 60
+        if action == "discharge":
+            self.plug_status = "discharging"
+            logger.info(f"[{self.name}] V2G discharging at {power_kw}kW for {duration_min}min")
+        elif action == "charge":
+            self.plug_status = "charging"
+            logger.info(f"[{self.name}] V2G charging at {power_kw}kW for {duration_min}min")
+        else:
+            self.plug_status = "connected"
+            self._v2g_action = "idle"
+
+    def _update_battery(self):
+        if not self.is_ev:
+            return
+        now = time.time()
+        # Temperature cycles slowly
+        self.battery_temp += random.uniform(-0.5, 0.5)
+        self.battery_temp = max(15.0, min(45.0, self.battery_temp))
+
+        if self._v2g_action == "discharge" and now < self._v2g_end_time:
+            discharge_kwh = V2G_POWER_KW * (HEARTBEAT_INTERVAL / 3600.0)
+            soc_drop = (discharge_kwh / BATTERY_CAPACITY_KWH) * 100.0
+            self.soc = max(10.0, self.soc - soc_drop)
+            self.battery_temp += 0.2  # heat from discharge
+        elif self._v2g_action == "charge" and now < self._v2g_end_time:
+            charge_kwh = V2G_POWER_KW * (HEARTBEAT_INTERVAL / 3600.0)
+            soc_rise = (charge_kwh / BATTERY_CAPACITY_KWH) * 100.0
+            self.soc = min(95.0, self.soc + soc_rise)
+            self.battery_temp += 0.1
+        else:
+            self._v2g_action = "idle"
+            self.plug_status = "connected"
+            # Slow self-discharge when idle
+            self.soc = max(10.0, self.soc - 0.01)
+
+        # SOH slowly degrades over time
+        self.soh = max(70.0, self.soh - 0.001)
+
     async def register(self):
         payload = json.dumps({
             "device_id": self.id,
@@ -136,13 +199,20 @@ class SimulatedDevice:
     async def send_heartbeat(self):
         self.uptime = min(100.0, 100.0 * (1.0 - (time.time() - self.start_time) / 86400) + 95.0)
         self.signal_strength = random.randint(max(-95, self.signal_strength - 2), min(-30, self.signal_strength + 2))
+        self._update_battery()
 
-        payload = json.dumps({
+        payload = {
             "uptime_percentage": round(self.uptime, 1),
             "signal_strength": self.signal_strength,
-        })
+        }
+        if self.is_ev:
+            payload["soc"] = round(self.soc, 1)
+            payload["soh"] = round(self.soh, 1)
+            payload["battery_temp"] = round(self.battery_temp, 1)
+            payload["plug_status"] = self.plug_status
+
         topic = f"iot/fleet/{self.id}/heartbeat"
-        self._client.publish(topic, payload, qos=1)
+        self._client.publish(topic, json.dumps(payload), qos=1)
 
     def connect(self, loop: asyncio.AbstractEventLoop):
         self._loop = loop
@@ -179,11 +249,12 @@ async def main():
 
     for i in range(DEVICE_COUNT):
         device_id = str(uuid.uuid4())
+        is_ev = i < 3  # first 3 devices are EVs with battery simulation
         name = f"Device-{i+1:03d}"
-        device = SimulatedDevice(device_id, name)
+        device = SimulatedDevice(device_id, name, is_ev=is_ev)
         devices.append(device)
         asyncio.create_task(device.run())
-        logger.info(f"Created simulated device: {name} ({device_id[:8]}...)")
+        logger.info(f"Created simulated device: {name} ({device_id[:8]}...) is_ev={is_ev}")
 
     def shutdown():
         logger.info("Shutting down simulator...")
