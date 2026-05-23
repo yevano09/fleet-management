@@ -56,6 +56,8 @@ class FirmwareUploadResponse(BaseModel):
     file_size: int
     created_at: datetime
 
+    model_config = {"from_attributes": True}
+
 
 class OtaTriggerRequest(BaseModel):
     firmware_id: str

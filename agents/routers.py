@@ -24,7 +24,7 @@ from agents.async_tools import (
     async_list_v2g_schedules,
 )
 from app.v2g_optimizer import heuristic_optimize, mock_spot_prices, degradation_cost_per_kwh, DegradationParams
-from app.schemas import V2gDispatchRequest, V2gDispatchResponse, V2gDispatchSlot
+from app.schemas import V2gDispatchResponse, V2gDispatchSlot
 from app.metrics import v2g_projected_revenue_dollars, battery_degradation_cost_dollars
 from app.mqtt_client import mqtt_client
 from agents import tools as http_tools
@@ -189,8 +189,10 @@ async def get_device_groups(
 
 @router.get("/v2g-dispatch", response_model=V2gDispatchResponse)
 async def get_v2g_dispatch(
-    req: V2gDispatchRequest = Depends(),
     db: AsyncSession = Depends(get_db),
+    device_ids: Optional[list[str]] = Query(None, description="Filter to specific device IDs"),
+    all_devices: bool = Query(False, description="Include all devices"),
+    horizon_hours: int = Query(24, description="Optimization horizon in hours"),
 ):
     """Run the V2G Arbitrage Optimizer agent.
 
@@ -198,12 +200,12 @@ async def get_v2g_dispatch(
     net revenue (spot price - degradation cost).
     """
     devices_data = await async_list_devices(db)
-    all_devices = devices_data.get("devices", [])
+    all_devices_list = devices_data.get("devices", [])
 
-    if req.device_ids:
-        target_devices = [d for d in all_devices if d["id"] in req.device_ids]
+    if device_ids:
+        target_devices = [d for d in all_devices_list if d["id"] in device_ids]
     else:
-        target_devices = all_devices
+        target_devices = all_devices_list
 
     if not target_devices:
         return V2gDispatchResponse(
@@ -214,7 +216,7 @@ async def get_v2g_dispatch(
             devices_used=0,
         )
 
-    spot_prices = mock_spot_prices(hours=req.horizon_hours)
+    spot_prices = mock_spot_prices(hours=horizon_hours)
 
     full_schedule: list[V2gDispatchSlot] = []
     total_revenue = 0.0
@@ -232,7 +234,7 @@ async def get_v2g_dispatch(
             soh=soh,
             battery_temp=battery_temp,
             plug_status=plug_status,
-            horizon_hours=req.horizon_hours,
+            horizon_hours=horizon_hours,
             spot_prices=spot_prices,
         )
         if schedule:
