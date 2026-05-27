@@ -14,3 +14,8 @@ build/
 .venv/
 venv/
 *.log
+.agents/
+AGENTS.md
+behindproxy.sh
+noproxy.sh
+skills-lock.json

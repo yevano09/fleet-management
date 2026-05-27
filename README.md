@@ -151,6 +151,27 @@ All configuration is via environment variables (see `.env.example`):
 | `SIMULATOR_HEARTBEAT_INTERVAL` | `10` | Seconds between heartbeats |
 | `SIMULATOR_OTA_FAILURE_RATE` | `0.2` | Probability of OTA hash mismatch |
 
+## Security & Dependency Management
+
+All Python dependencies are pinned to exact versions in `requirements.txt`. Dependabot is configured for automated vulnerability alerts.
+
+### Recent Fixes (Session 2 — May 2026)
+
+11 packages were upgraded to patch known CVEs, including critical fixes for `python-multipart` (path traversal → RCE, CVSS 8.6), `jinja2` (sandbox escape, CVSS 8.8), and `requests` (credential leak). All 3 Dockerfiles were hardened with `apt-get upgrade -y` at build time.
+
+See [`AGENTS.md`](AGENTS.md) for the full version change table and [`SECURITY.md`](SECURITY.md) for the security policy.
+
+```bash
+# Audit dependencies for known vulnerabilities
+pip install safety
+safety check -r requirements.txt
+
+# Scan Docker images
+docker scout quick fleet-management-backend
+```
+
+**Cadence**: Python packages reviewed monthly. Docker base images reviewed monthly.
+
 ## Scaling for Production
 
 For larger deployments:

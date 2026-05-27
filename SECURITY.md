@@ -279,7 +279,7 @@ services:
 - [ ] SQLAlchemy ORM used (no raw SQL)
 - [ ] Input validation via Pydantic schemas
 - [ ] All dependencies pinned and reviewed
-- [ ] Docker images use slim base (`python:3.12-slim`)
+- [ ] Docker images use slim base with `apt-get upgrade -y` at build time
 
 ### CI/CD Pipeline Checks
 
@@ -291,6 +291,8 @@ services:
 - docker scan fleet-management-backend  # Container image scan
 ```
 
+**Dockerfile best practice:** Always include `apt-get update && apt-get upgrade -y` before `apt-get install` and clean up with `apt-get autoremove -y && rm -rf /var/lib/apt/lists/*` to apply base image security patches at build time.
+
 ### Dependency Auditing
 
 ```bash
@@ -301,6 +303,8 @@ safety check -r requirements.txt
 # Check Docker base images for CVEs
 docker scout quick fleet-management-backend
 ```
+
+**Latest audit (May 2026):** 11 packages upgraded across 16 requirements to patch 10+ CVEs. All 3 Dockerfiles hardened with `apt-get upgrade -y` at build time. See [`AGENTS.md`](AGENTS.md) for the full change log.
 
 ### Update Cadence
 
