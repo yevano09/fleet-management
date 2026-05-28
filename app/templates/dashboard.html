@@ -155,6 +155,25 @@ input[type="checkbox"] { accent-color:#2563eb; width:1rem; height:1rem; cursor:p
 <div class="stat-card" style="padding:1.25rem;"><div class="label">Loading agent recommendations...</div></div>
 </div>
 </div>
+<div class="ota-section" id="firmware-section">
+<h3>Firmware Management</h3>
+<div style="display:grid;grid-template-columns:1fr 2fr;gap:1.5rem;">
+<div class="stat-card" style="padding:1.25rem;">
+<div class="label" style="margin-bottom:0.75rem;">Upload New Firmware</div>
+<form id="firmware-upload-form" style="display:flex;flex-direction:column;gap:0.75rem;">
+<input type="text" id="fw-version" placeholder="Version (e.g. 2.0.0)" required style="padding:0.5rem 0.75rem;background:#0f172a;border:1px solid #334155;border-radius:0.375rem;color:#e2e8f0;font-size:0.875rem;">
+<input type="file" id="fw-file" accept=".bin" required style="padding:0.5rem;background:#0f172a;border:1px solid #334155;border-radius:0.375rem;color:#e2e8f0;font-size:0.875rem;">
+<button type="submit" class="btn btn-success" style="width:100%;">Upload Firmware</button>
+</form>
+</div>
+<div class="stat-card" style="padding:1.25rem;">
+<div class="label" style="margin-bottom:0.75rem;">Available Firmware</div>
+<div id="firmware-list" style="max-height:300px;overflow-y:auto;">
+<div style="color:#64748b;font-size:0.875rem;">Loading...</div>
+</div>
+</div>
+</div>
+</div>
 </main>
 
 <div class="modal-overlay" id="ota-modal">
@@ -441,6 +460,73 @@ function toggleSelectAll() {
   document.querySelectorAll('.device-check').forEach(cb => cb.checked = checked);
 }
 
+async function loadFirmwareList() {
+  try {
+    const data = await fetchJson('/ota/firmware');
+    const container = document.getElementById('firmware-list');
+    if (data.length === 0) {
+      container.innerHTML = '<div style="color:#64748b;font-size:0.875rem;">No firmware uploaded yet.</div>';
+      return;
+    }
+    container.innerHTML = data.map(f => `
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:0.5rem 0;border-bottom:1px solid #334155;font-size:0.875rem;">
+        <div>
+          <div style="font-weight:600;">${f.version}</div>
+          <div style="color:#94a3b8;font-size:0.75rem;">${f.filename} (${(f.file_size / 1024).toFixed(1)} KB)</div>
+          <div style="color:#64748b;font-size:0.7rem;">${new Date(f.created_at + 'Z').toLocaleString()}</div>
+        </div>
+        <button class="btn btn-danger" style="padding:0.25rem 0.5rem;font-size:0.75rem;" onclick="deleteFirmware('${f.id}', '${f.version}')">Delete</button>
+      </div>
+    `).join('');
+  } catch {
+    document.getElementById('firmware-list').innerHTML = '<div style="color:#f87171;font-size:0.875rem;">Failed to load firmware list.</div>';
+  }
+}
+
+async function deleteFirmware(id, version) {
+  if (!confirm(`Delete firmware ${version}? This cannot be undone.`)) return;
+  try {
+    const res = await fetch(`/ota/firmware/${id}`, { method: 'DELETE' });
+    if (res.ok) {
+      showToast(`Firmware ${version} deleted`, 'success');
+      loadFirmwareList();
+      loadFirmware();
+    } else {
+      const err = await res.json();
+      showToast(err.detail || 'Delete failed', 'error');
+    }
+  } catch {
+    showToast('Network error', 'error');
+  }
+}
+
+document.getElementById('firmware-upload-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const version = document.getElementById('fw-version').value.trim();
+  const fileInput = document.getElementById('fw-file');
+  if (!version || !fileInput.files.length) { showToast('Enter version and select a file', 'error'); return; }
+
+  const formData = new FormData();
+  formData.append('version', version);
+  formData.append('file', fileInput.files[0]);
+
+  try {
+    const res = await fetch('/ota/upload', { method: 'POST', body: formData });
+    if (res.ok) {
+      showToast(`Firmware ${version} uploaded`, 'success');
+      document.getElementById('fw-version').value = '';
+      fileInput.value = '';
+      loadFirmwareList();
+      loadFirmware();
+    } else {
+      const err = await res.json();
+      showToast(err.detail || 'Upload failed', 'error');
+    }
+  } catch {
+    showToast('Network error', 'error');
+  }
+});
+
 function closeOtaModal() {
   document.getElementById('ota-modal').classList.remove('active');
 }
@@ -488,9 +574,11 @@ document.getElementById('ota-form').addEventListener('submit', async (e) => {
 });
 
 loadDashboard();
+loadFirmwareList();
 checkMqttStatus();
 loadAgentRecommendations();
 setInterval(loadDashboard, 5000);
+setInterval(loadFirmwareList, 30000);
 setInterval(checkMqttStatus, 10000);
 setInterval(loadAgentRecommendations, 30000);
 </script>
