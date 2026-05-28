@@ -43,7 +43,6 @@ async def async_list_devices(db: AsyncSession, status: str | None = None) -> dic
             elapsed = (now - device.last_seen).total_seconds()
             if elapsed > 60:
                 device.status = DeviceStatus.offline
-    await db.commit()
 
     return {
         "devices": [

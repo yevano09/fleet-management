@@ -43,6 +43,20 @@ class TestE2E:
         cls.created_device_ids = []
         cls.firmware_id = None
 
+    def test_00_metrics_endpoint_no_trailing_slash(self):
+        """Bug 2: /metrics (no trailing slash) must return 200."""
+        r = requests.get(f"{BASE_URL}/metrics", timeout=10)
+        assert r.status_code == 200, f"Expected 200, got {r.status_code}"
+        text = r.text
+        assert "fleet_active_devices" in text
+
+    def test_00_metrics_endpoint_with_trailing_slash(self):
+        """Bug 2: /metrics/ (with trailing slash) must NOT 404."""
+        r = requests.get(f"{BASE_URL}/metrics/", timeout=10)
+        assert r.status_code in (200, 307), (
+            f"Trailing-slash metrics should not 404, got {r.status_code}"
+        )
+
     def test_01_register_devices(self):
         for i in range(DEVICE_COUNT):
             payload = {
@@ -107,6 +121,24 @@ class TestE2E:
         assert data["sha256_hash"] == sha256_hash
         assert data["version"] == "2.0.0"
         self.__class__.firmware_id = data["id"]
+
+    def test_04b_upload_duplicate_firmware_returns_409(self):
+        """Bug 3: Duplicate firmware version must return 409, not 500."""
+        firmware_content = b"FLEET_COMMANDER_FIRMWARE_V2_DUPLICATE"
+        files = {
+            "file": ("firmware_v2_dup.bin", firmware_content, "application/octet-stream"),
+        }
+        r = requests.post(
+            f"{BASE_URL}/ota/upload",
+            data={"version": "2.0.0"},
+            files=files,
+            timeout=10,
+        )
+        assert r.status_code == 409, (
+            f"Expected 409 for duplicate firmware, got {r.status_code}: {r.text}"
+        )
+        detail = r.json().get("detail", "")
+        assert "already exists" in detail
 
     def test_05_trigger_ota(self):
         assert self.firmware_id is not None
@@ -180,3 +212,60 @@ class TestE2E:
         assert r.status_code == 200
         assert "Fleet Commander" in r.text
         assert "htmx" in r.text
+
+    def test_11_trigger_ota_invalid_firmware_returns_404(self):
+        r = requests.post(
+            f"{BASE_URL}/ota/trigger",
+            json={"firmware_id": "nonexistent-id", "all_devices": True},
+            timeout=10,
+        )
+        assert r.status_code == 404, f"Expected 404, got {r.status_code}: {r.text}"
+
+    def test_12_trigger_ota_no_devices_returns_400(self):
+        r = requests.post(
+            f"{BASE_URL}/ota/trigger",
+            json={"firmware_id": self.firmware_id or "x" * 36},
+            timeout=10,
+        )
+        assert r.status_code == 400, f"Expected 400, got {r.status_code}: {r.text}"
+
+    def test_13_heartbeat_nonexistent_device_returns_404(self):
+        r = requests.post(
+            f"{BASE_URL}/devices/nonexistent-id/heartbeat",
+            json={"uptime_percentage": 99.0, "signal_strength": -50},
+            timeout=10,
+        )
+        assert r.status_code == 404, f"Expected 404, got {r.status_code}: {r.text}"
+
+    def test_14_fetch_metrics_contains_all_expected_metrics(self):
+        """Verify all Prometheus metric names are exposed."""
+        r = requests.get(f"{BASE_URL}/metrics", timeout=10)
+        assert r.status_code == 200
+        text = r.text
+        expected = [
+            "fleet_active_devices",
+            "fleet_total_devices",
+            "fleet_ota_deployments_total",
+            "fleet_ota_in_progress",
+            "fleet_api_request_latency_seconds",
+            "fleet_mqtt_messages_published_total",
+            "fleet_mqtt_messages_received_total",
+        ]
+        for name in expected:
+            assert name in text, f"Metric {name} not found in /metrics"
+
+    def test_15_upload_firmware_empty_file_returns_200(self):
+        """Edge case: firmware with zero bytes should still be accepted."""
+        files = {
+            "file": ("empty_firmware.bin", b"", "application/octet-stream"),
+        }
+        r = requests.post(
+            f"{BASE_URL}/ota/upload",
+            data={"version": "0.0.0"},
+            files=files,
+            timeout=10,
+        )
+        assert r.status_code == 200, f"Empty firmware upload failed: {r.text}"
+        data = r.json()
+        assert data["file_size"] == 0
+        assert data["version"] == "0.0.0"

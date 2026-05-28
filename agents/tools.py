@@ -119,7 +119,7 @@ def fetch_metrics() -> str:
 
     Returns: Raw prometheus text (agent can parse relevant lines).
     """
-    resp = requests.get(f"{BASE_URL}/metrics/", timeout=10)
+    resp = requests.get(f"{BASE_URL}/metrics", timeout=10)
     resp.raise_for_status()
     return resp.text
 

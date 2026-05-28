@@ -31,6 +31,13 @@ async def upload_firmware(
 ):
     os.makedirs(settings.firmware_storage_path, exist_ok=True)
 
+    existing = await db.execute(select(Firmware).where(Firmware.version == version))
+    if existing.scalar_one_or_none():
+        raise HTTPException(
+            status_code=409,
+            detail=f"Firmware version '{version}' already exists",
+        )
+
     content = await file.read()
     sha256_hash = hashlib.sha256(content).hexdigest()
     file_path = os.path.join(settings.firmware_storage_path, file.filename)
@@ -170,3 +177,27 @@ async def list_firmware(db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Firmware).order_by(Firmware.created_at.desc()))
     firmware_list = result.scalars().all()
     return [FirmwareUploadResponse.model_validate(f) for f in firmware_list]
+
+@router.delete("/firmware/{firmware_id}")
+async def delete_firmware(firmware_id: str, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(Firmware).where(Firmware.id == firmware_id))
+    firmware = result.scalar_one_or_none()
+    if not firmware:
+        raise HTTPException(status_code=404, detail="Firmware not found")
+
+    # Check if any deployment references this firmware
+    dep_result = await db.execute(
+        select(OtaDeployment).where(OtaDeployment.firmware_id == firmware_id).limit(1)
+    )
+    if dep_result.scalar_one_or_none():
+        raise HTTPException(status_code=409, detail="Cannot delete firmware with existing deployments")
+
+    # Remove the binary file
+    if os.path.exists(firmware.binary_path):
+        os.remove(firmware.binary_path)
+
+    await db.delete(firmware)
+    await db.commit()
+
+    logger.info(f"Firmware deleted: {firmware.version} ({firmware.filename})")
+    return {"message": f"Firmware {firmware.version} deleted"}

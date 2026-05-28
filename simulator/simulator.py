@@ -100,7 +100,7 @@ class SimulatedDevice:
     async def _handle_ota_command(self, payload: dict):
         firmware_url = payload.get("firmware_url", "")
         expected_hash = payload.get("sha256_hash", "")
-        deployment_id = str(uuid.uuid4())
+        deployment_id = payload.get("deployment_id", str(uuid.uuid4()))
 
         logger.info(f"[{self.name}] Starting OTA: {firmware_url}")
 
