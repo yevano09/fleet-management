@@ -75,13 +75,27 @@ input[type="checkbox"] { accent-color:#2563eb; width:1rem; height:1rem; cursor:p
 </head>
 <body>
 <header>
-<div>
+<div style="display:flex;align-items:center;gap:1rem;">
 <h1>Fleet Commander</h1>
 <div class="subtitle">IoT Device Management Dashboard</div>
 </div>
 <div class="header-status">
-<span id="mqtt-status" class="mqtt-badge disconnected">MQTT: Disconnected</span>
-<button class="btn btn-outline" onclick="refreshAll()">Refresh</button>
+  {% if user %}
+  <div style="display:flex;align-items:center;gap:0.75rem;">
+    {% if user.picture %}
+    <img src="{{ user.picture }}" alt="" style="width:32px;height:32px;border-radius:50%;border:2px solid #38bdf8;">
+    {% endif %}
+    <div style="text-align:right;">
+      <div style="font-size:0.875rem;font-weight:600;color:#e2e8f0;">{{ user.name }}</div>
+      <div style="font-size:0.7rem;color:#94a3b8;">{{ user.email }}</div>
+    </div>
+    <a href="/auth/logout" class="btn btn-outline" style="text-decoration:none;font-size:0.75rem;padding:0.25rem 0.75rem;">Logout</a>
+  </div>
+  {% else %}
+  <a href="/auth/login" class="btn btn-primary" style="text-decoration:none;font-size:0.875rem;">Sign in with Google</a>
+  {% endif %}
+  <span id="mqtt-status" class="mqtt-badge disconnected">MQTT: Disconnected</span>
+  <button class="btn btn-outline" onclick="refreshAll()">Refresh</button>
 </div>
 </header>
 

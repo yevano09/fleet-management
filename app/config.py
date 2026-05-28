@@ -25,7 +25,15 @@ class Settings(BaseSettings):
     v2g_horizon_hours: int = 24
     v2g_time_step_minutes: int = 60
 
-    model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
+    # Google OAuth
+    google_client_id: str = ""
+    google_client_secret: str = ""
+    google_redirect_uri: str = "http://localhost:8000/auth/callback"
+    jwt_secret_key: str = "change-me-to-a-random-secret"
+    jwt_algorithm: str = "HS256"
+    jwt_expiration_minutes: int = 1440  # 24 hours
+
+    model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
 
 
 settings = Settings()

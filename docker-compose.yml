@@ -63,6 +63,10 @@ services:
       - OTA_TIMEOUT_SECONDS=120
       - MAX_RETRY_COUNT=3
       - OTA_FIRMWARE_BASE_URL=${OTA_FIRMWARE_BASE_URL:-http://localhost:8000}
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET:-}
+      - GOOGLE_REDIRECT_URI=${GOOGLE_REDIRECT_URI:-http://localhost:8000/auth/callback}
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-}
     volumes:
       - firmware_data:/app/firmware
       - sqlite_data:/app/data

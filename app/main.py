@@ -4,7 +4,8 @@ import logging
 from datetime import datetime, timezone
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import RedirectResponse
 from fastapi.responses import FileResponse
 from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
 from fastapi.responses import Response
@@ -13,7 +14,7 @@ from sqlalchemy import select
 from app.config import settings
 from app.database import init_db, async_session_factory
 from app.mqtt_client import mqtt_client
-from app.routers import devices, ota, dashboard
+from app.routers import devices, ota, dashboard, auth
 from agents.routers import router as agents_router
 from app.ota_manager import OtaStateMachine
 from app.metrics import metrics_middleware, active_devices, total_devices, mqtt_messages_received, v2g_active_discharges, device_soc
@@ -124,6 +125,7 @@ app = FastAPI(
 
 app.middleware("http")(metrics_middleware)
 
+app.include_router(auth.router)
 app.include_router(devices.router)
 app.include_router(ota.router)
 app.include_router(dashboard.router)
