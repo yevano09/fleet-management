@@ -178,10 +178,6 @@ async def list_firmware(db: AsyncSession = Depends(get_db)):
     firmware_list = result.scalars().all()
     return [FirmwareUploadResponse.model_validate(f) for f in firmware_list]
 
-<<<<<<< HEAD
-=======
-
->>>>>>> e2550b3839872243ae9a3e7fd8232f28acab28f4
 @router.delete("/firmware/{firmware_id}")
 async def delete_firmware(firmware_id: str, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Firmware).where(Firmware.id == firmware_id))
