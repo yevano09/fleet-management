@@ -208,10 +208,15 @@ class TestE2E:
         assert "fleet_api_request_latency_seconds" in text
 
     def test_10_dashboard_endpoint(self):
-        r = requests.get(f"{BASE_URL}/", timeout=10)
-        assert r.status_code == 200
-        assert "Fleet Commander" in r.text
-        assert "htmx" in r.text
+        r = requests.get(f"{BASE_URL}/", timeout=10, allow_redirects=False)
+        # Dashboard now requires authentication — unauthenticated requests
+        # are redirected to the Google OAuth login page.
+        assert r.status_code in (302, 307), (
+            f"Unauthenticated dashboard should redirect, got {r.status_code}"
+        )
+        assert "/auth/login" in r.headers.get("location", ""), (
+            f"Should redirect to /auth/login, got {r.headers.get('location')}"
+        )
 
     def test_11_trigger_ota_invalid_firmware_returns_404(self):
         r = requests.post(

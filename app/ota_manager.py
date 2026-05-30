@@ -1,19 +1,14 @@
 import asyncio
 import logging
-from datetime import datetime, timezone
 from typing import Optional
 
-
-def _utcnow():
-    return datetime.now(timezone.utc).replace(tzinfo=None)
-
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import async_session_factory
 from app.models import Device, OtaDeployment, OtaStatus, Firmware
 from app.mqtt_client import mqtt_client
 from app.config import settings
+from app.utils import utcnow
 
 logger = logging.getLogger(__name__)
 
@@ -69,7 +64,7 @@ class OtaStateMachine:
                 return None
 
             deployment.status = new_status
-            deployment.updated_at = _utcnow()
+            deployment.updated_at = utcnow()
             if error_message:
                 deployment.error_message = error_message
 

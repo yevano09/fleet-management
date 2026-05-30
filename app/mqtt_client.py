@@ -51,11 +51,11 @@ class MqttClient:
             client.subscribe("iot/fleet/register", qos=1)
             client.subscribe("iot/fleet/+/status/v2g", qos=1)
         else:
-            logger.error(f"Failed to connect to MQTT broker, rc={reason_code}")
+            logger.error("Failed to connect to MQTT broker, rc=%s", reason_code)
             self._connected = False
 
     def _on_disconnect(self, client, userdata, flags, reason_code, properties=None):
-        logger.warning(f"Disconnected from MQTT broker, rc={reason_code}")
+        logger.warning("Disconnected from MQTT broker, rc=%s", reason_code)
         self._connected = False
 
     def _on_message(self, client, userdata, msg):
@@ -91,8 +91,8 @@ class MqttClient:
                         asyncio.run_coroutine_threadsafe(
                             self._on_register(payload), self._loop
                         )
-        except Exception as e:
-            logger.error(f"Error processing MQTT message: {e}")
+        except Exception:
+            logger.exception("Error processing MQTT message")
 
     def connect(self):
         self.client = mqtt.Client(

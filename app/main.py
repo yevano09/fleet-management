@@ -11,21 +11,18 @@ from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
 from fastapi.responses import Response
 from sqlalchemy import select
 
-from app.config import settings
+from app.config import settings, validate_settings
 from app.database import init_db, async_session_factory
 from app.mqtt_client import mqtt_client
-from app.routers import devices, ota, dashboard, auth
+from app.routers import devices, ota, dashboard, auth, admin
 from agents.routers import router as agents_router
 from app.ota_manager import OtaStateMachine
 from app.metrics import metrics_middleware, active_devices, total_devices, mqtt_messages_received, v2g_active_discharges, device_soc
 from app.models import Device, DeviceStatus
+from app.utils import utcnow
 
 logging.basicConfig(level=getattr(logging, settings.log_level.upper()))
 logger = logging.getLogger(__name__)
-
-
-def _utcnow():
-    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 async def handle_mqtt_register(payload: dict):
@@ -47,7 +44,7 @@ async def handle_mqtt_register(payload: dict):
         if existing:
             was_offline = existing.status == DeviceStatus.offline
             existing.status = DeviceStatus.online
-            existing.last_seen = _utcnow()
+            existing.last_seen = utcnow()
             existing.name = name
             existing.mqtt_client_id = mqtt_id or existing.mqtt_client_id
             existing.ip_address = payload.get("ip_address", existing.ip_address)
@@ -61,13 +58,13 @@ async def handle_mqtt_register(payload: dict):
                 mqtt_client_id=mqtt_id,
                 firmware_version=payload.get("firmware_version", "1.0.0"),
                 status=DeviceStatus.online,
-                last_seen=_utcnow(),
+                last_seen=utcnow(),
                 ip_address=payload.get("ip_address", ""),
             )
             db.add(device)
             active_devices.inc()
             total_devices.inc()
-            logger.info(f"MQTT auto-registered device: {name} (id={device_id}, mqtt_id={mqtt_id})")
+            logger.info("MQTT auto-registered device: %s (id=%s, mqtt_id=%s)", name, device_id, mqtt_id)
         await db.commit()
     mqtt_messages_received.labels(topic="register").inc()
 
@@ -77,7 +74,7 @@ async def handle_mqtt_heartbeat(device_id: str, payload: dict):
         result = await db.execute(select(Device).where(Device.id == device_id))
         device = result.scalar_one_or_none()
         if device:
-            device.last_seen = _utcnow()
+            device.last_seen = utcnow()
             device.uptime_percentage = payload.get("uptime_percentage", 100.0)
             device.signal_strength = payload.get("signal_strength", 0)
             device.status = DeviceStatus.online
@@ -102,6 +99,8 @@ async def handle_mqtt_heartbeat(device_id: str, payload: dict):
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Starting Fleet Commander backend...")
+    validate_settings()
+    os.makedirs(settings.firmware_storage_path, exist_ok=True)
     await init_db()
     loop = asyncio.get_running_loop()
     mqtt_client.set_event_loop(loop)
@@ -126,17 +125,19 @@ app = FastAPI(
 app.middleware("http")(metrics_middleware)
 
 app.include_router(auth.router)
+app.include_router(admin.router)
 app.include_router(devices.router)
 app.include_router(ota.router)
 app.include_router(dashboard.router)
 app.include_router(agents_router)
 
-os.makedirs(settings.firmware_storage_path, exist_ok=True)
-
 
 @app.get("/firmware/{filename}")
 async def serve_firmware(filename: str):
-    file_path = os.path.join(settings.firmware_storage_path, filename)
+    storage = os.path.realpath(settings.firmware_storage_path)
+    file_path = os.path.realpath(os.path.join(storage, filename))
+    if not file_path.startswith(storage + os.sep):
+        raise HTTPException(status_code=403, detail="Access denied")
     if not os.path.exists(file_path):
         raise HTTPException(status_code=404, detail="Firmware file not found")
     return FileResponse(file_path, media_type="application/octet-stream", filename=filename)

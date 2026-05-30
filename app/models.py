@@ -1,12 +1,11 @@
 import uuid
+import enum
 from datetime import datetime, timezone
 
-def _utcnow():
-    return datetime.now(timezone.utc).replace(tzinfo=None)
 from sqlalchemy import Column, String, Integer, Float, DateTime, ForeignKey, Text, Enum as SAEnum
 from sqlalchemy.orm import relationship
 from app.database import Base
-import enum
+from app.utils import utcnow
 
 
 class DeviceStatus(str, enum.Enum):
@@ -40,7 +39,7 @@ class Device(Base):
     firmware_version = Column(String, default="1.0.0")
     status = Column(SAEnum(DeviceStatus), default=DeviceStatus.offline)
     signal_strength = Column(Integer, default=0)
-    last_seen = Column(DateTime, default=_utcnow)
+    last_seen = Column(DateTime, default=utcnow)
     uptime_percentage = Column(Float, default=100.0)
     ip_address = Column(String, default="")
     previous_firmware_version = Column(String, nullable=True)
@@ -70,7 +69,7 @@ class V2gSchedule(Base):
     spot_price_per_kwh = Column(Float, default=0.0)
     deg_cost_per_kwh = Column(Float, default=0.0)
     projected_revenue_dollars = Column(Float, default=0.0)
-    created_at = Column(DateTime, default=_utcnow)
+    created_at = Column(DateTime, default=utcnow)
 
     device = relationship("Device", back_populates="v2g_schedules")
 
@@ -84,7 +83,7 @@ class Firmware(Base):
     sha256_hash = Column(String, nullable=False)
     binary_path = Column(String, nullable=False)
     file_size = Column(Integer, default=0)
-    created_at = Column(DateTime, default=_utcnow)
+    created_at = Column(DateTime, default=utcnow)
 
 
 class OtaDeployment(Base):
@@ -97,8 +96,20 @@ class OtaDeployment(Base):
     status = Column(SAEnum(OtaStatus), default=OtaStatus.pending)
     retry_count = Column(Integer, default=0)
     error_message = Column(Text, nullable=True)
-    created_at = Column(DateTime, default=_utcnow)
-    updated_at = Column(DateTime, default=_utcnow, onupdate=_utcnow)
+    created_at = Column(DateTime, default=utcnow)
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
 
     device = relationship("Device", back_populates="ota_deployments")
     firmware = relationship("Firmware")
+
+
+class UserSession(Base):
+    __tablename__ = "user_sessions"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    email = Column(String, nullable=False)
+    name = Column(String, nullable=False)
+    picture = Column(String, default="")
+    login_time = Column(DateTime, default=utcnow)
+    last_active = Column(DateTime, default=utcnow, onupdate=utcnow)
+    revoked = Column(Integer, default=0)  # 0 = active, 1 = revoked

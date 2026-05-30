@@ -1,5 +1,4 @@
 import logging
-from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
@@ -12,14 +11,11 @@ from app.schemas import (
     HeartbeatRequest, DeviceResponse, DeviceListResponse,
 )
 from app.metrics import active_devices, total_devices
+from app.utils import utcnow
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/devices", tags=["devices"])
-
-
-def _utcnow():
-    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 @router.post("/register", response_model=DeviceRegisterResponse, status_code=201)
@@ -30,13 +26,13 @@ async def register_device(req: DeviceRegisterRequest, db: AsyncSession = Depends
     if existing:
         was_offline = existing.status == DeviceStatus.offline
         existing.status = DeviceStatus.online
-        existing.last_seen = _utcnow()
+        existing.last_seen = utcnow()
         existing.ip_address = req.ip_address or existing.ip_address
         if was_offline:
             active_devices.inc()
         await db.commit()
         await db.refresh(existing)
-        logger.info(f"Device re-registered: {existing.id} ({existing.name})")
+        logger.info("Device re-registered: %s (%s)", existing.id, existing.name)
         return DeviceRegisterResponse(
             device_id=existing.id,
             name=existing.name,
@@ -48,7 +44,7 @@ async def register_device(req: DeviceRegisterRequest, db: AsyncSession = Depends
         name=req.name,
         firmware_version=req.firmware_version,
         status=DeviceStatus.online,
-        last_seen=_utcnow(),
+        last_seen=utcnow(),
         ip_address=req.ip_address,
     )
     db.add(device)
@@ -58,7 +54,7 @@ async def register_device(req: DeviceRegisterRequest, db: AsyncSession = Depends
     total_devices.inc()
     active_devices.inc()
 
-    logger.info(f"Device registered: {device.id} ({device.name})")
+    logger.info("Device registered: %s (%s)", device.id, device.name)
     return DeviceRegisterResponse(
         device_id=device.id,
         name=device.name,
@@ -77,7 +73,7 @@ async def device_heartbeat(
     if not device:
         raise HTTPException(status_code=404, detail="Device not found")
 
-    device.last_seen = _utcnow()
+    device.last_seen = utcnow()
     device.uptime_percentage = req.uptime_percentage
     device.signal_strength = req.signal_strength
     device.status = DeviceStatus.online
@@ -98,7 +94,7 @@ async def list_devices(
     result = await db.execute(query.order_by(Device.last_seen.desc()))
     devices = result.scalars().all()
 
-    now = _utcnow()
+    now = utcnow()
     for device in devices:
         if device.status == DeviceStatus.online:
             elapsed = (now - device.last_seen).total_seconds()

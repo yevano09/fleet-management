@@ -4,7 +4,7 @@ import logging
 from datetime import datetime, timezone
 from typing import List
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Request
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Request, status
 from sqlalchemy import select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -29,7 +29,11 @@ async def upload_firmware(
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
 ):
-    os.makedirs(settings.firmware_storage_path, exist_ok=True)
+    if file.size and file.size > settings.max_upload_size_mb * 1024 * 1024:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=f"File size exceeds {settings.max_upload_size_mb}MB limit",
+        )
 
     existing = await db.execute(select(Firmware).where(Firmware.version == version))
     if existing.scalar_one_or_none():
@@ -39,15 +43,21 @@ async def upload_firmware(
         )
 
     content = await file.read()
+    if len(content) > settings.max_upload_size_mb * 1024 * 1024:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=f"File size exceeds {settings.max_upload_size_mb}MB limit",
+        )
     sha256_hash = hashlib.sha256(content).hexdigest()
-    file_path = os.path.join(settings.firmware_storage_path, file.filename)
+    safe_filename = os.path.basename(file.filename or "firmware.bin")
+    file_path = os.path.join(settings.firmware_storage_path, safe_filename)
 
     with open(file_path, "wb") as f:
         f.write(content)
 
     firmware = Firmware(
         version=version,
-        filename=file.filename,
+        filename=safe_filename,
         sha256_hash=sha256_hash,
         binary_path=file_path,
         file_size=len(content),
@@ -56,7 +66,7 @@ async def upload_firmware(
     await db.commit()
     await db.refresh(firmware)
 
-    logger.info(f"Firmware uploaded: {firmware.version} ({firmware.sha256_hash[:16]}...)")
+    logger.info("Firmware uploaded: %s (%s...)", firmware.version, firmware.sha256_hash[:16])
     return FirmwareUploadResponse(
         id=firmware.id,
         version=firmware.version,
@@ -122,10 +132,10 @@ async def trigger_ota(request: Request, req: OtaTriggerRequest, db: AsyncSession
             deployment.status = OtaStatus.downloading
             ota_deployments_in_progress.inc()
             ota_timeout_watcher.start_watch(deployment.id, mqtt_topic_id)
-            logger.info(f"OTA command published to device {device.id} ({device.name}) via MQTT id {mqtt_topic_id}, deployment {deployment.id}")
+            logger.info("OTA command published to device %s (%s) via MQTT id %s, deployment %s", device.id, device.name, mqtt_topic_id, deployment.id)
         else:
             mqtt_failures.append(device.id)
-            logger.error(f"Failed to publish OTA command to device {device.id} ({device.name})")
+            logger.error("Failed to publish OTA command to device %s (%s)", device.id, device.name)
 
         deployment_ids.append(deployment.id)
 
@@ -133,11 +143,11 @@ async def trigger_ota(request: Request, req: OtaTriggerRequest, db: AsyncSession
 
     if mqtt_failures:
         ota_deployments_total.labels(status="mqtt_failed").inc(len(mqtt_failures))
-        logger.warning(f"OTA partially failed: {len(mqtt_failures)}/{len(devices)} devices got no MQTT message")
+        logger.warning("OTA partially failed: %s/%s devices got no MQTT message", len(mqtt_failures), len(devices))
 
     ota_deployments_total.labels(status="triggered").inc(len(deployment_ids) - len(mqtt_failures))
 
-    logger.info(f"OTA triggered for {len(devices)} devices with firmware {firmware.version}")
+    logger.info("OTA triggered for %s devices with firmware %s", len(devices), firmware.version)
     return {
         "message": f"OTA update triggered for {len(devices)} devices",
         "deployment_ids": deployment_ids,
@@ -199,5 +209,5 @@ async def delete_firmware(firmware_id: str, db: AsyncSession = Depends(get_db)):
     await db.delete(firmware)
     await db.commit()
 
-    logger.info(f"Firmware deleted: {firmware.version} ({firmware.filename})")
+    logger.info("Firmware deleted: %s (%s)", firmware.version, firmware.filename)
     return {"message": f"Firmware {firmware.version} deleted"}

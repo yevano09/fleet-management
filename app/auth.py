@@ -1,13 +1,17 @@
 import logging
+import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import jwt
 from fastapi import Request, HTTPException
-from fastapi.responses import RedirectResponse
 from httpx import AsyncClient
+from sqlalchemy import select
 
 from app.config import settings
+from app.database import async_session_factory
+from app.models import UserSession
+from app.utils import utcnow
 
 logger = logging.getLogger(__name__)
 
@@ -16,19 +20,30 @@ GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
 GOOGLE_USERINFO_URL = "https://www.googleapis.com/oauth2/v2/userinfo"
 
 COOKIE_NAME = "fleet_token"
+ADMIN_COOKIE_NAME = "fleet_admin_token"
 
 
-def _utcnow():
-    return datetime.now(timezone.utc).replace(tzinfo=None)
+# ── JWT helpers ──────────────────────────────────────────────────────────
 
-
-def create_jwt_token(email: str, name: str, picture: str) -> str:
+def create_user_jwt_token(email: str, name: str, picture: str, session_id: str) -> str:
     payload = {
         "email": email,
         "name": name,
         "picture": picture,
-        "iat": _utcnow(),
-        "exp": _utcnow() + timedelta(minutes=settings.jwt_expiration_minutes),
+        "session_id": session_id,
+        "role": "user",
+        "iat": utcnow(),
+        "exp": utcnow() + timedelta(minutes=settings.jwt_expiration_minutes),
+    }
+    return jwt.encode(payload, settings.jwt_secret_key, algorithm=settings.jwt_algorithm)
+
+
+def create_admin_jwt_token(username: str) -> str:
+    payload = {
+        "username": username,
+        "role": "admin",
+        "iat": utcnow(),
+        "exp": utcnow() + timedelta(minutes=settings.jwt_expiration_minutes),
     }
     return jwt.encode(payload, settings.jwt_secret_key, algorithm=settings.jwt_algorithm)
 
@@ -37,12 +52,91 @@ def decode_jwt_token(token: str) -> Optional[dict]:
     try:
         return jwt.decode(token, settings.jwt_secret_key, algorithms=[settings.jwt_algorithm])
     except jwt.ExpiredSignatureError:
-        logger.warning("JWT token expired")
         return None
     except jwt.InvalidTokenError as e:
         logger.warning("Invalid JWT token: %s", e)
         return None
 
+
+# ── Session tracking ─────────────────────────────────────────────────────
+
+async def create_session(email: str, name: str, picture: str) -> str:
+    session_id = str(uuid.uuid4())
+    async with async_session_factory() as db:
+        session = UserSession(
+            id=session_id,
+            email=email,
+            name=name,
+            picture=picture,
+            login_time=utcnow(),
+            last_active=utcnow(),
+            revoked=0,
+        )
+        db.add(session)
+        await db.commit()
+    return session_id
+
+
+async def revoke_session(session_id: str) -> bool:
+    async with async_session_factory() as db:
+        result = await db.execute(select(UserSession).where(UserSession.id == session_id))
+        session = result.scalar_one_or_none()
+        if not session:
+            return False
+        session.revoked = 1
+        await db.commit()
+        return True
+
+
+async def is_session_revoked(session_id: str) -> bool:
+    async with async_session_factory() as db:
+        result = await db.execute(select(UserSession).where(UserSession.id == session_id))
+        session = result.scalar_one_or_none()
+        if not session:
+            return True
+        return session.revoked == 1
+
+
+async def get_active_sessions() -> list[dict]:
+    async with async_session_factory() as db:
+        result = await db.execute(
+            select(UserSession).where(UserSession.revoked == 0).order_by(UserSession.login_time.desc())
+        )
+        sessions = result.scalars().all()
+        return [
+            {
+                "id": s.id,
+                "email": s.email,
+                "name": s.name,
+                "picture": s.picture,
+                "login_time": s.login_time.isoformat() if s.login_time else "",
+                "last_active": s.last_active.isoformat() if s.last_active else "",
+            }
+            for s in sessions
+        ]
+
+
+async def get_all_sessions() -> list[dict]:
+    async with async_session_factory() as db:
+        result = await db.execute(
+            select(UserSession).order_by(UserSession.login_time.desc())
+        )
+        sessions = result.scalars().all()
+        return [
+            {
+                "id": s.id,
+                "email": s.email,
+                "name": s.name,
+                "picture": s.picture,
+                "login_time": s.login_time.isoformat() if s.login_time else "",
+                "last_active": s.last_active.isoformat() if s.last_active else "",
+                "revoked": s.revoked == 1,
+            }
+            for s in sessions
+        ]
+
+
+# ── Google OAuth helpers ─────────────────────────────────────────────────
 
 def get_google_redirect_uri() -> str:
     return settings.google_redirect_uri
@@ -88,6 +182,8 @@ async def get_google_user_info(access_token: str) -> Optional[dict]:
         return resp.json()
 
 
+# ── Cookie helpers ───────────────────────────────────────────────────────
+
 def set_auth_cookie(response, token: str):
     response.set_cookie(
         key=COOKIE_NAME,
@@ -95,7 +191,7 @@ def set_auth_cookie(response, token: str):
         httponly=True,
         samesite="lax",
         max_age=settings.jwt_expiration_minutes * 60,
-        secure=False,
+        secure=settings.secure_cookies,
     )
 
 
@@ -104,24 +200,50 @@ def clear_auth_cookie(response):
         key=COOKIE_NAME,
         httponly=True,
         samesite="lax",
-        secure=False,
+        secure=settings.secure_cookies,
     )
 
 
-def get_current_user(request: Request) -> Optional[dict]:
+def set_admin_cookie(response, token: str):
+    response.set_cookie(
+        key=ADMIN_COOKIE_NAME,
+        value=token,
+        httponly=True,
+        samesite="lax",
+        max_age=settings.jwt_expiration_minutes * 60,
+        secure=settings.secure_cookies,
+    )
+
+
+def clear_admin_cookie(response):
+    response.delete_cookie(
+        key=ADMIN_COOKIE_NAME,
+        httponly=True,
+        samesite="lax",
+        secure=settings.secure_cookies,
+    )
+
+
+# ── Request helpers ──────────────────────────────────────────────────────
+
+async def get_current_user(request: Request) -> Optional[dict]:
     token = request.cookies.get(COOKIE_NAME)
     if not token:
         return None
-    return decode_jwt_token(token)
+    payload = decode_jwt_token(token)
+    if not payload or payload.get("role") != "user":
+        return None
+    session_id = payload.get("session_id")
+    if session_id and await is_session_revoked(session_id):
+        return None
+    return payload
 
 
-async def require_auth(request: Request):
-    user = get_current_user(request)
-    if user is None:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    return user
-
-
-async def optional_auth(request: Request) -> dict:
-    user = get_current_user(request)
-    return user or {}
+def get_current_admin(request: Request) -> Optional[dict]:
+    token = request.cookies.get(ADMIN_COOKIE_NAME)
+    if not token:
+        return None
+    payload = decode_jwt_token(token)
+    if not payload or payload.get("role") != "admin":
+        return None
+    return payload

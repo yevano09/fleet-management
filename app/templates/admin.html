@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Admin Panel - Fleet Commander</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family: system-ui, -apple-system, sans-serif; background:#0f172a; color:#e2e8f0; min-height:100vh; }
+header { background:#1e293b; border-bottom:1px solid #334155; padding:1rem 2rem; display:flex; justify-content:space-between; align-items:center; }
+header h1 { font-size:1.5rem; color:#38bdf8; }
+header .subtitle { color:#94a3b8; font-size:0.875rem; }
+.header-right { display:flex; align-items:center; gap:1rem; }
+.header-right .admin-name { font-size:0.875rem; color:#94a3b8; }
+.btn { padding:0.5rem 1rem; border:none; border-radius:0.375rem; font-size:0.875rem; cursor:pointer; font-weight:600; text-decoration:none; display:inline-block; }
+.btn-outline { background:transparent; border:1px solid #475569; color:#e2e8f0; }
+.btn-outline:hover { background:#1e293b; }
+.btn-danger { background:#dc2626; color:white; }
+.btn-danger:hover { background:#b91c1c; }
+main { padding:2rem; }
+h2 { font-size:1.25rem; margin-bottom:1rem; }
+.stats { display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:1rem; margin-bottom:2rem; }
+.stat-card { background:#1e293b; border:1px solid #334155; border-radius:0.5rem; padding:1.25rem; }
+.stat-card .label { color:#94a3b8; font-size:0.75rem; text-transform:uppercase; letter-spacing:0.05em; }
+.stat-card .value { font-size:2rem; font-weight:700; margin-top:0.25rem; color:#38bdf8; }
+table { width:100%; border-collapse:collapse; background:#1e293b; border-radius:0.5rem; overflow:hidden; border:1px solid #334155; }
+th { text-align:left; padding:0.75rem 1rem; background:#0f172a; color:#94a3b8; font-size:0.75rem; text-transform:uppercase; letter-spacing:0.05em; border-bottom:1px solid #334155; }
+td { padding:0.75rem 1rem; border-bottom:1px solid #1e293b; vertical-align:middle; }
+tr:last-child td { border-bottom:none; }
+.avatar { width:32px; height:32px; border-radius:50%; vertical-align:middle; margin-right:0.5rem; }
+.badge { display:inline-flex; padding:0.25rem 0.625rem; border-radius:9999px; font-size:0.75rem; font-weight:600; }
+.badge-active { background:rgba(74,222,128,0.15); color:#4ade80; }
+.badge-revoked { background:rgba(248,113,113,0.15); color:#f87171; }
+.empty { text-align:center; padding:2rem; color:#64748b; }
+.toast { position:fixed; bottom:2rem; right:2rem; padding:1rem 1.5rem; border-radius:0.5rem; background:#1e293b; border:1px solid #334155; box-shadow:0 4px 12px rgba(0,0,0,0.3); transform:translateY(200%); transition:transform 0.3s ease; z-index:200; }
+.toast.show { transform:translateY(0); }
+.toast.success { border-color:#4ade80; }
+.toast.error { border-color:#f87171; }
+</style>
+</head>
+<body>
+<header>
+<div>
+<h1>Fleet Commander</h1>
+<div class="subtitle">Admin Panel</div>
+</div>
+<div class="header-right">
+<span class="admin-name">Logged in as <strong>{{ admin.username }}</strong></span>
+<a href="/auth/admin/logout" class="btn btn-outline">Logout</a>
+<a href="/" class="btn btn-outline">Dashboard</a>
+</div>
+</header>
+
+<main>
+<section class="stats">
+<div class="stat-card">
+<div class="label">Active Sessions</div>
+<div class="value" id="stat-active">{{ sessions|length }}</div>
+</div>
+<div class="stat-card">
+<div class="label">Online Devices</div>
+<div class="value" id="stat-devices">-</div>
+</div>
+</section>
+
+<h2>Active User Sessions</h2>
+<table id="session-table">
+<thead>
+<tr>
+<th>User</th>
+<th>Email</th>
+<th>Login Time</th>
+<th>Last Active</th>
+<th>Status</th>
+<th>Action</th>
+</tr>
+</thead>
+<tbody id="session-tbody">
+{% if sessions %}
+{% for s in sessions %}
+<tr id="session-{{ s.id }}">
+<td>
+{% if s.picture %}<img src="{{ s.picture }}" alt="" class="avatar">{% endif %}
+<strong>{{ s.name }}</strong>
+</td>
+<td>{{ s.email }}</td>
+<td>{{ s.login_time }}</td>
+<td>{{ s.last_active }}</td>
+<td><span class="badge badge-active">Active</span></td>
+<td><button class="btn btn-danger" style="padding:0.25rem 0.75rem;font-size:0.75rem;" onclick="disconnect('{{ s.id }}','{{ s.name }}')">Disconnect</button></td>
+</tr>
+{% endfor %}
+{% else %}
+<tr><td colspan="6" class="empty">No active user sessions</td></tr>
+{% endif %}
+</tbody>
+</table>
+</main>
+
+<div class="toast" id="toast"></div>
+
+<script>
+function showToast(msg, type) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = 'toast ' + type + ' show';
+  setTimeout(() => t.classList.remove('show'), 4000);
+}
+
+async function disconnect(id, name) {
+  if (!confirm('Disconnect ' + name + '? This will force them to log in again.')) return;
+  try {
+    const res = await fetch('/admin/sessions/' + id + '/revoke', { method: 'POST' });
+    if (res.ok) {
+      const row = document.getElementById('session-' + id);
+      if (row) row.remove();
+      showToast(name + ' disconnected', 'success');
+      const count = document.querySelectorAll('#session-tbody tr').length;
+      document.getElementById('stat-active').textContent = count;
+    } else {
+      const err = await res.json();
+      showToast(err.detail || 'Failed to disconnect', 'error');
+    }
+  } catch {
+    showToast('Network error', 'error');
+  }
+}
+
+async function loadDeviceCount() {
+  try {
+    const res = await fetch('/devices');
+    const data = await res.json();
+    const online = (data.devices || []).filter(d => d.status === 'online').length;
+    document.getElementById('stat-devices').textContent = online;
+  } catch {}
+}
+loadDeviceCount();
+</script>
+</body>
+</html>

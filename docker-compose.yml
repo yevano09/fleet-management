@@ -67,6 +67,8 @@ services:
       - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET:-}
       - GOOGLE_REDIRECT_URI=${GOOGLE_REDIRECT_URI:-http://localhost:8000/auth/callback}
       - JWT_SECRET_KEY=${JWT_SECRET_KEY:-}
+      - ADMIN_USERNAME=${ADMIN_USERNAME:-admin}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-adminadmin}
     volumes:
       - firmware_data:/app/firmware
       - sqlite_data:/app/data

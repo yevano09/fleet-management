@@ -16,7 +16,7 @@ templates = Jinja2Templates(directory=templates_path)
 
 @router.get("/", response_class=HTMLResponse)
 async def dashboard(request: Request):
-    user = get_current_user(request)
+    user = await get_current_user(request)
     if not user:
         return RedirectResponse(url="/auth/login")
     return templates.TemplateResponse(

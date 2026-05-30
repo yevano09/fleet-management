@@ -10,20 +10,14 @@ Usage:
   from app.database import get_db
 """
 
-from __future__ import annotations
-
 import logging
-from datetime import datetime, timezone
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Device, DeviceStatus, Firmware, OtaDeployment, OtaStatus, V2gSchedule
+from app.utils import utcnow
 
 logger = logging.getLogger(__name__)
-
-
-def _utcnow():
-    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 async def async_list_devices(db: AsyncSession, status: str | None = None) -> dict:
@@ -37,7 +31,7 @@ async def async_list_devices(db: AsyncSession, status: str | None = None) -> dic
     result = await db.execute(query.order_by(Device.last_seen.desc()))
     devices = result.scalars().all()
 
-    now = _utcnow()
+    now = utcnow()
     for device in devices:
         if device.status == DeviceStatus.online:
             elapsed = (now - device.last_seen).total_seconds()
@@ -192,7 +186,7 @@ async def async_suggest_device_groups(db: AsyncSession, min_group_size: int = 3)
 async def async_detect_anomalies(db: AsyncSession) -> list[dict]:
     """Async version of detect_anomalies using DB."""
     anomalies = []
-    now = _utcnow()
+    now = utcnow()
 
     devices_data = await async_list_devices(db)
     devices = devices_data.get("devices", [])

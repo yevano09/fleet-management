@@ -14,8 +14,6 @@ Usage:
   from agents.phase1_crew import run_all_agents, run_ota_agent, run_anomaly_agent, run_group_agent
 """
 
-from __future__ import annotations
-
 import logging
 import os
 from typing import Optional
