@@ -558,7 +558,7 @@
 <header>
   <span class="eyebrow"><span class="dot"></span> IoT Fleet Management</span>
   <h1>Fleet Commander <span class="accent">Architecture</span></h1>
-  <p class="sub">Production-grade IoT device management — FastAPI backend, MQTT device communication, Prometheus/Grafana observability, OTA firmware updates with rollback, AI agent recommendations, and multi-channel alerting.</p>
+  <p class="sub">Production-grade IoT device management — FastAPI backend, MQTT device communication, Prometheus/Grafana observability, OTA firmware updates with rollback, AI agent recommendations, multi-channel alerting, and Aegis auto-remediation engine.</p>
 </header>
 
 <div class="controls">
@@ -570,10 +570,10 @@
   <div class="legend" aria-label="Component legend">
     <span class="item"><span class="swatch" style="background:var(--c-user)"></span> User</span>
     <span class="item"><span class="swatch" style="background:var(--c-orch)"></span> Service</span>
-    <span class="item"><span class="swatch" style="background:var(--c-compute)"></span> Device/Compute</span>
-    <span class="item"><span class="swatch" style="background:var(--c-embed)"></span> Metrics</span>
+    <span class="item"><span class="swatch" style="background:var(--c-compute)"></span> Engine</span>
+    <span class="item"><span class="swatch" style="background:var(--c-embed)"></span> Broker</span>
     <span class="item"><span class="swatch" style="background:var(--c-vector)"></span> Datastore</span>
-    <span class="item"><span class="swatch" style="background:var(--c-seed)"></span> Notifications</span>
+    <span class="item"><span class="swatch" style="background:var(--c-seed)"></span> Edge/Alert</span>
   </div>
 
   <button class="theme-toggle" id="btnTheme" title="Toggle light/dark theme (T)" aria-label="Toggle theme">
@@ -596,14 +596,15 @@
   <button class="flowtab" data-flow="flow_dashboard" aria-pressed="false"><span class="num">3</span> Fleet Dashboard</button>
   <button class="flowtab" data-flow="flow_agents" aria-pressed="false"><span class="num">4</span> Agent Recommendations</button>
   <button class="flowtab" data-flow="flow_alerts" aria-pressed="false"><span class="num">5</span> Alert Pipeline</button>
+  <button class="flowtab" data-flow="flow_aegis" aria-pressed="false"><span class="num">6</span> Aegis Auto-Remediation</button>
 </nav>
 
-<p class="scenario-note">Shortcuts: <kbd>Space</kbd> play/pause · <kbd>&larr;</kbd>/<kbd>&rarr;</kbd> step · <kbd>1</kbd>&ndash;<kbd>5</kbd> flow · <kbd>O</kbd> mode · <kbd>T</kbd> theme · <kbd>F</kbd> fullscreen · <kbd>R</kbd> reset layout · Drag nodes to reposition</p>
+<p class="scenario-note">Shortcuts: <kbd>Space</kbd> play/pause &middot; <kbd>&larr;</kbd>/<kbd>&rarr;</kbd> step &middot; <kbd>1</kbd>&ndash;<kbd>6</kbd> flow &middot; <kbd>O</kbd> mode &middot; <kbd>T</kbd> theme &middot; <kbd>F</kbd> fullscreen &middot; <kbd>R</kbd> reset layout &middot; Drag nodes to reposition</p>
 
 <main>
   <section class="canvas" aria-label="Architecture diagram">
     <div class="canvas-head">
-      <span class="canvas-title">Pipeline · <span id="flowName">Device Registration</span></span>
+      <span class="canvas-title">Pipeline &middot; <span id="flowName">Device Registration</span></span>
       <div class="player" role="group" aria-label="Playback controls">
         <button id="btnPrev" title="Previous step (&larr;)" aria-label="Previous step">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
@@ -621,91 +622,102 @@
 
     <div class="stage" id="stage">
       <!-- User / Browser -->
-      <div class="node" data-role="user" data-id="user" style="left: 2%; top: 38%;">
+      <div class="node" data-role="user" data-id="user" style="left: 3%; top: 38%;">
         <div class="icon">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
         </div>
         <div class="label">User (Browser)</div>
-        <div class="tech">Jinja2 · HTMX · auto-refresh</div>
+        <div class="tech">Jinja2 &middot; HTMX &middot; auto-refresh</div>
         <div class="port" data-port-dev="localhost:8000" data-port-prod="fleet.example.com">localhost:8000</div>
-        <span class="step-badge">·</span>
+        <span class="step-badge">&middot;</span>
       </div>
 
       <!-- FastAPI Backend -->
-      <div class="node" data-role="orch" data-id="backend" style="left: 22%; top: 38%;">
+      <div class="node" data-role="orch" data-id="backend" style="left: 24%; top: 35%;">
         <div class="icon">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
         </div>
         <div class="label">FastAPI Backend</div>
-        <div class="tech">Python · SQLAlchemy · async</div>
-        <div class="port">:8000 · REST + MQTT</div>
-        <span class="step-badge">·</span>
+        <div class="tech">Python &middot; SQLAlchemy &middot; async</div>
+        <div class="port">:8000 &middot; REST + MQTT</div>
+        <span class="step-badge">&middot;</span>
+      </div>
+
+      <!-- Aegis Engine -->
+      <div class="node" data-role="compute" data-id="aegis" style="left: 44%; top: 10%;">
+        <div class="icon">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+        </div>
+        <div class="label">Aegis Engine</div>
+        <div class="tech">Python stdlib &middot; auto-remediation</div>
+        <div class="port">scrapes /metrics &middot; every 15s</div>
+        <span class="step-badge">&middot;</span>
       </div>
 
       <!-- Database -->
-      <div class="node" data-role="vector" data-id="db" style="left: 48%; top: 38%;">
+      <div class="node" data-role="vector" data-id="db" style="left: 65%; top: 35%;">
         <div class="icon">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0 0 18 0V5"/><path d="M3 12a9 3 0 0 0 18 0"/></svg>
         </div>
         <div class="label" data-label-dev="SQLite" data-label-prod="PostgreSQL">SQLite</div>
-        <div class="tech" data-tech-dev="aiosqlite · fleet.db" data-tech-prod="psycopg2 · fleet@host">aiosqlite · fleet.db</div>
+        <div class="tech" data-tech-dev="aiosqlite &middot; fleet.db" data-tech-prod="psycopg2 &middot; fleet@host">aiosqlite &middot; fleet.db</div>
         <div class="port" data-port-dev="file-based" data-port-prod=":5432">file-based</div>
-        <span class="step-badge">·</span>
+        <span class="step-badge">&middot;</span>
       </div>
 
       <!-- Mosquitto MQTT Broker -->
-      <div class="node" data-role="orch" data-id="mqtt" style="left: 22%; top: 70%;">
+      <div class="node" data-role="embed" data-id="mqtt" style="left: 24%; top: 65%;">
         <div class="icon">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 11a9 9 0 0 1 9 9"/><path d="M4 4a16 16 0 0 1 16 16"/><circle cx="5" cy="19" r="2"/></svg>
         </div>
         <div class="label">Mosquitto MQTT</div>
-        <div class="tech">eclipse-mosquitto:2 · pub/sub</div>
-        <div class="port">:1883 · iot/fleet/#</div>
-        <span class="step-badge">·</span>
+        <div class="tech">eclipse-mosquitto:2 &middot; pub/sub</div>
+        <div class="port">:1883 &middot; iot/fleet/#</div>
+        <span class="step-badge">&middot;</span>
       </div>
 
       <!-- Device Simulators -->
-      <div class="node" data-role="compute" data-id="simulator" style="left: 74%; top: 70%;">
+      <div class="node" data-role="seed" data-id="simulator" style="left: 3%; top: 65%;">
         <div class="icon">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg>
         </div>
         <div class="label">Device Simulator</div>
-        <div class="tech">5 virtual devices · 20% fail rate</div>
-        <div class="port">MQTT · heartbeat 10s</div>
-        <span class="step-badge">·</span>
+        <div class="tech">5 virtual devices &middot; 20% fail rate</div>
+        <div class="port">MQTT &middot; heartbeat 10s</div>
+        <span class="step-badge">&middot;</span>
       </div>
 
       <!-- Prometheus -->
-      <div class="node" data-role="embed" data-id="prometheus" style="left: 48%; top: 8%;">
+      <div class="node" data-role="vector" data-id="prometheus" style="left: 65%; top: 60%;">
         <div class="icon">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
         </div>
         <div class="label">Prometheus</div>
-        <div class="tech">v2.53.0 · 7d retention</div>
-        <div class="port">:9090 · scrapes /metrics</div>
-        <span class="step-badge">·</span>
+        <div class="tech">v2.53.0 &middot; 7d retention</div>
+        <div class="port">:9090 &middot; scrapes /metrics</div>
+        <span class="step-badge">&middot;</span>
       </div>
 
       <!-- Grafana -->
-      <div class="node" data-role="compute" data-id="grafana" style="left: 74%; top: 8%;">
+      <div class="node" data-role="vector" data-id="grafana" style="left: 82%; top: 60%;">
         <div class="icon">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>
         </div>
         <div class="label">Grafana</div>
-        <div class="tech">11.1.0 · pre-provisioned</div>
-        <div class="port">:3000 · admin/admin</div>
-        <span class="step-badge">·</span>
+        <div class="tech">11.1.0 &middot; pre-provisioned</div>
+        <div class="port">:3000 &middot; admin/admin</div>
+        <span class="step-badge">&middot;</span>
       </div>
 
       <!-- Alert Channels -->
-      <div class="node" data-role="seed" data-id="alerts" style="left: 74%; top: 38%;">
+      <div class="node" data-role="seed" data-id="alerts" style="left: 82%; top: 35%;">
         <div class="icon">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
         </div>
         <div class="label">Alert Channels</div>
-        <div class="tech">Slack · Email · Webhook</div>
+        <div class="tech">Slack &middot; Email &middot; Webhook</div>
         <div class="port">SMTP :587</div>
-        <span class="step-badge">·</span>
+        <span class="step-badge">&middot;</span>
       </div>
 
       <svg class="wires" id="wires" aria-hidden="true">
@@ -758,7 +770,7 @@ const flows = {
     note: "Device auto-registers on first connect, then sends periodic heartbeats",
     steps: [
       {
-        from:"simulator", to:"mqtt", color:"--c-compute",
+        from:"simulator", to:"mqtt", color:"--c-seed",
         title:"Device Connects & Registers",
         route:"PUB iot/fleet/register",
         desc:"Each simulated device connects to Mosquitto and publishes a registration message with its <em>device_id</em>, <em>name</em>, <em>firmware_version</em>, and <em>ip_address</em>.",
@@ -773,7 +785,7 @@ const flows = {
         chips:["auto-register","QOS 1","on connect"]
       },
       {
-        from:"mqtt", to:"backend", color:"--c-orch",
+        from:"mqtt", to:"backend", color:"--c-embed",
         title:"Backend Handles Registration",
         route:"route register",
         desc:"The MqttClient <code>_on_message</code> callback routes registration messages to <code>handle_mqtt_register()</code>. It checks for an existing device by <em>mqtt_client_id</em>, <em>id</em>, or <em>name</em>.",
@@ -795,7 +807,7 @@ else:
         chips:["~15ms","upsert logic"]
       },
       {
-        from:"backend", to:"db", color:"--c-vector",
+        from:"backend", to:"db", color:"--c-orch",
         title:"Persist Device Record",
         route:"INSERT / UPDATE",
         desc:"The device record is committed to the database — newly registered devices get a row inserted; returning devices get their <em>status</em> and <em>last_seen</em> updated.",
@@ -813,12 +825,12 @@ SET status = 'online',
     last_seen = '2026-06-15T10:30:00Z',
     ip_address = '10.0.0.42'
 WHERE mqtt_client_id = 'sim-xxxxxx'`,
-        chipsDev:["SQLite · fleet.db"],
-        chipsProd:["PostgreSQL · fleet DB"],
+        chipsDev:["SQLite &middot; fleet.db"],
+        chipsProd:["PostgreSQL &middot; fleet DB"],
         chips:["~5ms write"]
       },
       {
-        from:"simulator", to:"mqtt", color:"--c-compute",
+        from:"simulator", to:"mqtt", color:"--c-seed",
         title:"Periodic Heartbeat",
         route:"PUB iot/fleet/{id}/heartbeat",
         desc:"Every <em>10 seconds</em> each simulated device publishes a heartbeat with uptime, signal strength, and (for EV devices) battery telemetry: <em>SoC</em>, <em>SoH</em>, <em>temperature</em>, <em>plug_status</em>.",
@@ -835,7 +847,7 @@ WHERE mqtt_client_id = 'sim-xxxxxx'`,
         chips:["every 10s","~10ms","V2G telemetry"]
       },
       {
-        from:"mqtt", to:"backend", color:"--c-orch",
+        from:"mqtt", to:"backend", color:"--c-embed",
         title:"Backend Processes Heartbeat",
         route:"route heartbeat",
         desc:"Heartbeats are routed to <code>handle_mqtt_heartbeat()</code> which updates the device's <em>last_seen</em> to keep it online, tracks uptime/signal, updates battery metrics, and fires Prometheus gauge updates for SoC and V2G discharge status.",
@@ -855,7 +867,7 @@ if plug_status == "discharging":
         chips:["~10ms update","Prometheus metrics"]
       },
       {
-        from:"backend", to:"db", color:"--c-vector",
+        from:"backend", to:"db", color:"--c-orch",
         title:"Update Device State",
         route:"UPDATE",
         desc:"The heartbeat data is committed to the database, keeping the device record fresh. If a device hasn't sent a heartbeat in 60+ seconds, the list view shows it as <em>offline</em> (transient, not persisted).",
@@ -875,7 +887,7 @@ WHERE id = 'uuid-xxxx'`,
   /* ───── Flow 2: OTA Firmware Update ───── */
   flow_ota: {
     name: "OTA Firmware Update",
-    note: "Upload → trigger → device lifecycle → success or hash_mismatch → rollback",
+    note: "Upload &rarr; trigger &rarr; device lifecycle &rarr; success or hash_mismatch &rarr; rollback",
     steps: [
       {
         from:"user", to:"backend", color:"--c-user",
@@ -889,7 +901,7 @@ Content-Type: multipart/form-data
 version: "2.0.0"
 file: firmware.bin (4.2 MB)
 
-← Response →
+&larr; Response &rarr;
 {
   "id": "fw-uuid",
   "version": "2.0.0",
@@ -900,7 +912,7 @@ file: firmware.bin (4.2 MB)
         chips:["SHA256 hashing","< 100MB limit"]
       },
       {
-        from:"backend", to:"db", color:"--c-vector",
+        from:"backend", to:"db", color:"--c-orch",
         title:"Persist Firmware Record",
         route:"INSERT firmware",
         desc:"The firmware metadata is saved to the database with the computed SHA256 hash and file path. Duplicate version numbers are rejected (HTTP 409).",
@@ -924,7 +936,7 @@ VALUES ('fw-uuid', '2.0.0', 'firmware.bin',
   "all_devices": true
 }
 
-← Response →
+&larr; Response &rarr;
 {
   "message": "OTA triggered for 5 devices",
   "deployment_ids": ["dep-1", "dep-2", ...],
@@ -945,18 +957,18 @@ VALUES ('fw-uuid', '2.0.0', 'firmware.bin',
   "deployment_id": "dep-1",
   "timestamp": "2026-06-15T10:31:00Z"
 }`,
-        chips:["timeout 120s","retry ×3"]
+        chips:["timeout 120s","retry &times;3"]
       },
       {
-        from:"mqtt", to:"simulator", color:"--c-compute",
+        from:"mqtt", to:"simulator", color:"--c-embed",
         title:"Device Receives & Applies Update",
         route:"SUB iot/fleet/{id}/command/ota",
         desc:"The simulated device subscribes to its command topic and receives the OTA payload. It simulates the full lifecycle: <em>downloading</em> (1-3s), <em>applying</em> (1-2s), <em>verifying</em> (0.5-1.5s), then publishes status updates.",
         payload:
 `// Device OTA lifecycle
-[downloading]  1-3s → PUB status
-[applying]     1-2s → PUB status
-[verifying]   0.5-1.5s → PUB status
+[downloading]  1-3s &rarr; PUB status
+[applying]     1-2s &rarr; PUB status
+[verifying]   0.5-1.5s &rarr; PUB status
 
 if random() < 0.2 (FAILURE_RATE):
     // Hash mismatch!
@@ -970,7 +982,7 @@ else:
         chips:["20% fail rate","auto rollback"]
       },
       {
-        from:"simulator", to:"mqtt", color:"--c-compute",
+        from:"simulator", to:"mqtt", color:"--c-seed",
         title:"Device Reports Status",
         route:"PUB iot/fleet/{id}/status/ota",
         desc:"The device publishes its OTA status back through MQTT. On <em>hash_mismatch</em>, the device auto-reverts to the previous firmware and reports <em>rolled_back</em>.",
@@ -990,20 +1002,20 @@ else:
   "error": "SHA256 hash mismatch",
   "device_id": "uuid-xxxx"
 }`,
-        chips:["state machine","hash_mismatch→rollback"]
+        chips:["state machine","hash_mismatch&rarr;rollback"]
       },
       {
-        from:"mqtt", to:"backend", color:"--c-orch",
+        from:"mqtt", to:"backend", color:"--c-embed",
         title:"Backend Processes Status",
         route:"route OTA status",
-        desc:"The <code>OtaStateMachine.handle_ota_status()</code> validates the state transition. On hash_mismatch, it auto-transitions through <em>hash_mismatch → rollback → rolled_back</em> and updates the device's firmware version to the previous one.",
+        desc:"The <code>OtaStateMachine.handle_ota_status()</code> validates the state transition. On hash_mismatch, it auto-transitions through <em>hash_mismatch &rarr; rollback &rarr; rolled_back</em> and updates the device's firmware version to the previous one.",
         payload:
 `# OTA State Machine
-pending → downloading → applying
-    → verifying → success
-    → verifying → hash_mismatch
-    → rollback → rolled_back
-    → failed (timeout / max retries)
+pending &rarr; downloading &rarr; applying
+    &rarr; verifying &rarr; success
+    &rarr; verifying &rarr; hash_mismatch
+    &rarr; rollback &rarr; rolled_back
+    &rarr; failed (timeout / max retries)
 
 if status == "hash_mismatch":
     update_deployment_status(id, hash_mismatch)
@@ -1013,7 +1025,7 @@ if status == "hash_mismatch":
         chips:["state machine","auto rollback"]
       },
       {
-        from:"backend", to:"db", color:"--c-vector",
+        from:"backend", to:"db", color:"--c-orch",
         title:"Update Deployment & Device",
         route:"UPDATE deployments",
         desc:"The OtaDeployment record and Device firmware version are updated in the database. Success updates the device's firmware; rollback restores the previous version.",
@@ -1053,7 +1065,7 @@ WHERE id = 'uuid-xxxx'`,
         desc:"The admin user navigates to the fleet dashboard. The backend renders a Jinja2 template with auth check — users must pass Google OAuth or admin basic auth.",
         payload:
 `GET /
-← Response: HTML (Jinja2 template)
+&larr; Response: HTML (Jinja2 template)
 
 // Auth flow
 if get_current_user(request) or admin:
@@ -1063,7 +1075,7 @@ else:
         chips:["auth gate","Jinja2 SSR"]
       },
       {
-        from:"backend", to:"db", color:"--c-vector",
+        from:"backend", to:"db", color:"--c-orch",
         title:"Query Device List",
         route:"SELECT devices",
         desc:"The dashboard backend queries all devices to show the device table, including status, firmware, signal strength, and battery data. Devices not seen in 60+ seconds are shown as <em>offline</em>.",
@@ -1079,14 +1091,14 @@ for device in devices:
         elapsed = now - device.last_seen
         if elapsed > 60:
             device.status = "offline"
-            // Not persisted — heartbeat keeps it online`,
+            // Not persisted &mdash; heartbeat keeps it online`,
         chips:["60s threshold","transient"]
       },
       {
         from:"backend", to:"user", color:"--c-user",
         title:"Render Dashboard HTML",
-        route:"200 OK · HTML",
-        desc:"The dashboard renders with HTMX-powered auto-refresh: the device table refreshes every <em>5 seconds</em>, agent panels every <em>30 seconds</em>, and alert badge every <em>10 seconds</em>.",
+        route:"200 OK &middot; HTML",
+        desc:"The dashboard renders with HTMX-powered auto-refresh: the device table refreshes every <em>5 seconds</em>, agent panels every <em>30 seconds</em>, alert badge every <em>10 seconds</em>, and Aegis remediation panel every <em>10 seconds</em>.",
         payload:
 `<!-- Dashboard auto-refresh -->
 <div hx-get="/devices" hx-trigger="every 5s">
@@ -1097,17 +1109,22 @@ for device in devices:
   Alert Badge
 </div>
 
+<div hx-get="/aegis/history?limit=20"
+     hx-trigger="every 10s">
+  Aegis Panel
+</div>
+
 <div hx-get="/agents/recommendations"
      hx-trigger="every 30s">
   Agent Panels
 </div>`,
-        chips:["5s table","10s alerts","30s agents"]
+        chips:["5s table","10s alerts","10s aegis","30s agents"]
       },
       {
-        from:"backend", to:"prometheus", color:"--c-embed",
+        from:"backend", to:"prometheus", color:"--c-orch",
         title:"Prometheus Scrapes Metrics",
         route:"GET /metrics",
-        desc:"Prometheus scrapes the backend's <code>/metrics</code> endpoint every 15s, collecting fleet size, OTA deployment counts, API latency histograms, MQTT message counts, V2G revenue projections, and alert totals.",
+        desc:"Prometheus scrapes the backend's <code>/metrics</code> endpoint every 15s, collecting fleet size, OTA deployment counts, API latency histograms, MQTT message counts, V2G revenue projections, alert totals, and Aegis auto-remediation metrics.",
         payload:
 `# Prometheus scrape config
 scrape_configs:
@@ -1123,14 +1140,20 @@ fleet_ota_deployments_total{status}
 fleet_api_request_latency_seconds
 fleet_mqtt_messages_received_total{topic}
 fleet_alerts_total{severity,type}
-fleet_v2g_projected_revenue_dollars`,
-        chips:["15s scrape","7d retention"]
+fleet_v2g_projected_revenue_dollars
+
+# Aegis metrics (added):
+aegis_signals_total{severity,metric}
+aegis_decisions_total{rule,decision}
+aegis_remediations_total{action,status}
+aegis_active_remediations`,
+        chips:["15s scrape","7d retention","+Aegis metrics"]
       },
       {
-        from:"prometheus", to:"grafana", color:"--c-compute",
+        from:"prometheus", to:"grafana", color:"--c-vector",
         title:"Grafana Visualizes Metrics",
         route:"PromQL queries",
-        desc:"Grafana queries Prometheus to render pre-provisioned dashboards: active device timeline, OTA deployment funnel, V2G revenue charts, and alert severity breakdowns.",
+        desc:"Grafana queries Prometheus to render pre-provisioned dashboards: active device timeline, OTA deployment funnel, V2G revenue charts, alert severity breakdowns, and Aegis auto-remediation impact panels.",
         payload:
 `// Grafana dashboard queries
 // Fleet size over time
@@ -1141,9 +1164,14 @@ sum(fleet_ota_deployments_total{status="success"})
 /
 sum(fleet_ota_deployments_total)
 
-// V2G projected revenue
-fleet_v2g_projected_revenue_dollars`,
-        chips:["pre-provisioned","PromQL"]
+// Aegis remediation success rate
+sum(aegis_remediations_total{status="success"})
+/
+sum(aegis_remediations_total)
+
+// MTTR (mean time to remediate)
+avg(aegis_remediation_duration_seconds)`,
+        chips:["pre-provisioned","PromQL","Aegis panels"]
       }
     ]
   },
@@ -1157,24 +1185,25 @@ fleet_v2g_projected_revenue_dollars`,
         from:"user", to:"backend", color:"--c-user",
         title:"Request Fleet Analysis",
         route:"GET /agents/recommendations",
-        desc:"The user triggers all three Phase 1 agents: <em>OTA Campaign Strategist</em>, <em>Fleet Health Monitor</em>, and <em>Device Group Manager</em>. Each runs concurrently with individual error handling.",
+        desc:"The user triggers all Phase 1 agents: <em>OTA Campaign Strategist</em>, <em>Fleet Health Monitor</em>, <em>Device Group Manager</em>, and <em>Device Onboarding Agent</em>. Each runs concurrently with individual error handling.",
         payload:
 `GET /agents/recommendations?notify=true
 
-// Runs all 3 agents
+// Runs all 4 agents concurrently
 results = []
 results.append(run_ota_agent(firmware))
 results.append(run_anomaly_agent(notify))
 results.append(run_group_agent(min_size))
+results.append(run_onboarding_agent()) // Device Onboarding
 
 return {"agents": results}`,
-        chips:["×3 agents","parallel","~500ms"]
+        chips:["&times;4 agents","parallel","~500ms"]
       },
       {
-        from:"backend", to:"db", color:"--c-vector",
+        from:"backend", to:"db", color:"--c-orch",
         title:"Query Fleet State",
         route:"SELECT devices, firmware, deployments",
-        desc:"Each agent queries the database to gather fleet data: OTA agent checks device versions and firmware; anomaly agent checks signal strengths, OTA statuses, and heartbeat recency; group agent reads all device metadata.",
+        desc:"Each agent queries the database to gather fleet data: OTA agent checks device versions and firmware; anomaly agent checks signals/OTAs/heartbeats; group agent reads all device metadata; onboarding agent checks for device ID conflicts and recommends firmware.",
         payload:
 `-- OTA agent: what's available
 SELECT * FROM firmware ORDER BY created_at DESC
@@ -1188,24 +1217,21 @@ FROM devices OFFSET 0
 SELECT firmware_version, COUNT(*) as cnt
 FROM devices GROUP BY firmware_version
 
-SELECT
-    CASE WHEN signal_strength >= -60 THEN 'good'
-         WHEN signal_strength >= -80 THEN 'moderate'
-         ELSE 'poor'
-    END as band, COUNT(*) as cnt
-FROM devices GROUP BY band`,
-        chips:["×3 queries","heuristic logic"]
+-- Onboarding agent: check conflicts
+SELECT id, name, mqtt_client_id
+FROM devices WHERE status = 'online'`,
+        chips:["&times;4 queries","heuristic logic"]
       },
       {
         from:"db", to:"backend", color:"--c-vector",
         title:"Agents Process Results",
         route:"heuristic analysis",
-        desc:"Each agent runs its heuristic logic: OTA designs a canary rollout plan, anomaly detects weak signals/stuck OTAs/failure spikes, group manager clusters by firmware and signal strength.",
+        desc:"Each agent runs its heuristic logic: OTA designs a canary rollout plan, anomaly detects weak signals/stuck OTAs/failure spikes, group manager clusters by firmware/signal, onboarding checks conflict and recommends registration.",
         payload:
 `// OTA Campaign Agent
 {
   "agent": "OTA Campaign Strategist",
-  "recommendation": "Canary 1 device → 30% → 60% → 100%",
+  "recommendation": "Canary 1 device &rarr; 30% &rarr; 60% &rarr; 100%",
   "canary_group": ["Device-003"],
   "rollout_phases": [
     {"phase": 1, "pct": 30, "gate": "24h no failures"},
@@ -1213,20 +1239,28 @@ FROM devices GROUP BY band`,
     {"phase": 3, "pct": 100, "gate": "monitor 48h"}
   ],
   "risk_assessment": "low"
+}
+
+// Device Onboarding Agent
+{
+  "agent": "Device Onboarding",
+  "conflicts": null,
+  "recommended_firmware": "2.0.0",
+  "onboarding_possible": true
 }`,
-        chips:["canary strategy","heuristic","no LLM needed"]
+        chips:["canary strategy","onboarding check","heuristic"]
       },
       {
         from:"backend", to:"user", color:"--c-user",
         title:"Return Structured JSON",
-        route:"200 OK · JSON",
-        desc:"The backend returns a JSON response with all three agent results. The dashboard renders them in agent panels that auto-refresh every 30 seconds. Human input is required for OTA and group recommendations.",
+        route:"200 OK &middot; JSON",
+        desc:"The backend returns a JSON response with all four agent results. The dashboard renders them in agent panels that auto-refresh every 30 seconds. Human input is required for OTA, group, and onboarding recommendations.",
         payload:
 `{
   "agents": [
     {
       "agent": "OTA Campaign Strategist",
-      "summary": "Canary 1 device → 30% → 60% → 100%",
+      "summary": "Canary 1 device &rarr; 30% &rarr; 60% &rarr; 100%",
       "human_input_required": true
     },
     {
@@ -1238,6 +1272,11 @@ FROM devices GROUP BY band`,
       "agent": "Device Group Manager",
       "summary": "3 groups by firmware version",
       "groups": [...]
+    },
+    {
+      "agent": "Device Onboarding",
+      "summary": "No conflicts. Ready to register Sensor-042.",
+      "human_input_required": true
     }
   ]
 }`,
@@ -1248,28 +1287,34 @@ FROM devices GROUP BY band`,
 
   /* ───── Flow 5: Alert Pipeline ───── */
   flow_alerts: {
-    name: "Alert Pipeline (GET /agents/fleet-health)",
-    note: "Anomaly detection → AlertEngine dedup/cooldown → multi-channel notification",
+    name: "Alert Pipeline + Aegis Integration (GET /agents/fleet-health)",
+    note: "Anomaly detection &rarr; AlertEngine dedup/cooldown &rarr; Aegis auto-remediation &rarr; multi-channel notification",
     steps: [
       {
         from:"user", to:"backend", color:"--c-user",
         title:"Trigger Fleet Health Check",
         route:"GET /agents/fleet-health",
-        desc:"The fleet health endpoint runs anomaly detection and always processes results through the AlertEngine. Unlike the read-only <code>/anomaly-check</code>, this endpoint fires notifications.",
+        desc:"The fleet health endpoint runs anomaly detection and always processes results through the AlertEngine. High-severity anomalies are also forwarded to the Aegis engine for potential auto-remediation.",
         payload:
 `GET /agents/fleet-health
 
-// Always fires alerts
 anomalies = detect_anomalies()
-engine.process_anomalies(anomalies)
-return {"anomalies": anomalies, "processed": processed}`,
-        chips:["always notifies","alert vs check"]
+processed = engine.process_anomalies(anomalies)
+
+// Critical anomalies &rarr; Aegis auto-remediation
+for a in anomalies where severity == "critical":
+    aegis_engine.ingest_signal(a)
+
+return {"anomalies": anomalies,
+        "processed": processed,
+        "aegis_triggered": len(critical) > 0}`,
+        chips:["always notifies","Aegis integration"]
       },
       {
-        from:"backend", to:"db", color:"--c-vector",
+        from:"backend", to:"db", color:"--c-orch",
         title:"Detect Anomalies from Fleet Data",
-        route:"SELECT · heuristic checks",
-        desc:"The anomaly detector runs multiple heuristic checks: <em>device_offline</em> (no heartbeat > 120s), <em>weak_signal</em> (< -80 dBm), <em>stuck_ota</em> (pending > 5min), <em>v2g_revenue_drop</em> (negative revenue).",
+        route:"SELECT &middot; heuristic checks",
+        desc:"The anomaly detector runs multiple heuristic checks: <em>device_offline</em> (no heartbeat > 120s), <em>weak_signal</em> (< -80 dBm), <em>stuck_ota</em> (pending > 5min), <em>v2g_revenue_drop</em> (negative revenue), and <em>aegis_escalation</em> (auto-remediation exhausted).",
         payload:
 `// Anomaly detection checks
 anomalies = []
@@ -1291,20 +1336,46 @@ for d in devices:
             ...
         })
 
-// OTA failure spike
-    if failure_rate > 30%:
+// Aegis escalation check
+    if aegis_escalation_active():
         anomalies.push({
-            type: "ota_failure_spike",
+            type: "aegis_escalation",
             severity: "critical",
-            ...
+            message: "Auto-remediation exhausted"
         })`,
-        chips:["×4 anomaly types","Prometheus counters"]
+        chips:["&times;5 anomaly types","Prometheus counters","Aegis-aware"]
       },
       {
-        from:"backend", to:"db", color:"--c-vector",
+        from:"backend", to:"aegis", color:"--c-orch",
+        title:"Route Critical Anomalies to Aegis",
+        route:"aegis_engine.ingest_signal()",
+        desc:"Critical anomalies are forwarded to the Aegis auto-remediation engine. Aegis evaluates its 8 rule chain and may execute actions like <em>throttle_ota</em>, <em>device_restart</em>, or <em>human_escalation</em> before the AlertEngine sends notifications.",
+        payload:
+`// Forward to Aegis Engine
+for anomaly in critical_anomalies:
+    signal = RemediationSignal(
+        metric_name=anomaly.type,
+        value=anomaly.severity,
+        device_ids=anomaly.affected_device_ids
+    )
+    aegis_engine.ingest(signal)
+    // Evaluates rules R001-R008
+    // May auto-remediate before alert fires
+
+// Aegis response
+{
+  "matched_rule": "throttle_ota",
+  "action": "Paused OTA deployments",
+  "status": "success",
+  "duration_ms": 1200
+}`,
+        chips:["critical only","8 rules evaluated","low latency"]
+      },
+      {
+        from:"backend", to:"db", color:"--c-orch",
         title:"Persist Alert via AlertEngine",
         route:"INSERT alerts",
-        desc:"The AlertEngine processes each anomaly through dedup (by <em>type + device_id</em>), cooldown (300-3600s per type), and persistence. New alerts are created; existing ones are incremented and potentially <em>escalated</em> from warning to critical.",
+        desc:"The AlertEngine processes each anomaly through dedup (by <em>type + device_id</em>), cooldown (300-3600s per type), and persistence. New alerts are created; existing ones are incremented and potentially <em>escalated</em> from warning to critical after 3 occurrences.",
         payload:
 `INSERT INTO alerts (id, type, severity, message,
     device_ids, status, dedup_key, count)
@@ -1317,20 +1388,20 @@ VALUES ('alert-uuid', 'device_offline',
 if alert.count >= 3 and severity == "warning":
     severity = "critical"
     message = "[ESCALATED] " + message`,
-        chips:["dedup key","cooldown 600s","escalation ×3"]
+        chips:["dedup key","cooldown 600s","escalation &times;3"]
       },
       {
-        from:"backend", to:"alerts", color:"--c-seed",
+        from:"backend", to:"alerts", color:"--c-orch",
         title:"Send Notifications",
-        route:"Slack · Email · Webhook",
-        desc:"The AlertEngine fans out to all configured channels: Slack (rich attachment with severity color), Email (SMTP with plain-text body), and generic Webhook (JSON POST). Each channel is optional — configured via environment variables.",
+        route:"Slack &middot; Email &middot; Webhook",
+        desc:"The AlertEngine fans out to all configured channels: Slack (rich attachment with severity color), Email (SMTP with plain-text body), and generic Webhook (JSON POST). Each channel is optional — configured via environment variables. Aegis outcomes can also trigger notifications.",
         payload:
 `// Slack channel
 POST https://hooks.slack.com/services/...
 {
   "attachments": [{
     "color": "#f59f00",
-    "title": "FLEET COMMANDER — WARNING",
+    "title": "FLEET COMMANDER &mdash; WARNING",
     "text": "Device-003 offline for 130s",
     "fields": [
       {"title": "Type", "value": "device_offline"},
@@ -1354,8 +1425,8 @@ POST https://hooks.example.com/alerts
       {
         from:"backend", to:"user", color:"--c-user",
         title:"Return Processed Alert Status",
-        route:"200 OK · JSON",
-        desc:"The endpoint returns the processed alerts with IDs, statuses, and dedup info. The dashboard's alert panel (10s auto-refresh) shows active alerts with acknowledge/resolve buttons.",
+        route:"200 OK &middot; JSON",
+        desc:"The endpoint returns the processed alerts with IDs, statuses, dedup info, and Aegis auto-remediation results. The dashboard's alert panel (10s auto-refresh) shows active alerts with acknowledge/resolve buttons.",
         payload:
 `{
   "anomalies": [
@@ -1371,9 +1442,263 @@ POST https://hooks.example.com/alerts
       "action": "created"
     }
   ],
+  "aegis": {
+    "triggered": true,
+    "remediation_id": "rem-uuid",
+    "action": "throttle_ota",
+    "status": "success"
+  },
   "notifications_sent": true
 }`,
-        chips:["dashboard 10s refresh","ack/resolve UI"]
+        chips:["dashboard 10s refresh","ack/resolve UI","Aegis-aware"]
+      }
+    ]
+  },
+
+  /* ───── Flow 6: Aegis Auto-Remediation ───── */
+  flow_aegis: {
+    name: "Aegis Auto-Remediation Engine",
+    note: "Scrape &rarr; classify &rarr; decide &rarr; act &rarr; record &rarr; observe — closing the loop between alert fire and fleet healing",
+    steps: [
+      {
+        from:"aegis", to:"backend", color:"--c-compute",
+        title:"Scrape Fleet Metrics",
+        route:"GET /metrics/ &middot; AegisScrapeLoop",
+        desc:"Every <em>15 seconds</em> the Aegis engine polls the backend's <code>/metrics/</code> endpoint. It parses all <code>fleet_*</code> Prometheus metrics and normalizes readings into <code>RemediationSignal</code> objects with severity classification.",
+        payload:
+`# Aegis Scrape Loop (every 15s)
+AegisEngine.scrape_cycle()
+  &rarr; GET http://backend:8000/metrics/
+
+# Parsed signals (thresholds from config)
+signal_1 = RemediationSignal(
+    metric_name="fleet_ota_in_progress",
+    value=4,
+    threshold=3.0,
+    severity="WARNING",
+    window_seconds=15,
+    metadata={"gauge": True}
+)
+signal_2 = RemediationSignal(
+    metric_name="fleet_api_request_latency_seconds",
+    value=0.65,
+    threshold=0.5,
+    severity="WARNING",
+    window_seconds=60
+)
+signal_3 = RemediationSignal(
+    metric_name="fleet_active_devices",
+    value=5,
+    threshold=2.0,
+    severity="INFO"
+)`,
+        chips:["every 15s","configurable interval","&times;3 signal types"]
+      },
+      {
+        from:"aegis", to:"backend", color:"--c-compute",
+        title:"Classify Signals & Match Rules",
+        route:"normalize &rarr; classify &rarr; route",
+        desc:"Normalized signals are classified by severity (INFO / WARNING / CRITICAL) and matched against the rule registry. Each signal is evaluated against 8 priority-ordered rules. The first matched rule triggers action execution.",
+        payload:
+`# Signal Classification
+signal = RemediationSignal(
+    metric_name="fleet_ota_in_progress",
+    value=4,
+    severity="WARNING"
+)
+
+# Rule matching (priority order)
+Matched rules:
+  R001: throttle_ota     &rarr; condition PASS
+    ota_in_progress(4) > 3 AND latency(0.65s) > 0.5s
+  R005: rollback_ota_batch &rarr; condition FAIL
+    ota_failure_rate(12%) < 30% threshold
+
+&rarr; WINNER: R001 (throttle_ota)
+&rarr; Cooldown check: 300s elapsed since last fire
+&rarr; Max retries: 1 of 3 remaining
+
+aegis_signals_total{severity="warning",metric="fleet_ota_in_progress"}++`,
+        chips:["8 rules","priority chain","cooldown 300s"]
+      },
+      {
+        from:"aegis", to:"aegis", color:"--c-compute",
+        title:"Decision Engine — Rule Evaluation",
+        route:"priority-ordered &rarr; first match wins",
+        desc:"The decision engine evaluates rules in priority order: R001 (throttle_ota) through R008 (cleanup_firmware_artifacts). Each rule has a <em>condition</em> function, <em>cooldown</em>, <em>max_retries</em>, and an <em>enabled</em> flag. First match wins; if all fail, routes to human_escalation.",
+        payload:
+`// Decision Engine — Rule Chain
+Priority: R001 > R002 > R003 > R004 > R005 > R006 > R007 > R008
+
+R001 throttle_ota:
+  cond: ota_in_progress > 3 AND latency_p99 > 500ms
+  &rarr; MATCH &check;  (value=4, p99=650ms)
+  cooldown: 300s &check; (285s elapsed)
+  max_retries: 3 &check; (used 1)
+
+R002 mqtt_qos_downgrade:
+  cond: mqtt_msgs/sec > 1000
+  &rarr; SKIP (value=142)
+
+...
+
+R006 human_escalation:
+  cond: all auto-remediation exhausted
+  &rarr; SKIP (R001 matched)
+
+Decision: "matched" on R001
+Duration: 12ms
+aegis_decisions_total{rule="throttle_ota",decision="matched"}++`,
+        chips:["8 rules","first match wins","12ms eval"]
+      },
+      {
+        from:"aegis", to:"aegis", color:"--c-compute",
+        title:"Execute Remediation Action",
+        route:"timeout-guarded &rarr; retry &rarr; rollback",
+        desc:"The matched action executes with a 30-second timeout guard, exponential backoff retry (max 3), and rollback on failure. Each action implements <code>execute()</code>, <code>rollback()</code>, and <code>status()</code>. Failed actions drain to the dead-letter queue.",
+        payload:
+`# Action: R001 throttle_ota
+action = ThrottleOtaAction()
+action.execute(signal)
+  &rarr; set_ota_throttle(True, cooldown=300s)
+  &rarr; pause_all_pending_deployments()
+  &rarr; publish_event("ota_paused")
+  &rarr; schedule_resume(in=300s)
+
+# Result
+RemediationResult(
+    action="throttle_ota",
+    status="success",
+    duration_ms=1200,
+    output={
+        "throttled": True,
+        "paused_deployments": 3,
+        "resume_in_seconds": 300
+    },
+    error_message=None
+)
+
+# Rollback path (on failure)
+if result.status == "failed":
+    action.rollback(signal)
+    &rarr; Dead-letter queue (DLQ) &uarr;`,
+        chips:["30s timeout","&times;3 retry","DLQ on exhausted"]
+      },
+      {
+        from:"aegis", to:"mqtt", color:"--c-compute",
+        title:"Publish Remediation Commands via MQTT",
+        route:"PUB iot/fleet/system/command/remediate",
+        desc:"Aegis publishes remediation commands to affected devices and system topics via MQTT. Actions like <em>throttle_ota</em>, <em>device_soft_restart</em>, and <em>mqtt_qos_downgrade</em> send structured commands that devices execute in real-time.",
+        payload:
+`// System-wide command
+PUB iot/fleet/system/command/remediate QOS 1
+{
+  "action": "throttle_ota",
+  "signal_id": "sig_abc123",
+  "trigger": "ota_in_progress(4) > 3",
+  "params": {
+    "throttle": true,
+    "cooldown_seconds": 300,
+    "resume_at": "2026-06-15T10:37:00Z"
+  },
+  "source": "aegis:v1.0",
+  "timestamp": "2026-06-15T10:32:00Z"
+}
+
+// Per-device command (device_soft_restart)
+PUB iot/fleet/device-xxx/command/restart QOS 1
+{
+  "reason": "remediation: weak_signal (signal < -90)",
+  "grace_period_seconds": 5,
+  "source": "aegis:v1.0"
+}`,
+        chips:["QOS 1","system + per-device","real-time"]
+      },
+      {
+        from:"aegis", to:"backend", color:"--c-compute",
+        title:"Record Result to Remediation Model",
+        route:"INSERT remediations &middot; history",
+        desc:"Every remediation action produces an immutable <code>Remediation</code> record with the full input signal snapshot, output result, duration, and error trace. Records are never deleted — only soft-expired via 90-day TTL. Supports full-text search and JSON export.",
+        payload:
+`INSERT INTO remediations (
+    id, signal_id, metric_name,
+    value, threshold, severity,
+    rule_name, action_name, status,
+    input_snapshot, output_snapshot,
+    started_at, completed_at,
+    duration_ms, retry_count,
+    device_ids
+) VALUES (
+    'rem-uuid', 'sig_abc123',
+    'fleet_ota_in_progress',
+    4, 3.0, 'warning',
+    'throttle_ota', 'throttle_ota',
+    'success',
+    '{"metric":"fleet_ota_in_progress",...}',
+    '{"throttled":true,"paused":3}',
+    '2026-06-15T10:32:00Z',
+    '2026-06-15T10:32:01.2Z',
+    1200, 1,
+    '["device-001","device-002","device-003"]'
+)
+
+// Queryable via:
+// GET /aegis/history?status=success&action=throttle_ota`,
+        chips:["immutable audit trail","90d TTL","full-text search"]
+      },
+      {
+        from:"aegis", to:"prometheus", color:"--c-compute",
+        title:"Emit Aegis Prometheus Metrics",
+        route:"aegis_* counters &middot; gauges",
+        desc:"Aegis exposes 7 Prometheus metrics for full observability of the auto-remediation system itself: signal ingestion rate, decision distribution, action outcomes, execution duration, DLQ depth, and active remediation gauge.",
+        payload:
+`# Aegis Prometheus Metrics (post-action)
+aegis_scrape_duration_seconds{...} 0.15
+aegis_signals_total{severity="warning",
+    metric="fleet_ota_in_progress"} +1
+aegis_decisions_total{rule="throttle_ota",
+    decision="matched"} +1
+aegis_remediations_total{action="throttle_ota",
+    status="success"} +1
+aegis_remediation_duration_seconds{
+    action="throttle_ota"} 1.2
+aegis_active_remediations 0
+aegis_dlq_depth 0
+
+// Grafana dashboards consume these for:
+// &bull; Signal rate (sparkline, last 15min)
+// &bull; Decision distribution (pie)
+// &bull; Action success rate (bar)
+// &bull; MTTR trend (line)`,
+        chips:["7 metrics","ingestion &rarr; outcome","Grafana panels"]
+      },
+      {
+        from:"aegis", to:"user", color:"--c-compute",
+        title:"Dashboard Aegis Panel",
+        route:"three-column &middot; auto-refresh 10s",
+        desc:"The fleet dashboard includes a dedicated Aegis panel with three columns: <em>Incoming Signals</em> (last 10 with severity badges), <em>Active Remediations</em> (in-progress with pulse animation + cancel), and <em>History Timeline</em> (last 20 with green/amber/red outcome dots). Auto-refreshes every 10 seconds.",
+        payload:
+`+=================================================+
+| &Auml;EGIS AUTO-REMEDIATION   3 auto · 0 escal · 1 pending |
++=================================================+
+| SIGNALS        | ACTIVE     | HISTORY            |
+|----------------|------------|--------------------|
+| &Auml; OTA in     |  &bull; idle | &check; throttle_ota |
+|   progress: 4  |            |   &rarr; success 1.2s  |
+| &Auml; Latency:   |            | &check; restart     |
+|   p99 650ms    |            |   dev-003 &rarr; ok    |
+| &Auml; Devices: 5|            | &check; qos_downgrade|
+|   online: 5/5  |            |   &rarr; done 0.8s    |
++=================================================+
+| &larr; click to expand &rarr; full input/output snapshots |
++=================================================+
+
+// Each history entry expands inline:
+&rarr; throttle_ota (success)
+  Input:  {"metric":"fleet_ota_in_progress","value":4}
+  Output: {"throttled":true,"paused":3}
+  [Re-run] [View Trace]`,
+        chips:["10s refresh","3 columns","expandable entries"]
       }
     ]
   }
@@ -1455,6 +1780,22 @@ function computeWireGeometry(){
   const flow = flows[state.flow];
   const geom = [];
   flow.steps.forEach((s, i) => {
+    if (s.from === s.to) {
+      const a = nodeById(s.from);
+      if (!a || a.classList.contains("hidden")) { geom.push(null); return; }
+      const c = nodeCenter(a);
+      const hw = c.w / 2;
+      const loopW = 55;
+      const loopH = i % 2 === 0 ? 35 : -35;
+      const sx = c.x + hw;
+      const sy = c.y;
+      const d = "M " + sx + " " + sy +
+        " C " + (sx + loopW) + " " + (sy - loopH) +
+        " " + (sx + loopW) + " " + (sy + loopH) +
+        " " + sx + " " + sy;
+      geom.push({ d, cx: sx + loopW * 0.55, cy: sy });
+      return;
+    }
     const a = nodeById(s.from);
     const b = nodeById(s.to);
     if(!a || !b || a.classList.contains("hidden") || b.classList.contains("hidden")){
@@ -1503,7 +1844,9 @@ function drawWires(){
     path.setAttribute("data-step", i);
     path.setAttribute("d", g.d);
     path.style.setProperty("--wire-color", "var(" + s.color + ")");
-    path.setAttribute("marker-end", "url(#" + (ahMap[s.color] || "ah-mint") + ")");
+    if (s.from !== s.to) {
+      path.setAttribute("marker-end", "url(#" + (ahMap[s.color] || "ah-mint") + ")");
+    }
     svgWires.appendChild(path);
     const lab = document.createElementNS("http://www.w3.org/2000/svg","text");
     lab.setAttribute("class","wire-label");
@@ -1568,7 +1911,7 @@ function applyStep(){
   flow.steps.forEach(s=>{ participantIds.add(s.from); participantIds.add(s.to); });
   nodes.forEach(n=>{
     n.classList.remove("active","active-from","participant","dimmed","has-badge");
-    n.querySelector(".step-badge").textContent = "·";
+    n.querySelector(".step-badge").textContent = "&middot;";
   });
   const a = nodeById(step.from);
   const b = nodeById(step.to);
@@ -1599,7 +1942,7 @@ function applyStep(){
     } else { el.classList.add("muted"); }
   });
   panelTitle.textContent = step.title;
-  panelRoute.innerHTML = '<span class="from">' + prettyId(step.from) + '</span><span class="arrow">→</span><span class="to">' + prettyId(step.to) + '</span><span style="margin-left:6px;color:var(--muted)">' + (step.route || "") + '</span>';
+  panelRoute.innerHTML = '<span class="from">' + prettyId(step.from) + '</span><span class="arrow">&rarr;</span><span class="to">' + prettyId(step.to) + '</span><span style="margin-left:6px;color:var(--muted)">' + (step.route || "") + '</span>';
   panelDesc.innerHTML = step.desc;
   let payload = "";
   if(step.payload) payload = step.payload;
@@ -1610,7 +1953,7 @@ function applyStep(){
   if(state.mode==="dev" && step.chipsDev) chips = step.chipsDev;
   if(state.mode==="prod" && step.chipsProd) chips = step.chipsProd;
   panelMeta.innerHTML = (chips || []).map(function(c){
-    var cls = /\d+\s*(?:ms|s|min)\b/.test(c) ? "chip lat" : (/dim|×|loaded|rules|count/.test(c) ? "chip size" : "chip");
+    var cls = /\d+\s*(?:ms|s|min)\b/.test(c) ? "chip lat" : (/dim|&times;|loaded|rules|count/.test(c) ? "chip size" : "chip");
     return '<span class="' + cls + '">' + c + '</span>';
   }).join("");
   btnPrev.disabled = btnPrev2.disabled = state.step === 0;
@@ -1677,7 +2020,7 @@ function pickMode(m){
 
 const CONFIG = {
   fallbackFlow: "flow_register",
-  keyboardFlowOrder: ["flow_register", "flow_ota", "flow_dashboard", "flow_agents", "flow_alerts"],
+  keyboardFlowOrder: ["flow_register", "flow_ota", "flow_dashboard", "flow_agents", "flow_alerts", "flow_aegis"],
   toggleModes: ["dev", "prod"]
 };
 

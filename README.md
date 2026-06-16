@@ -5,16 +5,21 @@ A production-grade IoT fleet management system built with FastAPI, MQTT, Prometh
 ## Architecture
 
 ```
-┌─────────────┐    MQTT     ┌─────────────┐   HTTP    ┌────────────┐
-│  Device     │◄───────────►│  Mosquitto   │◄─────────►│  FastAPI   │
-│  Simulators │   iot/fleet/ │  (Broker)   │  REST API │  Backend   │
-│  (x5-N)     │  .../command │             │           │  :8000     │
-└─────────────┘  .../status  └──────┬──────┘           └─────┬──────┘
-                                    │                        │
-                                    │                 ┌──────┴──────┐
-                                    │                 │  SQLite/    │
-                                    │                 │  Postgres   │
-                                    │                 └─────────────┘
+┌─────────────┐    MQTT     ┌─────────────┐   HTTP    ┌──────────────────┐
+│  Device     │◄───────────►│  Mosquitto   │◄─────────►│  FastAPI Backend │
+│  Simulators │   iot/fleet/ │  (Broker)   │  REST API │  :8000           │
+│  (x5-N)     │  .../command │             │           │  ┌────────────┐  │
+└─────────────┘  .../status  └──────┬──────┘           │  │ Aegis     │  │
+                                    │                   │  │ Auto-     │  │
+                                    │                   │  │Remediation│  │
+                                    │                   │  │ Engine    │  │
+                                    │                   │  └────────────┘  │
+                                    │                   └─────────┬────────┘
+                                    │                             │
+                                    │                     ┌───────┴───────┐
+                                    │                     │  SQLite/      │
+                                    │                     │  Postgres     │
+                                    │                     └───────────────┘
                             ┌───────┴───────┐
                             │   Prometheus   │
                             │   :9090        │
@@ -108,7 +113,7 @@ docker compose --profile testing run --build --rm tests
 
 | Method | Endpoint | Description |
 |---|---|---|
-| `GET` | `/metrics` | Prometheus metrics endpoint |
+| `GET` | `/metrics` | Prometheus metrics endpoint (includes `fleet_*` and `aegis_*` metrics) |
 
 ### Dashboard
 
@@ -116,25 +121,50 @@ docker compose --profile testing run --build --rm tests
 |---|---|---|
 | `GET` | `/` | Fleet UI Dashboard |
 
+### Alerts
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/alerts` | List alerts with status filters |
+| `POST` | `/alerts/{id}/acknowledge` | Acknowledge an alert |
+| `POST` | `/alerts/{id}/resolve` | Resolve an alert |
+
+### Aegis Auto-Remediation
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/aegis/history` | Remediation history (paginated, filterable) |
+| `GET` | `/aegis/scan` | Trigger on-demand remediation scan |
+| `GET` | `/aegis/summary` | Summary counts for dashboard panel |
+| `POST` | `/aegis/ingest` | Webhook receiver for external Alertmanager |
+| `POST` | `/aegis/rerun/{id}` | Re-run a specific remediation action |
+
 ### Agent Recommendations (Phase 1 — Assisted Mode)
 
 | Method | Endpoint | Description |
 |---|---|---|
-| `GET` | `/agents/recommendations` | Run all three agents (OTA, anomaly, groups) |
+| `GET` | `/agents/recommendations` | Run all agents (OTA, anomaly, groups, remediation) |
 | `GET` | `/agents/ota-campaign` | Canary-based rollout plan for a firmware version |
 | `GET` | `/agents/anomaly-check` | Fleet health scan: weak signals, stuck OTAs, failure spikes |
 | `GET` | `/agents/device-groups` | Device groupings by firmware version and signal strength |
+| `GET` | `/agents/fleet-health` | Fleet health check with alert engine triggers |
+| `GET` | `/agents/onboarding` | Device onboarding with conflict detection |
+| `GET` | `/agents/aegis/scan` | Aegis auto-remediation scan via agent |
+| `GET` | `/agents/aegis/history` | Aegis remediation history via agent |
 
-All agent endpoints return structured JSON with agent name, type, summary, and details. OTA and group agents mark `"human_input_required": true`.
+All agent endpoints return structured JSON with agent name, type, summary, and details. OTA, group, and onboarding agents mark `"human_input_required": true`.
 
 **CLI runner:**
 ```bash
 python run_agents.py --ota --firmware 2.0.0
 python run_agents.py --anomaly
+python run_agents.py --onboard "Sensor-042" --onboard-auto
+python run_agents.py --remediate
+python run_agents.py --remediation-history
 python run_agents.py --json
 ```
 
-**Dashboard:** Agent recommendation panels auto-refresh every 30 seconds at the bottom of `http://localhost:8000`.
+**Dashboard:** Agent recommendation panels auto-refresh every 30 seconds; Aegis remediation panel auto-refreshes every 10 seconds. Alert badge count updates on every refresh.
 
 ## Configuration
 
@@ -150,6 +180,14 @@ All configuration is via environment variables (see `.env.example`):
 | `SIMULATOR_DEVICE_COUNT` | `5` | Virtual devices to simulate |
 | `SIMULATOR_HEARTBEAT_INTERVAL` | `10` | Seconds between heartbeats |
 | `SIMULATOR_OTA_FAILURE_RATE` | `0.2` | Probability of OTA hash mismatch |
+| `AEGIS_SCRAPE_INTERVAL` | `15` | Aegis scrape loop interval (seconds) |
+| `AEGIS_ACTION_TIMEOUT` | `30` | Aegis action execution timeout (seconds) |
+| `AEGIS_RETRY_MAX` | `3` | Max retries per Aegis remediation action |
+| `AEGIS_DRY_RUN` | `False` | Aegis dry-run mode (log only, no side effects) |
+| `AEGIS_ACTIVE_DEVICES_THRESHOLD` | `2.0` | Min active devices before pressure detected |
+| `AEGIS_OTA_IN_PROGRESS_THRESHOLD` | `3.0` | Max OTA deployments before pressure detected |
+| `AEGIS_LATENCY_THRESHOLD` | `0.5` | API latency threshold (seconds) |
+| `AEGIS_OFFLINE_RATIO_THRESHOLD` | `0.3` | Offline ratio threshold |
 
 ## Security & Dependency Management
 
@@ -200,17 +238,29 @@ fleet-management/
 │   ├── main.py               # App entry point, lifespan, routes
 │   ├── config.py             # Pydantic settings (env-based)
 │   ├── database.py           # SQLAlchemy async engine & session
-│   ├── models.py             # ORM models (Device, Firmware, OtaDeployment)
+│   ├── models.py             # ORM models (Device, Firmware, OtaDeployment, Alert, Remediation, RuleConfig)
 │   ├── schemas.py            # Pydantic request/response schemas
 │   ├── mqtt_client.py        # MQTT client wrapper
 │   ├── ota_manager.py        # OTA state machine + timeout watcher
+│   ├── alert_engine.py       # Alert engine with dedup, cooldown, multi-channel notify
 │   ├── metrics.py            # Prometheus metrics definitions
+│   ├── aegis/                # Aegis Auto-Remediation Engine
+│   │   ├── engine.py         # Scrape loop, metric classification, remediation orchestrator
+│   │   ├── rules.py          # Rule registry with cooldown enforcement + RuleConfig merge
+│   │   ├── actions.py        # 8 remediation actions (throttle_ota, qos_downgrade, restart, etc.)
+│   │   ├── models.py         # Remediation + RuleConfig SQLAlchemy models
+│   │   ├── schemas.py        # Pydantic schemas for remediation API
+│   │   ├── scheduler.py      # Background async scrape + decision scheduler
+│   │   ├── router.py         # REST endpoints: /aegis/history, /aegis/scan, /aegis/ingest
+│   │   ├── metrics.py        # 7 Prometheus metrics for auto-remediation observability
+│   │   └── config.py         # Aegis-specific Settings extension
 │   ├── routers/              # API route handlers
 │   │   ├── devices.py        # Device registration, heartbeat, listing
 │   │   ├── ota.py            # Firmware upload, OTA trigger, status
+│   │   ├── alerts.py         # Alert lifecycle: list, acknowledge, resolve, prune
 │   │   └── dashboard.py      # Dashboard HTML serving
 │   └── templates/            # Jinja2 templates
-│       └── dashboard.html    # Fleet UI dashboard
+│       └── dashboard.html    # Fleet UI dashboard (device table, OTA, alerts, Aegis panel)
 ├── agents/                   # Phase 1 Crew AI agents
 │   ├── __init__.py            # Package init
 │   ├── tools.py               # HTTP-based tools (CLI mode)

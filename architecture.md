@@ -1,6 +1,6 @@
 # Fleet Commander — Architecture Diagram
 
-Interactive HTML diagram at `architecture.html`. Open in any browser and click through 5 flows with animated data packets, a side panel showing real payloads, and a dev/prod mode toggle.
+Interactive HTML diagram at `architecture.html`. Open in any browser and click through 6 flows with animated data packets, a side panel showing real payloads, and a dev/prod mode toggle.
 
 ---
 
@@ -10,6 +10,7 @@ Interactive HTML diagram at `architecture.html`. Open in any browser and click t
 |---|---|---|---|
 | **User (Browser)** | Dashboard UI | Jinja2 + HTMX · auto-refresh (5s/10s/30s) | localhost:8000 |
 | **FastAPI Backend** | Orchestrator — REST + MQTT + Agents | Python · FastAPI · SQLAlchemy async | :8000 |
+| **Aegis Engine** | Auto-remediation — scrape → classify → decide → act | Python stdlib · co-located | scrapes /metrics every 15s |
 | **SQLite / PostgreSQL** | Primary datastore | Dev: aiosqlite · fleet.db / Prod: psycopg2 | file-based / :5432 |
 | **Mosquitto MQTT** | Message broker | eclipse-mosquitto:2 · pub/sub | :1883 |
 | **Device Simulator** | Virtual IoT devices (5, 20% OTA fail rate) | Python · paho-mqtt · async | MQTT heartbeat 10s |
@@ -49,33 +50,49 @@ State machine: `pending → downloading → applying → verifying → success` 
 
 ### 3. Fleet Dashboard
 
-The live monitoring UI with auto-refreshing device table, agent panels, and alert badge.
+The live monitoring UI with auto-refreshing device table, agent panels, alert badge, and Aegis panel.
 
 1. **User → Backend** — GET `/` with auth check (Google OAuth or admin basic auth)
 2. **Backend → DB** — Queries all devices with status, firmware, signal, battery data
 3. **Backend → User** — Returns rendered Jinja2 HTML with HTMX auto-refresh directives
-4. **Backend → Prometheus** — `/metrics` endpoint scraped every 15s (fleet size, OTA, latency, MQTT, alerts, V2G)
-5. **Prometheus → Grafana** — Pre-provisioned dashboards query PromQL for visualizations
+4. **Backend → Prometheus** — `/metrics` endpoint scraped every 15s (fleet size, OTA, latency, MQTT, alerts, V2G, Aegis)
+5. **Prometheus → Grafana** — Pre-provisioned dashboards query PromQL for visualizations including Aegis panels
 
 ### 4. Agent Recommendations
 
-Three Phase 1 AI agents analyze fleet state and return structured recommendations.
+Four Phase 1 AI agents analyze fleet state and return structured recommendations.
 
-1. **User → Backend** — GET `/agents/recommendations` triggers all 3 agents concurrently
-2. **Backend → DB** — OTA agent queries firmware + devices; anomaly agent checks signals/heartbeats/OTAs; group agent clusters by firmware and signal
+1. **User → Backend** — GET `/agents/recommendations` triggers all 4 agents concurrently (OTA, Anomaly, Groups, Device Onboarding)
+2. **Backend → DB** — OTA agent queries firmware + devices; anomaly agent checks signals/heartbeats/OTAs; group agent clusters by firmware and signal; onboarding agent checks for ID conflicts
 3. **DB → Backend** — Raw fleet data returned for heuristic processing
-4. **Backend → User** — Structured JSON with OTA campaign plan, anomaly report, and device groups (human_input_required flagged)
+4. **Backend → User** — Structured JSON with OTA campaign plan, anomaly report, device groups, and onboarding recommendation
 
-### 5. Alert Pipeline
+### 5. Alert Pipeline + Aegis Integration
 
-Anomaly detection → AlertEngine dedup/cooldown → multi-channel notifications.
+Anomaly detection → AlertEngine dedup/cooldown → Aegis auto-remediation → multi-channel notifications.
 
 1. **User → Backend** — GET `/agents/fleet-health` triggers anomaly detection with mandatory alerting
-2. **Backend → DB** — Heuristic checks for device_offline, weak_signal, stuck_ota, v2g_revenue_drop
-3. **Backend → AlertEngine** — Processes anomalies through dedup (type + device_id), cooldown (300-3600s), and escalation (3× count → critical)
-4. **AlertEngine → Channels** — Fans out to Slack (rich attachment), Email (SMTP), Webhook (JSON POST)
-5. **Backend → DB** — Alert records persisted with active/acknowledged/resolved lifecycle
-6. **Backend → User** — Returns processed alert status; dashboard panel refreshes every 10s
+2. **Backend → DB** — Heuristic checks for device_offline, weak_signal, stuck_ota, v2g_revenue_drop, aegis_escalation
+3. **Backend → Aegis** — Critical anomalies forwarded to Aegis engine for auto-remediation (8 rule chain)
+4. **Backend → AlertEngine** — Processes anomalies through dedup (type + device_id), cooldown (300-3600s), and escalation (3× count → critical)
+5. **AlertEngine → Channels** — Fans out to Slack (rich attachment), Email (SMTP), Webhook (JSON POST)
+6. **Backend → DB** — Alert records persisted with active/acknowledged/resolved lifecycle; Aegis results also recorded
+7. **Backend → User** — Returns processed alert status + Aegis remediation result; dashboard panel refreshes every 10s
+
+### 6. Aegis Auto-Remediation
+
+Closing the loop between metric signals and fleet healing — scrape, classify, decide, act, record, observe.
+
+1. **Aegis → Backend** — Scrape loop (every 15s) polls `/metrics/`, parses fleet_* signals into RemediationSignal objects
+2. **Aegis → Backend** — Classifies signals by severity (INFO/WARNING/CRITICAL), matches against 8 priority-ordered rules
+3. **Aegis → Aegis** — Decision engine evaluates rules in priority order; first match wins; cooldown enforcement per rule
+4. **Aegis → Aegis** — Action execution with 30s timeout, exponential backoff retry (×3), rollback, dead-letter queue
+5. **Aegis → MQTT** — Publishes remediation commands (throttle_ota, device_restart, qos_downgrade, etc.)
+6. **Aegis → Backend** — Records immutable Remediation record (full input/output snapshots, duration, error trace)
+7. **Aegis → Prometheus** — Increments 7 aegis_* Prometheus metrics (signals, decisions, remediations, duration, DLQ)
+8. **Aegis → User** — Dashboard panel (3-column: signals/active/history, auto-refresh 10s, expandable entries)
+
+Built-in rules: R001 throttle_ota, R002 mqtt_qos_downgrade, R003 device_soft_restart, R004 scale_heartbeat, R005 rollback_ota_batch, R006 human_escalation, R007 migrate_device_pool, R008 cleanup_firmware_artifacts.
 
 ---
 
@@ -98,7 +115,7 @@ Toggle with the Dev/Prod button or press `O`.
 |---|---|
 | `Space` | Play / Pause auto-advance |
 | `←` / `→` | Previous / Next step |
-| `1`–`5` | Select flow tab |
+| `1`–`6` | Select flow tab |
 | `O` | Toggle dev/prod mode |
 | `T` | Toggle dark/light theme |
 | `F` | Fullscreen canvas |
@@ -111,6 +128,7 @@ Toggle with the Dev/Prod button or press `O`.
 
 1. **"Show me how a device joins the fleet"** — Click flow 1 and watch the MQTT registration → DB persist → heartbeat loop
 2. **"What happens when an OTA fails?"** — Flow 2 step 6: 20% failure rate triggers hash_mismatch → automatic rollback
-3. **"How does the dashboard stay live?"** — Flow 3: HTMX auto-refresh + Prometheus scraping + Grafana dashboards
-4. **"What can the AI agents tell me?"** — Flow 4: all 3 agents run concurrently with heuristic logic (no LLM API key needed)
-5. **"How do alerts get to Slack?"** — Flow 5: anomaly detection → dedup → escalation → Slack/Email/Webhook
+3. **"How does the dashboard stay live?"** — Flow 3: HTMX auto-refresh + Prometheus scraping + Grafana dashboards (+Aegis panel)
+4. **"What can the AI agents tell me?"** — Flow 4: all 4 agents run concurrently with heuristic logic (no LLM API key needed)
+5. **"How do alerts get to Slack and trigger auto-remediation?"** — Flow 5: anomaly detection → Aegis rules → dedup → escalation → Slack/Email/Webhook
+6. **"How does Aegis auto-heal the fleet?"** — Flow 6: scrape → classify → decide → act → record → observe — 8 rules, dead-letter queue, full audit trail

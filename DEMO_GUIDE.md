@@ -38,6 +38,7 @@ Three presentation styles for showcasing the Fleet Commander IoT device manageme
 - MQTT-based command and control
 - Automatic rollback on hash mismatch
 - Real-time dashboard visibility
+- Aegis auto-remediation engine — detects resource pressure and heals the fleet automatically
 
 ---
 
@@ -265,8 +266,18 @@ curl 'http://localhost:8000/agents/ota-campaign?firmware_version=2.0.0'
 # Anomaly check only
 curl 'http://localhost:8000/agents/anomaly-check?notify=false'
 
+# Fleet health (fires alerts)
+curl 'http://localhost:8000/agents/fleet-health'
+
 # Device groupings
 curl 'http://localhost:8000/agents/device-groups'
+
+# Device onboarding
+curl 'http://localhost:8000/agents/onboarding?name=Sensor-042&auto_register=true'
+
+# Aegis auto-remediation
+curl 'http://localhost:8000/agents/aegis/scan'
+curl 'http://localhost:8000/agents/aegis/history'
 ```
 
 ### 10. V2G Arbitrage with Battery Degradation Pricing
@@ -389,7 +400,141 @@ See `SCALING.md` for details on:
 - **Database**: TimescaleDB hypertables for time-series battery/SOC data
 - **Optimization**: MILP via PuLP/OR-Tools with stochastic price scenarios
 
-### 11. Device Onboarding Agent
+### 11. Aegis Auto-Remediation Engine
+
+The Aegis engine monitors Prometheus metrics from the backend, classifies resource pressure signals (CPU, memory, disk, OTA, latency), and automatically executes remediation actions to resolve issues before they impact the fleet.
+
+#### How It Works
+
+```
+Prometheus /metrics
+       │ (scraped every 15s)
+       ▼
+Aegis Engine ──► Classifies signals (CPU/memory/disk/OTA/latency)
+       │
+       ▼
+Decision Engine ──► Rule registry (8 rules, priority-ordered)
+       │
+       ├── R001 throttle_ota          ──► Pause OTA deployments
+       ├── R002 mqtt_qos_downgrade    ──► Reduce non-critical QoS
+       ├── R003 device_soft_restart   ──► Restart affected devices
+       ├── R004 scale_heartbeat       ──► Increase monitoring frequency
+       ├── R005 rollback_ota_batch    ──► Roll back failing OTA batch
+       ├── R006 human_escalation      ──► Create critical alert + Slack
+       ├── R007 migrate_device_pool   ──► Route traffic away from stressed device
+       └── R008 cleanup_firmware      ──► Free disk space from old artifacts
+       │
+       ▼
+Action Executor ──► Timeout, retry (×3), rollback, DLQ
+       │
+       ▼
+Audit Trail ──► Remediation history + 7 Prometheus metrics
+```
+
+#### From the Dashboard
+
+The Aegis remediation panel sits between alerts and the device table in a three-column layout:
+
+1. **Signals** (left) — Last 10 classified signals with severity badges (critical/warning/info)
+2. **Active** (center) — In-progress remediations with animated pulse indicator
+3. **History** (right) — Last 20 remediation results as a timeline with green/amber/red outcome dots
+
+Click any entry to expand inline with full input/output snapshots. The panel auto-refreshes every 10 seconds.
+
+#### Via CLI
+
+```bash
+# Run a remediation scan (detects pressure, executes actions)
+python run_agents.py --remediate
+
+# Dry-run mode (show what would happen, no side effects)
+AEGIS_DRY_RUN=true python run_agents.py --remediate
+
+# View remediation history
+python run_agents.py --remediation-history
+
+# Re-run a specific remediation
+python run_agents.py --remediation-rerun <REMEDIATION_ID>
+```
+
+#### Via REST API
+
+```bash
+# Trigger an on-demand scan
+curl http://localhost:8000/aegis/scan
+
+# View history (paginated, with filters)
+curl 'http://localhost:8000/aegis/history?status=failed&limit=10'
+
+# View summary counts
+curl http://localhost:8000/aegis/summary
+
+# Webhook endpoint (for external Alertmanager)
+curl -X POST http://localhost:8000/aegis/ingest \
+  -H "Content-Type: application/json" \
+  -d '{"metric_name": "fleet_active_devices", "value": 1.0, "severity": "critical"}'
+
+# Re-run a remediation
+curl -X POST http://localhost:8000/aegis/rerun/{id}
+```
+
+#### Demoing Aegis
+
+1. Start the system: `docker compose --profile demo up -d`
+2. Open the dashboard at http://localhost:8000 — the Aegis panel shows in the middle
+3. Trigger an OTA update to create resource pressure:
+   ```bash
+   curl -X POST http://localhost:8000/ota/upload -F "version=2.0.0" -F "file=@/path/to/firmware.bin"
+   curl -X POST http://localhost:8000/ota/trigger -H "Content-Type: application/json" -d '{"firmware_id": "<FW_ID>", "all_devices": true}'
+   ```
+4. Within 15-30 seconds, the Aegis panel shows:
+   - The signals column detects OTA + latency pressure
+   - The active column shows `throttle_ota` in progress (animated pulse)
+   - The history column records the outcome
+5. Check Prometheus metrics:
+   ```bash
+   curl -s http://localhost:8000/metrics | grep aegis_
+   ```
+6. Run a dry-run scan to see what Aegis would do without side effects:
+   ```bash
+   AEGIS_DRY_RUN=true python run_agents.py --remediate
+   ```
+
+#### Dry-Run Mode
+
+Set `AEGIS_DRY_RUN=true` to run the full decision pipeline without executing any actions. All decisions are logged and recorded with `status="dry_run"` in the history. Use this for testing rule changes or threshold adjustments before going live.
+
+#### 8 Built-in Remediation Actions
+
+| ID | Action | Trigger | Behavior |
+|----|--------|---------|----------|
+| R001 | `throttle_ota` | OTA in progress > 3 + latency > 500ms | Pause pending OTA; resume after 5 min |
+| R002 | `mqtt_qos_downgrade` | MQTT message volume spike | Downgrade non-critical topics to QoS 0 |
+| R003 | `device_soft_restart` | Signal < -90 + uptime > 24h | MQTT restart command to affected devices |
+| R004 | `scale_heartbeat` | Offline ratio > 30% | Increase heartbeat frequency to 5s |
+| R005 | `rollback_ota_batch` | OTA failure spike > 30% | Roll back to previous firmware |
+| R006 | `human_escalation` | All auto-remediation exhausted | Critical Alert + Slack + Email |
+| R007 | `migrate_device_pool` | Device CPU/memory > 90% | Route traffic away; mark for inspection |
+| R008 | `cleanup_firmware_artifacts` | Disk pressure on firmware dir | Delete oldest resolved OTA artifacts |
+
+#### Aegis Prometheus Metrics
+
+| Metric | Type | Description |
+|--------|------|-------------|
+| `aegis_signals_total{severity, metric}` | Counter | Classified signals |
+| `aegis_decisions_total{rule, decision}` | Counter | Rule match/cooldown/no-match |
+| `aegis_remediations_total{action, status}` | Counter | Remediation outcomes |
+| `aegis_remediation_duration_seconds{action}` | Histogram | Action execution time |
+| `aegis_scrape_duration_seconds` | Histogram | Scrape loop duration |
+| `aegis_dlq_depth` | Gauge | Dead-letter queue size |
+| `aegis_active_remediations` | Gauge | Currently executing actions |
+
+#### Configurable Thresholds
+
+All thresholds are configurable via environment variables — no hard-coded magic numbers:
+`AEGIS_SCRAPE_INTERVAL`, `AEGIS_ACTION_TIMEOUT`, `AEGIS_RETRY_MAX`, `AEGIS_DRY_RUN`, `AEGIS_ACTIVE_DEVICES_THRESHOLD`, `AEGIS_OTA_IN_PROGRESS_THRESHOLD`, `AEGIS_LATENCY_THRESHOLD`, `AEGIS_OFFLINE_RATIO_THRESHOLD`.
+
+### 12. Device Onboarding Agent
 
 The Device Onboarding Agent guides you through introducing a new device to the fleet. It checks for naming conflicts, recommends the optimal firmware, registers the device, pushes initial MQTT configuration, and verifies it comes online.
 
@@ -509,12 +654,29 @@ python run_agents.py --ota
 # V2G dispatch
 python run_agents.py --v2g
 
+# Fleet health / anomaly check
+python run_agents.py --anomaly
+
 # Onboard a device
 python run_agents.py --onboard "Sensor-042" --onboard-auto
+
+# Aegis auto-remediation
+python run_agents.py --remediate
+python run_agents.py --remediation-history
+python run_agents.py --remediation-rerun <REMEDIATION_ID>
 
 # JSON output for scripting
 python run_agents.py --json | jq .
 ```
+
+### Aegis Auto-Remediation (Dashboard)
+
+The Aegis panel is in the middle of the dashboard — three columns:
+- **Signals**: incoming resource pressure signals with severity badges
+- **Active**: currently running remediations (animated pulse)
+- **History**: past actions with green/amber/red outcome dots
+
+The panel auto-refreshes every 10 seconds alongside the main dashboard.
 
 ### Cleanup
 
