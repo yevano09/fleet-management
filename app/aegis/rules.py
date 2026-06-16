@@ -1,6 +1,11 @@
+import json
 import logging
+from datetime import datetime
 from typing import Optional
 
+from sqlalchemy import select
+
+from app.utils import utcnow
 from app.aegis.schemas import RemediationSignal
 from app.aegis.actions import ACTION_REGISTRY, RemediationAction
 from app.aegis.metrics import aegis_decisions_total
@@ -32,6 +37,7 @@ class RemediationRule:
 class RuleRegistry:
     def __init__(self):
         self._rules: list[RemediationRule] = []
+        self._last_fired: dict[str, datetime] = {}
 
     def add_rule(self, rule: RemediationRule):
         self._rules.append(rule)
@@ -46,13 +52,45 @@ class RuleRegistry:
                 return r
         return None
 
+    def enable_rule(self, name: str, enabled: bool) -> bool:
+        rule = self.get_rule(name)
+        if rule:
+            rule.enabled = enabled
+            return True
+        return False
+
+    def update_rule_from_config(self, config: 'RuleConfig'):
+        rule = self.get_rule(config.rule_name)
+        if not rule:
+            return
+        if config.enabled is not None:
+            rule.enabled = config.enabled
+        if config.cooldown_seconds is not None:
+            rule.cooldown_seconds = config.cooldown_seconds
+        if config.max_retries is not None:
+            rule.max_retries = config.max_retries
+        if config.priority is not None:
+            rule.priority = config.priority
+            self._rules.sort(key=lambda r: r.priority, reverse=False)
+
     def get_matching_rule(self, signal: RemediationSignal) -> Optional[RemediationRule]:
+        now = utcnow()
         for rule in self._rules:
-            if rule.matches(signal):
-                aegis_decisions_total.labels(rule=rule.name, decision="match").inc()
-                logger.info("Rule '%s' matched signal %s (metric=%s, value=%s)",
-                            rule.name, signal.id, signal.metric_name, signal.value)
-                return rule
+            if not rule.matches(signal):
+                continue
+            last = self._last_fired.get(rule.name)
+            if last is not None:
+                elapsed = (now - last).total_seconds()
+                if elapsed < rule.cooldown_seconds:
+                    aegis_decisions_total.labels(rule=rule.name, decision="cooldown").inc()
+                    logger.info("Rule '%s' in cooldown (%0.1fs/%ds)",
+                                rule.name, elapsed, rule.cooldown_seconds)
+                    continue
+            self._last_fired[rule.name] = now
+            aegis_decisions_total.labels(rule=rule.name, decision="match").inc()
+            logger.info("Rule '%s' matched signal %s (metric=%s, value=%s)",
+                        rule.name, signal.id, signal.metric_name, signal.value)
+            return rule
         aegis_decisions_total.labels(rule="no_match", decision="no_match").inc()
         logger.info("No rule matched signal %s (metric=%s)", signal.id, signal.metric_name)
         return None
@@ -60,6 +98,17 @@ class RuleRegistry:
     @property
     def rules(self) -> list[RemediationRule]:
         return list(self._rules)
+
+
+async def load_rule_configs(db) -> dict[str, 'RuleConfig']:
+    from app.aegis.models import RuleConfig
+    result = await db.execute(select(RuleConfig))
+    return {row.rule_name: row for row in result.scalars().all()}
+
+
+async def merge_configs(registry: RuleRegistry, configs: dict[str, 'RuleConfig']):
+    for rule_name, config in configs.items():
+        registry.update_rule_from_config(config)
 
 
 def build_default_registry() -> RuleRegistry:

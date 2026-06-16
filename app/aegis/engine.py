@@ -3,59 +3,33 @@ import uuid
 import time
 import asyncio
 import logging
-from datetime import datetime, timezone
 from typing import Optional
 
 import requests
 
-from app.database import async_session_factory
 from app.config import settings
 from app.utils import utcnow
 from app.aegis.models import Remediation
 from app.aegis.schemas import RemediationSignal, IngestRequest
 from app.aegis.rules import RuleRegistry, build_default_registry
-from app.aegis.actions import ACTION_REGISTRY, RemediationAction, RemediationResult
+from app.aegis.actions import ACTION_REGISTRY, RemediationResult
 from app.aegis.metrics import (
     aegis_scrape_duration,
     aegis_signals_total,
     aegis_decisions_total,
     aegis_remediations_total,
-    aegis_remediation_duration,
     aegis_dlq_depth,
     aegis_active_remediations,
 )
-from app.aegis.config import AEGIS_DEFAULT_ACTION_TIMEOUT
 
 logger = logging.getLogger(__name__)
 
 
 class AegisEngine:
-    def __init__(self, registry: Optional[RuleRegistry] = None,
-                 scrape_interval: int = 15):
+    def __init__(self, registry: Optional[RuleRegistry] = None):
         self.registry = registry or build_default_registry()
-        self.scrape_interval = scrape_interval
-        self._stop = False
-        self._backend_url = getattr(settings, 'aegis_backend_url', "http://localhost:8000")
+        self._backend_url = settings.aegis_backend_url or "http://localhost:8000"
         self._signal_history: dict[str, list[float]] = {}
-
-    def stop(self):
-        self._stop = True
-
-    async def run_forever(self):
-        logger.info("Aegis engine started (scrape interval=%ss)", self.scrape_interval)
-        while not self._stop:
-            start = time.time()
-            try:
-                async with async_session_factory() as db:
-                    await self.run_cycle(db)
-            except asyncio.CancelledError:
-                break
-            except Exception:
-                logger.exception("Aegis cycle failed")
-            elapsed = time.time() - start
-            sleep_time = max(0.5, self.scrape_interval - elapsed)
-            await asyncio.sleep(sleep_time)
-        logger.info("Aegis engine stopped")
 
     async def run_cycle(self, db):
         start = time.time()
@@ -80,10 +54,6 @@ class AegisEngine:
 
     async def _scrape_metrics(self) -> str:
         try:
-            url = f"{self._backend_url}/metrics/"
-            resp = await asyncio.to_thread(requests.get, url, timeout=10)
-            if resp.status_code == 200:
-                return resp.text
             url = f"{self._backend_url}/metrics"
             resp = await asyncio.to_thread(requests.get, url, timeout=10)
             if resp.status_code == 200:
@@ -122,8 +92,6 @@ class AegisEngine:
                 parsed[name] = value
 
         ts = utcnow()
-        ts_iso = ts.isoformat()
-        device_ids: list[str] = []
 
         active = parsed.get("fleet_active_devices")
         if active is not None:
@@ -144,7 +112,7 @@ class AegisEngine:
                 )
                 signals.append(signal)
                 aegis_signals_total.labels(severity=severity, metric="fleet_active_devices").inc()
-                self._signal_history.setdefault(sig_id, []).append(active)
+                self._signal_history.setdefault("fleet_active_devices", []).append(active)
 
         ota = parsed.get("fleet_ota_in_progress")
         if ota is not None:
@@ -165,6 +133,7 @@ class AegisEngine:
                 )
                 signals.append(signal)
                 aegis_signals_total.labels(severity=severity, metric="fleet_ota_in_progress").inc()
+                self._signal_history.setdefault("fleet_ota_in_progress", []).append(ota)
 
         for hist_key, buckets in histogram_buckets.items():
             sum_val = buckets.get(f"{hist_key}_sum", 0)
@@ -188,6 +157,7 @@ class AegisEngine:
                     )
                     signals.append(signal)
                     aegis_signals_total.labels(severity=severity, metric=hist_key).inc()
+                    self._signal_history.setdefault(hist_key, []).append(round(avg_latency, 4))
 
         return signals
 
@@ -217,16 +187,29 @@ class AegisEngine:
         await db.refresh(remediation)
         aegis_active_remediations.inc()
 
+        dry_run = getattr(settings, 'aegis_dry_run', False)
+        if dry_run:
+            logger.info("DRY RUN: would execute rule=%s action=%s for signal=%s",
+                        rule.name, action.name, signal.id)
+            remediation.status = "dry_run"
+            remediation.output_snapshot = json.dumps({"dry_run": True, "action": action.name})
+            remediation.completed_at = utcnow()
+            await db.commit()
+            aegis_active_remediations.dec()
+            aegis_remediations_total.labels(action=action.name, status="dry_run").inc()
+            return {"remediation_id": remediation.id, "status": "dry_run"}
+
         context = {}
+        timeout = getattr(action, 'timeout', settings.aegis_action_timeout) or settings.aegis_action_timeout
         try:
             result = await asyncio.wait_for(
                 action.execute_with_retry(signal, context),
-                timeout=AEGIS_DEFAULT_ACTION_TIMEOUT,
+                timeout=timeout,
             )
         except asyncio.TimeoutError:
             result = RemediationResult(
                 success=False,
-                error_message=f"Action '{action.name}' timed out after {AEGIS_DEFAULT_ACTION_TIMEOUT}s",
+                error_message=f"Action '{action.name}' timed out after {timeout}s",
                 output_snapshot={"timeout": True, "action": action.name},
             )
 
@@ -327,3 +310,18 @@ class AegisEngine:
             await self._escalate_human(db, signal)
 
         return signal
+
+
+_engine_instance: Optional[AegisEngine] = None
+
+
+def get_engine() -> AegisEngine:
+    global _engine_instance
+    if _engine_instance is None:
+        _engine_instance = AegisEngine()
+    return _engine_instance
+
+
+def set_engine(engine: AegisEngine):
+    global _engine_instance
+    _engine_instance = engine

@@ -1,7 +1,8 @@
 import uuid
+import json
 from datetime import datetime
 
-from sqlalchemy import Column, String, Integer, Float, DateTime, Text
+from sqlalchemy import Column, String, Integer, Float, DateTime, Text, Boolean
 
 from app.database import Base
 from app.utils import utcnow
@@ -27,3 +28,30 @@ class Remediation(Base):
     duration_ms = Column(Integer, nullable=True)
     retry_count = Column(Integer, default=0)
     device_ids = Column(Text, default="")
+
+
+class RuleConfig(Base):
+    __tablename__ = "rule_configs"
+
+    rule_name = Column(String, primary_key=True)
+    enabled = Column(Boolean, nullable=False, default=True)
+    cooldown_seconds = Column(Integer, nullable=True)
+    max_retries = Column(Integer, nullable=True)
+    priority = Column(Integer, nullable=True)
+    threshold_overrides = Column(Text, nullable=False, default="{}")
+
+    def __init__(self, rule_name: str, enabled: bool = True,
+                 cooldown_seconds: int = None, max_retries: int = None,
+                 priority: int = None, threshold_overrides: str = "{}"):
+        self.rule_name = rule_name
+        self.enabled = enabled
+        self.cooldown_seconds = cooldown_seconds
+        self.max_retries = max_retries
+        self.priority = priority
+        self.threshold_overrides = threshold_overrides
+
+    def get_threshold_overrides(self) -> dict:
+        try:
+            return json.loads(self.threshold_overrides or "{}")
+        except (json.JSONDecodeError, TypeError):
+            return {}

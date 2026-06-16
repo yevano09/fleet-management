@@ -111,14 +111,17 @@ async def lifespan(app: FastAPI):
     mqtt_client.on_register(handle_mqtt_register)
     mqtt_client.connect()
 
-    from app.aegis.engine import AegisEngine
-    aegis_engine = AegisEngine(scrape_interval=settings.aegis_scrape_interval)
-    aegis_task = asyncio.create_task(aegis_engine.run_forever())
+    from app.aegis.engine import AegisEngine, set_engine
+    from app.aegis.scheduler import AegisScheduler
+    aegis_engine = AegisEngine()
+    set_engine(aegis_engine)
+    scheduler = AegisScheduler(engine=aegis_engine, interval=settings.aegis_scrape_interval)
+    aegis_task = asyncio.create_task(scheduler.run())
     logger.info("Aegis auto-remediation engine started (interval=%ss)", settings.aegis_scrape_interval)
 
     logger.info("Fleet Commander backend started.")
     yield
-    aegis_engine.stop()
+    scheduler.stop()
     aegis_task.cancel()
     try:
         await aegis_task

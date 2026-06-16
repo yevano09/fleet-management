@@ -63,6 +63,7 @@ class Settings(BaseSettings):
     aegis_latency_threshold: float = 0.5
     aegis_offline_ratio_threshold: float = 0.3
     aegis_backend_url: str = ""
+    aegis_dry_run: bool = False
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
 

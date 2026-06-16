@@ -1,20 +1,20 @@
 import json
 import time
+import asyncio
 import logging
 from abc import ABC, abstractmethod
 from typing import Optional
 
+from app.config import settings
 from app.mqtt_client import mqtt_client
 from app.utils import utcnow
 from app.aegis.schemas import RemediationSignal
 from app.aegis.config import (
-    AEGIS_DEFAULT_ACTION_TIMEOUT,
-    AEGIS_DEFAULT_RETRY_MAX,
     AEGIS_OTA_THROTTLE_DURATION_SECONDS,
     AEGIS_HEARTBEAT_FAST_INTERVAL,
     AEGIS_HEARTBEAT_NORMAL_INTERVAL,
 )
-from app.aegis.metrics import aegis_remediations_total, aegis_remediation_duration, aegis_active_remediations
+from app.aegis.metrics import aegis_remediations_total, aegis_remediation_duration
 
 logger = logging.getLogger(__name__)
 
@@ -30,8 +30,8 @@ class RemediationResult:
 
 class RemediationAction(ABC):
     name: str = ""
-    timeout: int = AEGIS_DEFAULT_ACTION_TIMEOUT
-    max_retries: int = AEGIS_DEFAULT_RETRY_MAX
+    timeout: int = 30
+    max_retries: int = 3
 
     @abstractmethod
     async def execute(self, signal: RemediationSignal, context: dict) -> RemediationResult:
@@ -44,7 +44,6 @@ class RemediationAction(ABC):
         last_error = None
         for attempt in range(self.max_retries + 1):
             try:
-                aegis_active_remediations.inc()
                 start = time.time()
                 result = await self.execute(signal, context)
                 elapsed_ms = int((time.time() - start) * 1000)
@@ -54,16 +53,12 @@ class RemediationAction(ABC):
                 aegis_remediations_total.labels(action=self.name, status=status).inc()
                 return result
             except Exception as e:
-                aegis_active_remediations.dec()
                 last_error = str(e)
                 logger.warning("Action %s attempt %d failed: %s", self.name, attempt + 1, last_error)
                 aegis_remediations_total.labels(action=self.name, status="failed").inc()
                 if attempt < self.max_retries:
-                    import asyncio
                     backoff = 2 ** attempt
                     await asyncio.sleep(backoff)
-            finally:
-                aegis_active_remediations.dec()
         return RemediationResult(
             success=False,
             error_message=f"Exhausted {self.max_retries} retries: {last_error}",
@@ -94,6 +89,13 @@ class ThrottleOtaAction(RemediationAction):
     async def rollback(self, signal: RemediationSignal, context: dict) -> bool:
         self._throttled = False
         context["ota_throttled"] = False
+        if mqtt_client.is_connected:
+            payload = json.dumps({
+                "command": "resume_ota",
+                "reason": "rollback",
+                "timestamp": utcnow().isoformat(),
+            })
+            mqtt_client.client.publish("iot/fleet/command/ota_resume", payload, qos=1)
         logger.info("OTA throttle released")
         return True
 
@@ -123,8 +125,16 @@ class MqttQosDowngradeAction(RemediationAction):
         )
 
     async def rollback(self, signal: RemediationSignal, context: dict) -> bool:
+        topics = list(self._downgraded_topics)
         self._downgraded_topics = []
-        logger.info("MQTT QoS restored for all topics")
+        if mqtt_client.is_connected:
+            payload = json.dumps({
+                "command": "restore_qos",
+                "topics": topics,
+                "timestamp": utcnow().isoformat(),
+            })
+            mqtt_client.client.publish("iot/fleet/command/qos_restore", payload, qos=1)
+        logger.info("MQTT QoS restored for %d topics", len(topics))
         return True
 
 
@@ -164,7 +174,16 @@ class DeviceSoftRestartAction(RemediationAction):
         )
 
     async def rollback(self, signal: RemediationSignal, context: dict) -> bool:
-        logger.info("Device restart rollback: cannot unsend restart command")
+        for device_id in signal.device_ids:
+            if mqtt_client.is_connected:
+                topic = f"iot/fleet/{device_id}/command/cancel_restart"
+                payload = json.dumps({
+                    "command": "cancel_restart",
+                    "reason": "rollback",
+                    "timestamp": utcnow().isoformat(),
+                })
+                mqtt_client.client.publish(topic, payload, qos=1)
+        logger.info("Published rollback cancel_restart for %d devices", len(signal.device_ids))
         return True
 
 

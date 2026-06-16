@@ -16,6 +16,7 @@ from app.aegis.actions import (
     DeviceSoftRestartAction, ScaleHeartbeatAction,
     ACTION_REGISTRY, RemediationResult,
 )
+from app.aegis.engine import AegisEngine
 
 
 def _make_signal(metric: str = "fleet_ota_in_progress", value: float = 5.0,
@@ -245,3 +246,221 @@ class TestSignals:
         json_str = signal.model_dump_json()
         parsed = json.loads(json_str)
         assert parsed["id"] == "test-sig-1"
+
+
+class TestRuleCooldown:
+    def test_cooldown_enforced(self):
+        registry = RuleRegistry()
+        registry.add_rule(RemediationRule(
+            name="cooldown_rule",
+            condition=lambda s: True,
+            action_name="throttle_ota",
+            cooldown_seconds=3600,
+            priority=1,
+        ))
+        signal = _make_signal()
+        first = registry.get_matching_rule(signal)
+        assert first is not None
+        second = registry.get_matching_rule(_make_signal(metric="fleet_ota_in_progress", value=10.0))
+        assert second is None, "Cooldown should prevent second match"
+
+    def test_cooldown_expired_allows_match(self):
+        registry = RuleRegistry()
+        registry.add_rule(RemediationRule(
+            name="fast_cooldown",
+            condition=lambda s: True,
+            action_name="throttle_ota",
+            cooldown_seconds=0,
+            priority=1,
+        ))
+        signal = _make_signal()
+        first = registry.get_matching_rule(signal)
+        assert first is not None
+        second = registry.get_matching_rule(_make_signal(metric="fleet_ota_in_progress", value=10.0))
+        assert second is not None, "Zero cooldown should allow immediate re-match"
+
+
+class TestRuleEnableDisable:
+    def test_enable_rule_returns_false_for_unknown(self):
+        registry = RuleRegistry()
+        assert registry.enable_rule("nonexistent", False) is False
+
+    def test_enable_rule_toggles(self):
+        registry = build_default_registry()
+        assert registry.get_rule("r001_throttle_ota").enabled is True
+        registry.enable_rule("r001_throttle_ota", False)
+        assert registry.get_rule("r001_throttle_ota").enabled is False
+        registry.enable_rule("r001_throttle_ota", True)
+        assert registry.get_rule("r001_throttle_ota").enabled is True
+
+
+class TestActionFailurePaths:
+    @pytest.mark.asyncio
+    async def test_device_soft_restart_mqtt_disconnected(self):
+        action = DeviceSoftRestartAction()
+        signal = _make_signal(metric="fleet_device_signal", value=-95.0,
+                              severity="critical", device_ids=["dev-1", "dev-2"])
+        context = {}
+        with patch("app.aegis.actions.mqtt_client") as mock_mqtt:
+            mock_mqtt.is_connected = False
+            result = await action.execute(signal, context)
+        assert result.success is False
+        assert "MQTT publish failed" in (result.error_message or "")
+        assert len(result.output_snapshot.get("devices_failed", [])) == 2
+
+
+class TestEngineMetricsParsing:
+    def test_classify_metrics_parses_fleet_gauges(self):
+        from app.aegis.engine import AegisEngine
+        engine = AegisEngine()
+        text = "fleet_active_devices 1.0\nfleet_ota_in_progress 5.0\n"
+        signals = engine._classify_metrics(text)
+        assert len(signals) == 2
+
+    def test_classify_metrics_ignores_non_fleet(self):
+        engine = AegisEngine()
+        text = "python_info 1.0\nfleet_active_devices 10.0\n"
+        signals = engine._classify_metrics(text)
+        assert len(signals) == 0
+
+    def test_classify_metrics_ignores_comments(self):
+        engine = AegisEngine()
+        text = "# HELP fleet_active_devices Active devices\n# TYPE fleet_active_devices gauge\nfleet_active_devices 1.0\n"
+        signals = engine._classify_metrics(text)
+        assert len(signals) == 1
+        assert signals[0].metric_name == "fleet_active_devices"
+
+    def test_signal_history_uses_metric_name_key(self):
+        engine = AegisEngine()
+        text = "fleet_active_devices 1.0\nfleet_ota_in_progress 5.0\n"
+        engine._classify_metrics(text)
+        assert "fleet_active_devices" in engine._signal_history
+        assert "fleet_ota_in_progress" in engine._signal_history
+        assert engine._signal_history["fleet_active_devices"] == [1.0]
+
+
+class TestEngineFullCycle:
+    @pytest.mark.asyncio
+    async def test_run_cycle_creates_remediations(self):
+        from app.database import Base
+        from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
+        from app.aegis.models import Remediation
+        from sqlalchemy import select
+
+        test_engine = create_async_engine("sqlite+aiosqlite://")
+        test_session_factory = async_sessionmaker(test_engine, class_=AsyncSession, expire_on_commit=False)
+        async with test_engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+
+        engine = AegisEngine()
+        with patch.object(engine, '_scrape_metrics') as mock:
+            mock.return_value = "fleet_active_devices 1.0\nfleet_ota_in_progress 5.0\n"
+            async with test_session_factory() as db:
+                await engine.run_cycle(db)
+
+                result = await db.execute(select(Remediation))
+                rows = result.scalars().all()
+                assert len(rows) > 0
+        await test_engine.dispose()
+
+    @pytest.mark.asyncio
+    async def test_run_cycle_no_metrics_no_remediation(self):
+        from app.database import Base
+        from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
+        from app.aegis.models import Remediation
+        from sqlalchemy import select
+
+        test_engine = create_async_engine("sqlite+aiosqlite://")
+        test_session_factory = async_sessionmaker(test_engine, class_=AsyncSession, expire_on_commit=False)
+        async with test_engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+
+        engine = AegisEngine()
+        with patch.object(engine, '_scrape_metrics') as mock:
+            mock.return_value = ""
+            async with test_session_factory() as db:
+                await engine.run_cycle(db)
+
+                result = await db.execute(select(Remediation))
+                rows = result.scalars().all()
+                assert len(rows) == 0
+        await test_engine.dispose()
+
+    @pytest.mark.asyncio
+    async def test_process_ingest_creates_remediation(self):
+        from app.database import Base
+        from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
+        from app.aegis.models import Remediation
+        from app.aegis.schemas import IngestRequest
+        from sqlalchemy import select
+
+        test_engine = create_async_engine("sqlite+aiosqlite://")
+        test_session_factory = async_sessionmaker(test_engine, class_=AsyncSession, expire_on_commit=False)
+        async with test_engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+
+        engine = AegisEngine()
+        req = IngestRequest(
+            metric_name="fleet_ota_in_progress",
+            value=10.0,
+            threshold=3.0,
+            severity="warning",
+        )
+        async with test_session_factory() as db:
+            signal = await engine.process_ingest(db, req)
+            assert signal is not None
+
+            result = await db.execute(select(Remediation))
+            rows = result.scalars().all()
+            assert len(rows) > 0
+        await test_engine.dispose()
+
+    @pytest.mark.asyncio
+    async def test_process_ingest_escalates_on_no_match(self):
+        from app.database import Base
+        from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
+        from app.aegis.models import Remediation
+        from app.aegis.schemas import IngestRequest
+        from app.models import Alert
+        from sqlalchemy import select
+
+        test_engine = create_async_engine("sqlite+aiosqlite://")
+        test_session_factory = async_sessionmaker(test_engine, class_=AsyncSession, expire_on_commit=False)
+        async with test_engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+
+        engine = AegisEngine()
+        req = IngestRequest(
+            metric_name="fleet_unknown_metric",
+            value=999.0,
+            threshold=1.0,
+            severity="critical",
+        )
+        async with test_session_factory() as db:
+            signal = await engine.process_ingest(db, req)
+            assert signal is not None
+
+            result = await db.execute(select(Remediation))
+            rows = result.scalars().all()
+            assert len(rows) > 0
+            assert rows[0].status == "escalated"
+        await test_engine.dispose()
+
+
+class TestRuleConfigModel:
+    def test_rule_config_defaults(self):
+        from app.aegis.models import RuleConfig
+        config = RuleConfig(rule_name="test_rule")
+        assert config.rule_name == "test_rule"
+        assert config.enabled is True
+        assert config.get_threshold_overrides() == {}
+
+    def test_rule_config_threshold_overrides(self):
+        from app.aegis.models import RuleConfig
+        config = RuleConfig(rule_name="test_rule", threshold_overrides='{"cpu": 90}')
+        assert config.get_threshold_overrides() == {"cpu": 90}
+
+    def test_rule_config_bad_json_returns_empty(self):
+        from app.aegis.models import RuleConfig
+        config = RuleConfig(rule_name="test_rule", threshold_overrides="not-json")
+        assert config.get_threshold_overrides() == {}

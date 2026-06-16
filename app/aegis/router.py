@@ -10,9 +10,7 @@ from app.database import get_db, async_session_factory
 from app.utils import utcnow
 from app.aegis.models import Remediation
 from app.aegis.schemas import RemediationResponse, RemediationListResponse, IngestRequest
-from app.aegis.engine import AegisEngine
-from app.aegis.rules import build_default_registry
-from app.aegis.config import AEGIS_DEFAULT_SCRAPE_INTERVAL
+from app.aegis.engine import get_engine
 
 logger = logging.getLogger(__name__)
 
@@ -97,8 +95,7 @@ async def ingest_alert(
     req: IngestRequest,
     db: AsyncSession = Depends(get_db),
 ):
-    registry = build_default_registry()
-    engine = AegisEngine(registry=registry)
+    engine = get_engine()
     signal = await engine.process_ingest(db, req)
     return {
         "message": "Alert ingested and processed",
