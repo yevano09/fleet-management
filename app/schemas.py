@@ -8,6 +8,7 @@ class DeviceRegisterRequest(BaseModel):
     name: str
     firmware_version: str = "1.0.0"
     ip_address: str = ""
+    mqtt_client_id: Optional[str] = None
 
 
 class DeviceRegisterResponse(BaseModel):
@@ -15,6 +16,7 @@ class DeviceRegisterResponse(BaseModel):
     name: str
     firmware_version: str
     status: str
+    mqtt_client_id: Optional[str] = None
 
 
 class HeartbeatRequest(BaseModel):
@@ -113,3 +115,33 @@ class V2gDispatchResponse(BaseModel):
     total_deg_cost_dollars: float
     schedule: List[V2gDispatchSlot]
     devices_used: int
+
+
+# ── Alert schemas ──────────────────────────────────────────────
+
+class AlertResponse(BaseModel):
+    id: str
+    type: str
+    severity: str
+    message: str
+    device_ids: str = ""
+    status: str
+    dedup_key: str
+    count: int = 1
+    channel: str = ""
+    acknowledged_by: Optional[str] = None
+    acknowledged_at: Optional[datetime] = None
+    resolved_at: Optional[datetime] = None
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class AlertListResponse(BaseModel):
+    alerts: List[AlertResponse]
+    total: int
+
+
+class AcknowledgeRequest(BaseModel):
+    user: str

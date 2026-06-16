@@ -40,16 +40,19 @@ def list_devices(status: Optional[str] = None) -> dict:
 
 
 def register_device(name: str, firmware_version: str = "1.0.0",
-                    ip_address: str = "") -> dict:
+                    ip_address: str = "", mqtt_client_id: str = "") -> dict:
     """Register a new device or re-activate an existing one.
 
     Returns: {device_id, name, firmware_version, status}
     """
-    resp = requests.post(f"{BASE_URL}/devices/register", json={
+    payload = {
         "name": name,
         "firmware_version": firmware_version,
         "ip_address": ip_address,
-    }, timeout=10)
+    }
+    if mqtt_client_id:
+        payload["mqtt_client_id"] = mqtt_client_id
+    resp = requests.post(f"{BASE_URL}/devices/register", json=payload, timeout=10)
     resp.raise_for_status()
     return resp.json()
 
@@ -149,8 +152,109 @@ def parse_metric(metric_name: str) -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
+# Device onboarding (used by the onboarding agent)
+# ---------------------------------------------------------------------------
+
+def onboard_device(
+    name: str,
+    firmware_version: str = "",
+    ip_address: str = "",
+    mqtt_client_id: str = "",
+    auto_register: bool = False,
+) -> dict:
+    """Check conflicts and optionally register a new device for fleet monitoring.
+
+    Returns an onboarding report with conflicts, recommended firmware,
+    initial config, and (if auto_register) the created device.
+    """
+    conflicts = []
+    devices_data = list_devices()
+    existing_devices = devices_data.get("devices", [])
+
+    for d in existing_devices:
+        if d.get("name", "").lower() == name.lower():
+            conflicts.append({
+                "type": "name",
+                "existing_device_id": d["id"],
+                "message": f"Device name '{name}' is already used by device {d['id'][:8]}...",
+            })
+        if mqtt_client_id and d.get("mqtt_client_id") == mqtt_client_id:
+            conflicts.append({
+                "type": "mqtt_client_id",
+                "existing_device_id": d["id"],
+                "message": f"MQTT client ID '{mqtt_client_id}' is already assigned to device {d['id'][:8]}...",
+            })
+
+    fw_list = list_firmware()
+    recommended_fw = None
+    if firmware_version:
+        recommended_fw = next((f for f in fw_list if f["version"] == firmware_version), None)
+        if not recommended_fw and fw_list:
+            recommended_fw = fw_list[0]
+    elif fw_list:
+        recommended_fw = fw_list[0]
+
+    initial_config = {
+        "heartbeat_interval_seconds": 10,
+        "ota_poll_interval_seconds": 60,
+        "log_level": "INFO",
+    }
+
+    device = None
+    registration_status = "skipped"
+    if auto_register and not conflicts:
+        result = register_device(
+            name=name,
+            firmware_version=recommended_fw["version"] if recommended_fw else "1.0.0",
+            ip_address=ip_address,
+            mqtt_client_id=mqtt_client_id,
+        )
+        device = {
+            "id": result.get("device_id", ""),
+            "name": result.get("name", name),
+            "firmware_version": result.get("firmware_version", ""),
+            "status": result.get("status", "online"),
+            "mqtt_client_id": mqtt_client_id or "",
+            "ip_address": ip_address or "",
+        }
+        registration_status = "created"
+
+    online_count = sum(1 for d in existing_devices if d.get("status") == "online")
+
+    return {
+        "onboarding_possible": len(conflicts) == 0,
+        "conflicts": conflicts,
+        "recommended_firmware": recommended_fw,
+        "initial_config": initial_config,
+        "device": device,
+        "registration_status": registration_status,
+        "fleet_state": {
+            "total_devices": devices_data.get("total", 0),
+            "online_devices": online_count,
+        },
+    }
+
+
+# ---------------------------------------------------------------------------
 # Notification tools
 # ---------------------------------------------------------------------------
+
+def push_remote_config(device_id: str, config: dict) -> bool:
+    """Push a remote configuration to a device via the backend API.
+
+    Returns: True if the config was published via MQTT.
+    """
+    try:
+        resp = requests.post(
+            f"{BASE_URL}/devices/{device_id}/config",
+            json={"config": config},
+            timeout=10,
+        )
+        return resp.status_code == 200
+    except requests.RequestException:
+        logger.warning("Failed to push config to device %s", device_id)
+        return False
+
 
 def send_slack_alert(message: str, severity: str = "info") -> bool:
     """Send an alert to Slack via webhook.
@@ -158,7 +262,7 @@ def send_slack_alert(message: str, severity: str = "info") -> bool:
     Returns: True if sent successfully.
     """
     if not SLACK_WEBHOOK:
-        logger.info(f"[Slack disabled] {severity}: {message}")
+        logger.info("[Slack disabled] %s: %s", severity, message)
         return False
     color = {"info": "#36a64f", "warning": "#f59f00", "critical": "#f03e3e"}
     resp = requests.post(SLACK_WEBHOOK, json={
@@ -170,6 +274,45 @@ def send_slack_alert(message: str, severity: str = "info") -> bool:
         }],
     }, timeout=10)
     return resp.status_code == 200
+
+
+def fetch_alerts(status: Optional[str] = None, severity: Optional[str] = None) -> dict:
+    """Fetch alerts from the backend API.
+
+    Returns: {alerts: [...], total: N}
+    """
+    params = {}
+    if status:
+        params["status"] = status
+    if severity:
+        params["severity"] = severity
+    resp = requests.get(f"{BASE_URL}/alerts/", params=params, timeout=10)
+    resp.raise_for_status()
+    return resp.json()
+
+
+def acknowledge_alert(alert_id: str, user: str) -> dict:
+    """Acknowledge an alert via the backend API.
+
+    Returns: {success: bool, message: str}
+    """
+    resp = requests.post(
+        f"{BASE_URL}/alerts/{alert_id}/acknowledge",
+        json={"user": user},
+        timeout=10,
+    )
+    resp.raise_for_status()
+    return resp.json()
+
+
+def resolve_alert(alert_id: str) -> dict:
+    """Resolve an alert via the backend API.
+
+    Returns: {success: bool, message: str}
+    """
+    resp = requests.post(f"{BASE_URL}/alerts/{alert_id}/resolve", timeout=10)
+    resp.raise_for_status()
+    return resp.json()
 
 
 # ---------------------------------------------------------------------------
@@ -400,3 +543,60 @@ def plan_ota_campaign(firmware_version: str) -> dict:
             f"Estimated completion: ~15 minutes."
         ),
     }
+
+
+# ---------------------------------------------------------------------------
+# Aegis remediation tools (Sprint 2)
+# ---------------------------------------------------------------------------
+
+def detect_resource_pressure() -> dict:
+    """Check for resource pressure signals from /metrics endpoint.
+
+    Returns: {pressure_detected: bool, signals: [...], metrics_summary: str}
+    """
+    try:
+        resp = requests.get(f"{BASE_URL}/aegis/scan", timeout=15)
+        resp.raise_for_status()
+        data = resp.json()
+        return {"pressure_detected": True, "scan_result": data}
+    except requests.RequestException as e:
+        return {"pressure_detected": False, "error": str(e)}
+
+def run_remediation_cycle() -> dict:
+    """Trigger a full Aegis remediation cycle via the API.
+
+    Returns: {cycle_completed: bool, summary: str}
+    """
+    try:
+        resp = requests.get(f"{BASE_URL}/aegis/scan", timeout=30)
+        resp.raise_for_status()
+        return {"cycle_completed": True, "message": "Remediation cycle completed"}
+    except requests.RequestException as e:
+        return {"cycle_completed": False, "error": str(e)}
+
+def get_remediation_history(status: str = None, action: str = None, limit: int = 50) -> dict:
+    """Fetch remediation history from the API.
+
+    Returns: {remediations: [...], total: N}
+    """
+    params = {}
+    if status:
+        params["status"] = status
+    if action:
+        params["action"] = action
+    params["limit"] = limit
+    resp = requests.get(f"{BASE_URL}/aegis/history", params=params, timeout=10)
+    resp.raise_for_status()
+    return resp.json()
+
+def rerun_remediation(remediation_id: str) -> dict:
+    """Re-run a specific remediation action via the API.
+
+    Returns: {success: bool, message: str}
+    """
+    try:
+        resp = requests.post(f"{BASE_URL}/aegis/rerun/{remediation_id}", timeout=30)
+        resp.raise_for_status()
+        return resp.json()
+    except requests.RequestException as e:
+        return {"success": False, "error": str(e)}

@@ -103,6 +103,31 @@ class OtaDeployment(Base):
     firmware = relationship("Firmware")
 
 
+class AlertStatus(str, enum.Enum):
+    active = "active"
+    acknowledged = "acknowledged"
+    resolved = "resolved"
+
+
+class Alert(Base):
+    __tablename__ = "alerts"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    type = Column(String, nullable=False)
+    severity = Column(String, nullable=False)
+    message = Column(Text, nullable=False)
+    device_ids = Column(Text, default="")
+    status = Column(SAEnum(AlertStatus), default=AlertStatus.active)
+    dedup_key = Column(String, nullable=False)
+    count = Column(Integer, default=1)
+    channel = Column(String, default="")
+    acknowledged_by = Column(String, nullable=True)
+    acknowledged_at = Column(DateTime, nullable=True)
+    resolved_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=utcnow)
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
+
+
 class UserSession(Base):
     __tablename__ = "user_sessions"
 

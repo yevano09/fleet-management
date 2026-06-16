@@ -199,7 +199,7 @@ class AegisEngine:
             aegis_remediations_total.labels(action=action.name, status="dry_run").inc()
             return {"remediation_id": remediation.id, "status": "dry_run"}
 
-        context = {}
+        context = {"db": db}
         timeout = getattr(action, 'timeout', settings.aegis_action_timeout) or settings.aegis_action_timeout
         try:
             result = await asyncio.wait_for(

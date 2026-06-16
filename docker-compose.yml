@@ -53,19 +53,20 @@ services:
         https_proxy: ${https_proxy:-}
     container_name: fleet-backend
     ports:
-      - "8000:8000"
+      - "${HOST_PORT:-8181}:8000"
     environment:
       - DATABASE_URL=${DATABASE_URL:-sqlite+aiosqlite:///./data/fleet.db}
       - MQTT_BROKER_HOST=mosquitto
       - MQTT_BROKER_PORT=1883
       - LOG_LEVEL=INFO
+      - EXTERNAL_PORT=${HOST_PORT:-8181}
       - FIRMWARE_STORAGE_PATH=/app/firmware
       - OTA_TIMEOUT_SECONDS=120
       - MAX_RETRY_COUNT=3
-      - OTA_FIRMWARE_BASE_URL=${OTA_FIRMWARE_BASE_URL:-http://localhost:8000}
+      - OTA_FIRMWARE_BASE_URL=${OTA_FIRMWARE_BASE_URL:-}
       - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-}
       - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET:-}
-      - GOOGLE_REDIRECT_URI=${GOOGLE_REDIRECT_URI:-http://localhost:8000/auth/callback}
+      - GOOGLE_REDIRECT_URI=${GOOGLE_REDIRECT_URI:-}
       - JWT_SECRET_KEY=${JWT_SECRET_KEY:-}
       - ADMIN_USERNAME=${ADMIN_USERNAME:-admin}
       - ADMIN_PASSWORD=${ADMIN_PASSWORD:-adminadmin}

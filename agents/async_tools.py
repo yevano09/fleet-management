@@ -11,7 +11,7 @@ Usage:
 """
 
 import logging
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Device, DeviceStatus, Firmware, OtaDeployment, OtaStatus, V2gSchedule
@@ -50,6 +50,7 @@ async def async_list_devices(db: AsyncSession, status: str | None = None) -> dic
                 "last_seen": d.last_seen.isoformat() if d.last_seen else None,
                 "ip_address": d.ip_address or "",
                 "previous_firmware_version": d.previous_firmware_version or "",
+                "mqtt_client_id": d.mqtt_client_id or "",
                 "soc": d.soc,
                 "soh": d.soh,
                 "battery_temp": d.battery_temp,
@@ -248,7 +249,90 @@ async def async_detect_anomalies(db: AsyncSession) -> list[dict]:
             "timestamp": ts,
         })
 
+    # ── 5. Individual device offline (new) ──
+    for d in devices:
+        if d.get("status") == "offline":
+            last_seen = d.get("last_seen")
+            if last_seen:
+                from datetime import datetime
+                try:
+                    dt = datetime.fromisoformat(last_seen)
+                    elapsed = (now - dt).total_seconds()
+                    if elapsed > 300:  # 5 minutes
+                        anomalies.append({
+                            "type": "device_offline",
+                            "severity": "warning",
+                            "message": f"Device '{d['name']}' has been offline for {int(elapsed//60)} minutes.",
+                            "affected_device_ids": [d["id"]],
+                            "timestamp": ts,
+                        })
+                except Exception:
+                    pass
+
+    # ── 6. V2G revenue drop (new) ──
+    v2g_schedules = await async_list_v2g_schedules(db)
+    total_revenue = sum(
+        s.get("projected_revenue_dollars", 0.0)
+        for s in v2g_schedules.get("schedules", [])
+    )
+    if total_revenue < 0 and len(devices) > 0:
+        anomalies.append({
+            "type": "v2g_revenue_drop",
+            "severity": "warning",
+            "message": f"V2G projected revenue is negative (${total_revenue:.2f}). "
+                       f"Check spot prices and degradation costs.",
+            "affected_device_ids": [],
+            "timestamp": ts,
+        })
+
     return anomalies
+
+
+# ---------------------------------------------------------------------------
+# Alert processing
+# ---------------------------------------------------------------------------
+
+async def async_process_anomalies(db: AsyncSession, anomalies: list[dict]) -> list[dict]:
+    """Run anomalies through the alert engine: dedup, persist, notify.
+
+    Returns processed alerts with status and IDs.
+    """
+    from app.alert_engine import AlertEngine
+    engine = AlertEngine(db)
+    return await engine.process_anomalies(anomalies)
+
+
+async def async_get_alerts(db: AsyncSession, status: str = None, severity: str = None) -> dict:
+    """Fetch alerts from DB.
+
+    Returns: {alerts: [...], total: N}
+    """
+    from app.alert_engine import AlertEngine
+    engine = AlertEngine(db)
+    history = await engine.get_alert_history(status=status, severity=severity, limit=100)
+    return history
+
+
+async def async_acknowledge_alert(db: AsyncSession, alert_id: str, user: str) -> dict:
+    """Acknowledge an alert.
+
+    Returns: {success: bool, message: str}
+    """
+    from app.alert_engine import AlertEngine
+    engine = AlertEngine(db)
+    ok = await engine.acknowledge_alert(alert_id, user)
+    return {"success": ok, "message": "Alert acknowledged" if ok else "Alert not found"}
+
+
+async def async_resolve_alert(db: AsyncSession, alert_id: str) -> dict:
+    """Resolve an alert.
+
+    Returns: {success: bool, message: str}
+    """
+    from app.alert_engine import AlertEngine
+    engine = AlertEngine(db)
+    ok = await engine.resolve_alert(alert_id)
+    return {"success": ok, "message": "Alert resolved" if ok else "Alert not found"}
 
 
 async def async_plan_ota_campaign(db: AsyncSession, firmware_version: str) -> dict:
@@ -313,6 +397,194 @@ async def async_plan_ota_campaign(db: AsyncSession, firmware_version: str) -> di
             f"through {len(phases)} rollout phases. "
             f"Estimated completion: ~15 minutes."
         ),
+    }
+
+
+async def async_onboard_device(
+    db: AsyncSession,
+    name: str,
+    firmware_version: str = "",
+    ip_address: str = "",
+    mqtt_client_id: str = "",
+    auto_register: bool = False,
+) -> dict:
+    """Check conflicts, recommend firmware, optionally register a new device.
+
+    Returns an onboarding report with conflicts, recommended firmware,
+    suggested initial config, and (if auto_register) the created device.
+    """
+    conflicts = []
+    devices_data = await async_list_devices(db)
+    existing_devices = devices_data.get("devices", [])
+
+    for d in existing_devices:
+        if d["name"].lower() == name.lower():
+            conflicts.append({
+                "type": "name",
+                "existing_device_id": d["id"],
+                "message": f"Device name '{name}' is already used by device {d['id'][:8]}...",
+            })
+        if mqtt_client_id and d.get("mqtt_client_id") == mqtt_client_id:
+            conflicts.append({
+                "type": "mqtt_client_id",
+                "existing_device_id": d["id"],
+                "message": f"MQTT client ID '{mqtt_client_id}' is already assigned to device {d['id'][:8]}...",
+            })
+
+    fw_list = await async_list_firmware(db)
+    recommended_fw = None
+    if firmware_version:
+        recommended_fw = next((f for f in fw_list if f["version"] == firmware_version), None)
+        if not recommended_fw and fw_list:
+            recommended_fw = fw_list[0]
+    elif fw_list:
+        recommended_fw = fw_list[0]
+
+    initial_config = {
+        "heartbeat_interval_seconds": 10,
+        "ota_poll_interval_seconds": 60,
+        "log_level": "INFO",
+    }
+
+    device = None
+    registration_status = "skipped"
+    if auto_register and not conflicts:
+        new_device = Device(
+            name=name,
+            firmware_version=recommended_fw["version"] if recommended_fw else "1.0.0",
+            status=DeviceStatus.online,
+            last_seen=utcnow(),
+            ip_address=ip_address or "",
+            mqtt_client_id=mqtt_client_id or None,
+        )
+        db.add(new_device)
+        await db.commit()
+        await db.refresh(new_device)
+        device = {
+            "id": new_device.id,
+            "name": new_device.name,
+            "firmware_version": new_device.firmware_version,
+            "status": new_device.status.value,
+            "mqtt_client_id": new_device.mqtt_client_id or "",
+            "ip_address": new_device.ip_address or "",
+            "last_seen": new_device.last_seen.isoformat() if new_device.last_seen else None,
+        }
+        registration_status = "created"
+
+    online_count = sum(1 for d in existing_devices if d.get("status") == "online")
+
+    return {
+        "onboarding_possible": len(conflicts) == 0,
+        "conflicts": conflicts,
+        "recommended_firmware": recommended_fw,
+        "initial_config": initial_config,
+        "device": device,
+        "registration_status": registration_status,
+        "fleet_state": {
+            "total_devices": devices_data.get("total", 0),
+            "online_devices": online_count,
+        },
+    }
+
+
+# ---------------------------------------------------------------------------
+# Aegis remediation tools (Sprint 2)
+# ---------------------------------------------------------------------------
+
+
+async def async_detect_resource_pressure(db: AsyncSession) -> dict:
+    """Check for resource pressure signals from Prometheus metrics.
+
+    Returns: {pressure_detected: bool, signals: [...], metrics_summary: str}
+    """
+    from app.aegis.engine import AegisEngine
+    engine = AegisEngine()
+    metrics_text = await engine._scrape_metrics()
+    if not metrics_text:
+        return {"pressure_detected": False, "signals": [], "metrics_summary": "No metrics available"}
+
+    signals = engine._classify_metrics(metrics_text)
+    return {
+        "pressure_detected": len(signals) > 0,
+        "signals": [s.model_dump() for s in signals],
+        "metrics_summary": f"{len(signals)} signal(s) detected" if signals else "All metrics within normal range",
+    }
+
+
+async def async_run_remediation_cycle(db: AsyncSession) -> dict:
+    """Execute one full Aegis remediation cycle: scrape -> classify -> decide -> act.
+
+    Returns: {cycle_completed: bool, remediations_created: int, summary: str}
+    """
+    from app.aegis.engine import AegisEngine
+    engine = AegisEngine()
+    await engine.run_cycle(db)
+    from app.aegis.models import Remediation
+    from sqlalchemy import select, func
+    result = await db.execute(select(func.count()).select_from(Remediation))
+    total = result.scalar() or 0
+    return {
+        "cycle_completed": True,
+        "remediations_created": total,
+        "summary": f"Remediation cycle completed. Total remediations: {total}",
+    }
+
+
+async def async_get_remediation_history(
+    db: AsyncSession,
+    status: str = None,
+    action: str = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> dict:
+    """Fetch remediation history from DB.
+
+    Returns: {remediations: [...], total: N, limit, offset}
+    """
+    from app.aegis.models import Remediation
+    query = select(Remediation)
+    count_query = select(func.count()).select_from(Remediation)
+
+    if status:
+        query = query.where(Remediation.status == status)
+        count_query = count_query.where(Remediation.status == status)
+    if action:
+        query = query.where(Remediation.action_name == action)
+        count_query = count_query.where(Remediation.action_name == action)
+
+    query = query.order_by(Remediation.started_at.desc())
+
+    total_result = await db.execute(count_query)
+    total = total_result.scalar() or 0
+
+    result = await db.execute(query.offset(offset).limit(limit))
+    remediations = result.scalars().all()
+
+    return {
+        "remediations": [
+            {
+                "id": r.id,
+                "signal_id": r.signal_id,
+                "metric_name": r.metric_name,
+                "value": r.value,
+                "threshold": r.threshold,
+                "severity": r.severity,
+                "rule_name": r.rule_name,
+                "action_name": r.action_name,
+                "status": r.status,
+                "error_message": r.error_message,
+                "input_snapshot": r.input_snapshot,
+                "output_snapshot": r.output_snapshot,
+                "started_at": r.started_at.isoformat() if r.started_at else None,
+                "completed_at": r.completed_at.isoformat() if r.completed_at else None,
+                "duration_ms": r.duration_ms,
+                "device_ids": r.device_ids,
+            }
+            for r in remediations
+        ],
+        "total": total,
+        "limit": limit,
+        "offset": offset,
     }
 
 

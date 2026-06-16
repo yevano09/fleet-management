@@ -1,0 +1,1876 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Fleet Commander · Architecture</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:        #0a0d12;
+    --bg-2:      #0f1419;
+    --panel:     #121821;
+    --panel-2:   #182030;
+    --border:    #1f2937;
+    --border-2:  #2a3650;
+    --text:      #e6edf7;
+    --muted:     #8492a8;
+    --dim:       #5a6679;
+    --c-user:        #46f9b8;
+    --c-orch:        #6aa9ff;
+    --c-compute:      #ff6b8a;
+    --c-embed:       #ffc14d;
+    --c-vector:      #b388ff;
+    --c-seed:        #ff9457;
+    --brand-violet:  #a201ff;
+    --brand-mint:    #46f9b8;
+    --radius:        14px;
+    --radius-sm:     8px;
+    --shadow-soft:   0 10px 30px rgba(0,0,0,.45);
+    --shadow-pop:    0 0 0 1px rgba(255,255,255,.04), 0 18px 50px rgba(0,0,0,.55);
+    --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+    --sans: "Space Grotesk", system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  *{ box-sizing:border-box; }
+  html,body{ margin:0; padding:0; }
+  body{
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    font-feature-settings: "ss01","ss02","cv11";
+    min-height:100vh;
+    overflow-x:hidden;
+    background-image:
+      radial-gradient(1200px 600px at 15% -10%, rgba(106,169,255,.07), transparent 60%),
+      radial-gradient(1000px 500px at 100% 0%, rgba(162,1,255,.06), transparent 60%),
+      radial-gradient(800px 600px at 50% 120%, rgba(70,249,184,.04), transparent 60%);
+  }
+  body::before{
+    content:"";
+    position:fixed; inset:0; pointer-events:none; z-index:0;
+    background-image:
+      linear-gradient(rgba(255,255,255,.018) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,255,255,.018) 1px, transparent 1px);
+    background-size: 48px 48px;
+    mask-image: radial-gradient(ellipse at 50% 30%, #000 30%, transparent 75%);
+  }
+  header{
+    position:relative; z-index:2;
+    padding: 36px 32px 12px;
+    max-width: 1480px; margin: 0 auto;
+  }
+  .eyebrow{
+    display:inline-flex; align-items:center; gap:8px;
+    font-family: var(--mono); font-size:11px; letter-spacing:.18em;
+    color: var(--muted); text-transform: uppercase;
+    padding: 6px 10px;
+    border:1px solid var(--border);
+    border-radius: 999px;
+    background: rgba(255,255,255,.015);
+  }
+  .eyebrow .dot{
+    width:6px; height:6px; border-radius:50%; background: var(--brand-mint);
+    box-shadow: 0 0 12px var(--brand-mint);
+  }
+  h1{
+    margin: 16px 0 6px;
+    font-size: clamp(28px, 3.6vw, 44px);
+    font-weight: 600; letter-spacing:-.02em;
+    line-height: 1.05;
+  }
+  h1 .accent{
+    background: linear-gradient(90deg, var(--brand-mint), var(--c-orch) 50%, var(--brand-violet));
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  .sub{
+    color: var(--muted); font-size: 15px; max-width: 70ch;
+    margin: 0;
+  }
+  .controls{
+    position:relative; z-index:2;
+    max-width: 1480px; margin: 28px auto 0; padding: 0 32px;
+    display:flex; flex-wrap:wrap; gap:18px;
+    align-items:center; justify-content:space-between;
+  }
+  .modepick{
+    display:inline-flex; padding:4px;
+    background: var(--panel); border:1px solid var(--border);
+    border-radius: 12px;
+  }
+  .modepick button{
+    border:0; background:transparent; color: var(--muted);
+    font-family: var(--sans); font-weight:500; font-size:13px;
+    padding: 9px 16px; border-radius: 8px; cursor:pointer;
+    display:inline-flex; align-items:center; gap:8px;
+    transition: all .25s ease;
+  }
+  .modepick button .pill{
+    font-family: var(--mono); font-size:10px;
+    padding: 2px 6px; border-radius: 4px;
+    background: rgba(255,255,255,.05); color: var(--muted);
+  }
+  .modepick button[aria-pressed="true"]{
+    background: linear-gradient(180deg, rgba(255,255,255,.06), rgba(255,255,255,.02));
+    color: var(--text);
+    box-shadow: inset 0 0 0 1px var(--border-2);
+  }
+  .modepick button[aria-pressed="true"][data-mode="dev"] .pill{ background: rgba(106,169,255,.16); color: var(--c-orch); }
+  .modepick button[aria-pressed="true"][data-mode="prod"] .pill{ background: rgba(162,1,255,.18); color: #d9a6ff; }
+  .legend{
+    display:flex; flex-wrap:wrap; gap:14px;
+    font-family: var(--mono); font-size:11px; color: var(--muted);
+  }
+  .legend .item{ display:inline-flex; align-items:center; gap:6px; }
+  .legend .swatch{ width:10px; height:10px; border-radius:3px; box-shadow: 0 0 0 1px rgba(255,255,255,.06); }
+  .flowtabs{
+    position:relative; z-index:2;
+    max-width: 1480px; margin: 18px auto 0; padding: 0 32px;
+    display:flex; flex-wrap:wrap; gap:8px;
+  }
+  .flowtab{
+    appearance:none; border:1px solid var(--border);
+    background: var(--panel); color: var(--muted);
+    font-family: var(--mono); font-size: 12px; letter-spacing:.04em;
+    padding: 10px 14px; border-radius: 10px;
+    display:inline-flex; align-items:center; gap:10px;
+    cursor:pointer; transition: all .2s ease;
+  }
+  .flowtab .num{
+    font-size:10px;
+    background: rgba(255,255,255,.06); color: var(--muted);
+    padding: 2px 6px; border-radius: 4px;
+  }
+  .flowtab:hover{ color: var(--text); border-color: var(--border-2); }
+  .flowtab[aria-pressed="true"]{
+    border-color: var(--brand-mint);
+    color: var(--text);
+    background: linear-gradient(180deg, rgba(70,249,184,.10), rgba(70,249,184,.02));
+    box-shadow: 0 0 0 4px rgba(70,249,184,.06);
+  }
+  .flowtab[aria-pressed="true"] .num{
+    background: var(--brand-mint); color: #08120e;
+  }
+  main{
+    position:relative; z-index:1;
+    max-width: 1480px; margin: 22px auto 80px; padding: 0 32px;
+    display:grid; grid-template-columns: minmax(0, 1fr) 400px; gap: 24px;
+    align-items: start;
+  }
+  @media (max-width: 1180px){
+    main{ grid-template-columns: 1fr; }
+  }
+  .canvas{
+    position:relative;
+    background:
+      radial-gradient(800px 400px at 50% 20%, rgba(106,169,255,.06), transparent 60%),
+      linear-gradient(180deg, var(--panel) 0%, var(--bg-2) 100%);
+    border: 1px solid var(--border);
+    border-radius: 18px;
+    padding: 36px 28px 28px;
+    min-height: 540px;
+    box-shadow: var(--shadow-soft);
+    overflow: hidden;
+  }
+  .canvas::before{
+    content:""; position:absolute; inset:0; pointer-events:none;
+    background-image:
+      linear-gradient(rgba(255,255,255,.02) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,255,255,.02) 1px, transparent 1px);
+    background-size: 32px 32px;
+    mask-image: radial-gradient(circle at 50% 40%, #000 30%, transparent 80%);
+  }
+  .canvas-head{
+    display:flex; justify-content:space-between; align-items:center;
+    margin-bottom: 18px; position:relative; z-index:2;
+  }
+  .canvas-title{
+    font-family: var(--mono); font-size:11px; letter-spacing:.16em;
+    color: var(--muted); text-transform: uppercase;
+  }
+  .player{
+    display:flex; gap:6px; align-items:center;
+    font-family: var(--mono); font-size: 11px; color: var(--muted);
+  }
+  .player button{
+    appearance:none; border:1px solid var(--border); background: var(--panel-2);
+    color: var(--muted); cursor:pointer;
+    width: 30px; height: 30px; border-radius: 8px;
+    display:inline-flex; align-items:center; justify-content:center;
+    transition: all .15s ease;
+  }
+  .player button:hover{ color: var(--text); border-color: var(--border-2); }
+  .player button[aria-pressed="true"]{
+    background: rgba(70,249,184,.12); border-color: var(--brand-mint); color: var(--brand-mint);
+  }
+  .player .stepidx{
+    padding: 0 10px; min-width: 64px; text-align:center;
+  }
+  .progress-track{
+    width:100%; height: 3px; background: var(--border);
+    border-radius: 2px; margin-top: 4px;
+    grid-column: 1 / -1;
+  }
+  .progress-fill{
+    height:100%; border-radius: 2px;
+    background: var(--brand-mint);
+    transition: width .35s ease;
+    box-shadow: 0 0 8px rgba(70,249,184,.3);
+  }
+  .stage{
+    position:relative;
+    width: 100%;
+    height: 460px;
+  }
+  .stage svg.wires{
+    position:absolute; inset:0; width:100%; height:100%;
+    pointer-events:none;
+  }
+  .node{
+    position:absolute;
+    width: 150px;
+    padding: 14px 14px 12px;
+    background: var(--panel-2);
+    border: 1px solid var(--border-2);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-soft);
+    transition: transform .35s cubic-bezier(.2,.8,.2,1), opacity .35s ease, border-color .25s ease, box-shadow .25s ease;
+    z-index: 2;
+    cursor: pointer;
+    user-select: none;
+    touch-action: none;
+  }
+  .node.dragging{
+    z-index: 100;
+    cursor: grabbing;
+    transition: none;
+    box-shadow: 0 0 0 2px var(--c), 0 20px 60px rgba(0,0,0,.5);
+    transform: scale(1.04);
+  }
+  .node:hover{
+    border-color: color-mix(in srgb, var(--c) 60%, var(--border-2));
+    transform: translateY(-1px);
+    box-shadow: var(--shadow-soft), 0 0 0 1px color-mix(in srgb, var(--c) 30%, transparent);
+  }
+  .node:hover .label{ color: var(--c); }
+  .node:focus-visible{
+    outline: 2px solid var(--c);
+    outline-offset: 4px;
+  }
+  .node .label{
+    font-size: 13px; font-weight: 600; letter-spacing:-.01em;
+    margin: 0 0 4px;
+  }
+  .node .tech{
+    font-family: var(--mono); font-size: 10.5px; color: var(--muted);
+    line-height: 1.4;
+  }
+  .node .port{
+    margin-top: 8px;
+    font-family: var(--mono); font-size: 10.5px;
+    color: var(--c-orch);
+  }
+  .node .icon{
+    width: 28px; height: 28px; border-radius: 8px;
+    display:inline-flex; align-items:center; justify-content:center;
+    margin-bottom: 8px;
+    background: rgba(255,255,255,.04);
+    border: 1px solid var(--border-2);
+  }
+  .node[data-role="user"]   { --c: var(--c-user); }
+  .node[data-role="orch"]   { --c: var(--c-orch); }
+  .node[data-role="compute"] { --c: var(--c-compute); }
+  .node[data-role="embed"]  { --c: var(--c-embed); }
+  .node[data-role="vector"] { --c: var(--c-vector); }
+  .node[data-role="seed"]   { --c: var(--c-seed); }
+  .node .icon{ color: var(--c); }
+  .node::before{
+    content:""; position:absolute; left:0; top:14px; bottom:14px; width:3px;
+    background: var(--c); border-radius: 3px;
+    opacity:.7;
+  }
+  .node.hidden{ opacity: 0; transform: scale(.92); pointer-events: none; }
+  @keyframes node-shake {
+    0%, 100%{ transform: translateX(0); }
+    20%{ transform: translateX(-4px); }
+    40%{ transform: translateX(4px); }
+    60%{ transform: translateX(-3px); }
+    80%{ transform: translateX(2px); }
+  }
+  .node.active{
+    border-color: var(--c);
+    box-shadow:
+      0 0 0 1px var(--c),
+      0 0 0 6px color-mix(in srgb, var(--c) 18%, transparent),
+      var(--shadow-pop);
+    transform: translateY(-2px);
+  }
+  .node.active-from{
+    border-color: var(--c);
+    box-shadow:
+      0 0 0 1px color-mix(in srgb, var(--c) 70%, transparent),
+      0 0 0 4px color-mix(in srgb, var(--c) 10%, transparent),
+      var(--shadow-soft);
+    opacity: .95;
+  }
+  .node.participant{
+    opacity: .8;
+    filter: saturate(.85);
+  }
+  .node.dimmed{ opacity: .25; filter: saturate(.4); }
+  .node .step-badge{
+    position:absolute; top:-10px; right:-10px;
+    width:24px; height:24px; border-radius:50%;
+    background: var(--c); color:#0a0d12;
+    font-family: var(--mono); font-weight:600; font-size: 11px;
+    display:flex; align-items:center; justify-content:center;
+    opacity: 0; transform: scale(.6);
+    transition: opacity .2s ease, transform .25s cubic-bezier(.2,1.2,.2,1);
+    box-shadow: 0 4px 14px rgba(0,0,0,.4), 0 0 0 2px var(--bg-2);
+  }
+  .node.has-badge .step-badge{ opacity:1; transform: scale(1); }
+  .wire{
+    fill:none;
+    stroke: var(--border-2);
+    stroke-width: 1.5;
+    stroke-dasharray: 4 6;
+    opacity: .55;
+    transition: opacity .3s ease, stroke .3s ease;
+  }
+  .wire.active{
+    stroke: var(--wire-color, var(--brand-mint));
+    stroke-width: 2.5;
+    stroke-dasharray: 0;
+    opacity: 1;
+    filter: drop-shadow(0 0 6px var(--wire-color, var(--brand-mint)));
+  }
+  .wire.preview{
+    stroke: var(--wire-color, var(--border-2));
+    stroke-width: 1.5;
+    stroke-dasharray: 3 5;
+    opacity: .5;
+  }
+  .wire.muted{ opacity: .08; }
+  .packet{
+    r: 5;
+    fill: var(--wire-color, var(--brand-mint));
+    filter: drop-shadow(0 0 8px var(--wire-color, var(--brand-mint)));
+    opacity: 0;
+  }
+  .packet.run{ opacity: 1; }
+  .wire-label{
+    font-family: var(--mono); font-size: 10px;
+    fill: var(--muted);
+    paint-order: stroke;
+    stroke: var(--bg-2); stroke-width: 4;
+    transition: fill .3s ease;
+  }
+  .wire-label.active{ fill: var(--wire-color, var(--brand-mint)); font-weight: 600; }
+  .wire-label.preview{ fill: var(--muted); opacity: .8; }
+  aside{
+    position: sticky; top: 18px;
+    background:
+      linear-gradient(180deg, rgba(255,255,255,.025), rgba(255,255,255,.005));
+    border: 1px solid var(--border);
+    border-radius: 18px;
+    padding: 20px 20px 18px;
+    box-shadow: var(--shadow-soft);
+    min-height: 540px;
+    display:flex; flex-direction:column;
+  }
+  .panel-head{
+    display:flex; justify-content:space-between; align-items:flex-start;
+    gap: 12px;
+    padding-bottom: 14px;
+    border-bottom: 1px dashed var(--border);
+  }
+  .panel-step{
+    font-family: var(--mono); font-size: 11px; letter-spacing:.16em;
+    color: var(--muted); text-transform: uppercase;
+  }
+  .panel-step strong{
+    color: var(--text); font-weight: 600;
+  }
+  .panel-mode{
+    font-family: var(--mono); font-size: 10px;
+    padding: 4px 8px; border-radius: 6px;
+    background: rgba(255,255,255,.04); color: var(--muted);
+    border:1px solid var(--border);
+  }
+  .panel-mode[data-mode="dev"]{ color: var(--c-orch); border-color: rgba(106,169,255,.3); }
+  .panel-mode[data-mode="prod"]{ color: #d9a6ff; border-color: rgba(162,1,255,.35); }
+  .panel-title{
+    font-size: 18px; font-weight: 600; margin: 14px 0 4px;
+    letter-spacing:-.01em;
+  }
+  .panel-route{
+    font-family: var(--mono); font-size: 12px;
+    color: var(--muted); margin-bottom: 12px;
+    display:inline-flex; align-items:center; gap:8px; flex-wrap:wrap;
+  }
+  .panel-route .from, .panel-route .to{
+    color: var(--text);
+    padding: 3px 7px; border-radius: 6px;
+    background: rgba(255,255,255,.04);
+    border:1px solid var(--border);
+  }
+  .panel-route .arrow{ color: var(--brand-mint); }
+  .panel-desc{
+    color: var(--muted); font-size: 13.5px; line-height: 1.55;
+    margin: 0 0 14px;
+  }
+  .panel-desc em{ color: var(--text); font-style: normal; }
+  .panel-payload{
+    font-family: var(--mono); font-size: 11.5px;
+    background: #08111c;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px 14px;
+    color: #c9d6e8;
+    overflow:auto; max-height: 260px;
+    line-height: 1.6;
+    margin: 0 0 14px;
+    white-space: pre;
+    -webkit-overflow-scrolling: touch;
+  }
+  .panel-meta{
+    margin-top:auto; padding-top: 12px;
+    border-top: 1px dashed var(--border);
+    display:flex; gap: 8px; flex-wrap:wrap;
+  }
+  .chip{
+    font-family: var(--mono); font-size: 10.5px;
+    padding: 5px 9px; border-radius: 999px;
+    background: rgba(255,255,255,.035); border:1px solid var(--border);
+    color: var(--muted);
+  }
+  .chip.lat::before{ content:"⏱ "; color: var(--brand-mint); }
+  .chip.size::before{ content:"⛁ "; color: var(--c-vector); }
+  .step-nav{
+    display:flex; gap:8px; margin-top: 14px;
+  }
+  .step-nav button{
+    flex:1; padding: 9px 12px;
+    background: var(--panel-2); color: var(--text);
+    border:1px solid var(--border); border-radius: 9px;
+    font-family: var(--sans); font-size: 12.5px; cursor:pointer;
+    transition: all .15s ease;
+    display:inline-flex; align-items:center; justify-content:center; gap:6px;
+  }
+  .step-nav button:hover{ border-color: var(--brand-mint); color: var(--brand-mint); }
+  .step-nav button:disabled{ opacity:.4; cursor:not-allowed; }
+  .scenario-note{
+    position: relative; z-index: 2;
+    max-width: 1480px; margin: 14px auto 0; padding: 0 32px;
+    color: var(--dim); font-size: 12px;
+    font-family: var(--mono);
+  }
+  .scenario-note kbd{
+    font-family: var(--mono); font-size: 11px;
+    padding: 2px 6px; border-radius: 4px;
+    background: var(--panel-2); border:1px solid var(--border); color: var(--text);
+  }
+  @media (max-width: 720px){
+    header{ padding: 24px 18px 8px; }
+    .controls, .flowtabs, main, .scenario-note{ padding-left: 18px; padding-right: 18px; }
+    main{ gap:18px; }
+    .canvas{ padding: 22px 14px 18px; }
+    .stage{ height: 420px; }
+    .node{ width: 132px; padding: 12px; }
+    .node .label{ font-size: 12px; }
+    .node .tech{ font-size: 10px; }
+    aside{ position: static; }
+  }
+  button:focus-visible, .flowtab:focus-visible{
+    outline: 2px solid var(--brand-mint); outline-offset: 2px;
+  }
+  body.light{
+    --bg:        #f6f7fa;
+    --bg-2:      #ffffff;
+    --panel:     #ffffff;
+    --panel-2:   #f1f3f8;
+    --border:    #e2e6ee;
+    --border-2:  #c8d0dd;
+    --text:      #0f1419;
+    --muted:     #555f70;
+    --dim:       #8492a8;
+    --c-user:    #00b377;
+    --c-orch:    #2a6fdb;
+    --c-compute: #d63a5f;
+    --c-embed:   #c98a00;
+    --c-vector:  #7a4ed1;
+    --c-seed:    #d96e2c;
+    --brand-violet: #7a1cd9;
+    --brand-mint:   #00b377;
+    --shadow-soft: 0 4px 18px rgba(15,20,25,.06);
+    --shadow-pop:  0 0 0 1px rgba(15,20,25,.04), 0 8px 24px rgba(15,20,25,.08);
+    background-image:
+      radial-gradient(1200px 600px at 15% -10%, rgba(42,111,219,.05), transparent 60%),
+      radial-gradient(1000px 500px at 100% 0%, rgba(122,28,217,.04), transparent 60%),
+      radial-gradient(800px 600px at 50% 120%, rgba(0,179,119,.03), transparent 60%);
+  }
+  body.light::before{
+    background-image:
+      linear-gradient(rgba(0,0,0,.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(0,0,0,.03) 1px, transparent 1px);
+  }
+  body.light .panel-payload{
+    background: #f0f2f7;
+    color: #1e2838;
+    border-color: var(--border);
+  }
+  body.light .eyebrow{ background: rgba(0,0,0,.02); }
+  body.light .eyebrow .dot{ box-shadow: 0 0 8px var(--brand-mint); }
+  body.light .legend .swatch{ box-shadow: 0 0 0 1px rgba(0,0,0,.08); }
+  body.light .wire-label{ stroke: var(--panel); stroke-width: 5; }
+  body.light .node{ box-shadow: 0 2px 8px rgba(0,0,0,.06); }
+  body.light .node.active{ box-shadow: 0 0 0 1px var(--c), 0 0 0 6px color-mix(in srgb, var(--c) 12%, transparent), 0 4px 16px rgba(0,0,0,.08); }
+  body.light .wire.active{ filter: drop-shadow(0 0 4px var(--wire-color, var(--brand-mint))); }
+  body.light .chip{ background: rgba(0,0,0,.04); }
+  body.light aside{ background: linear-gradient(180deg, rgba(0,0,0,.01), rgba(0,0,0,.005)); }
+  .theme-toggle, .layout-reset, .fullscreen-toggle{
+    appearance:none; border:1px solid var(--border); background: var(--panel);
+    color: var(--muted); cursor:pointer;
+    width: 34px; height: 34px; border-radius: 10px;
+    display:inline-flex; align-items:center; justify-content:center;
+    transition: all .2s ease;
+    flex-shrink: 0;
+  }
+  .theme-toggle:hover, .layout-reset:hover, .fullscreen-toggle:hover{ color: var(--text); border-color: var(--border-2); }
+  .layout-reset{ display:none; }
+  .layout-reset.has-custom{ display:inline-flex; }
+  .theme-toggle .icon-sun{ display:none; }
+  body.light .theme-toggle .icon-moon{ display:none; }
+  body.light .theme-toggle .icon-sun{ display:block; }
+  .canvas.is-fullscreen{
+    position:fixed; inset:0; z-index:9999;
+    border-radius:0; margin:0; max-width:none;
+    min-height:100vh;
+    overflow:auto;
+  }
+  .canvas.is-fullscreen .stage{ height: calc(100vh - 80px); }
+  .canvas.is-fullscreen ~ aside{ display:none; }
+</style>
+</head>
+<body>
+
+<header>
+  <span class="eyebrow"><span class="dot"></span> IoT Fleet Management</span>
+  <h1>Fleet Commander <span class="accent">Architecture</span></h1>
+  <p class="sub">Production-grade IoT device management — FastAPI backend, MQTT device communication, Prometheus/Grafana observability, OTA firmware updates with rollback, AI agent recommendations, and multi-channel alerting.</p>
+</header>
+
+<div class="controls">
+  <div class="modepick" role="tablist" aria-label="Deployment mode">
+    <button data-mode="dev" aria-pressed="true">Dev <span class="pill">SQLite</span></button>
+    <button data-mode="prod"  aria-pressed="false">Prod <span class="pill">PostgreSQL</span></button>
+  </div>
+
+  <div class="legend" aria-label="Component legend">
+    <span class="item"><span class="swatch" style="background:var(--c-user)"></span> User</span>
+    <span class="item"><span class="swatch" style="background:var(--c-orch)"></span> Service</span>
+    <span class="item"><span class="swatch" style="background:var(--c-compute)"></span> Device/Compute</span>
+    <span class="item"><span class="swatch" style="background:var(--c-embed)"></span> Metrics</span>
+    <span class="item"><span class="swatch" style="background:var(--c-vector)"></span> Datastore</span>
+    <span class="item"><span class="swatch" style="background:var(--c-seed)"></span> Notifications</span>
+  </div>
+
+  <button class="theme-toggle" id="btnTheme" title="Toggle light/dark theme (T)" aria-label="Toggle theme">
+    <svg class="icon-moon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+    <svg class="icon-sun" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+  </button>
+
+  <button class="layout-reset" id="btnResetLayout" title="Reset node positions (R)" aria-label="Reset layout">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
+  </button>
+
+  <button class="fullscreen-toggle" id="btnFullscreen" title="Fullscreen (F)" aria-label="Toggle fullscreen">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>
+  </button>
+</div>
+
+<nav class="flowtabs" aria-label="Scenarios">
+  <button class="flowtab" data-flow="flow_register" aria-pressed="true"><span class="num">1</span> Device Registration</button>
+  <button class="flowtab" data-flow="flow_ota" aria-pressed="false"><span class="num">2</span> OTA Firmware Update</button>
+  <button class="flowtab" data-flow="flow_dashboard" aria-pressed="false"><span class="num">3</span> Fleet Dashboard</button>
+  <button class="flowtab" data-flow="flow_agents" aria-pressed="false"><span class="num">4</span> Agent Recommendations</button>
+  <button class="flowtab" data-flow="flow_alerts" aria-pressed="false"><span class="num">5</span> Alert Pipeline</button>
+</nav>
+
+<p class="scenario-note">Shortcuts: <kbd>Space</kbd> play/pause · <kbd>&larr;</kbd>/<kbd>&rarr;</kbd> step · <kbd>1</kbd>&ndash;<kbd>5</kbd> flow · <kbd>O</kbd> mode · <kbd>T</kbd> theme · <kbd>F</kbd> fullscreen · <kbd>R</kbd> reset layout · Drag nodes to reposition</p>
+
+<main>
+  <section class="canvas" aria-label="Architecture diagram">
+    <div class="canvas-head">
+      <span class="canvas-title">Pipeline · <span id="flowName">Device Registration</span></span>
+      <div class="player" role="group" aria-label="Playback controls">
+        <button id="btnPrev" title="Previous step (&larr;)" aria-label="Previous step">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
+        </button>
+        <button id="btnPlay" title="Play/Pause (Space)" aria-label="Play/Pause" aria-pressed="false">
+          <svg id="playIcon" width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="6 4 20 12 6 20 6 4"/></svg>
+        </button>
+        <button id="btnNext" title="Next step (&rarr;)" aria-label="Next step">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+        </button>
+        <span class="stepidx" id="stepIdx">0 / 0</span>
+      </div>
+    </div>
+    <div class="progress-track"><div class="progress-fill" id="progressFill" style="width:0%"></div></div>
+
+    <div class="stage" id="stage">
+      <!-- User / Browser -->
+      <div class="node" data-role="user" data-id="user" style="left: 2%; top: 38%;">
+        <div class="icon">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+        </div>
+        <div class="label">User (Browser)</div>
+        <div class="tech">Jinja2 · HTMX · auto-refresh</div>
+        <div class="port" data-port-dev="localhost:8000" data-port-prod="fleet.example.com">localhost:8000</div>
+        <span class="step-badge">·</span>
+      </div>
+
+      <!-- FastAPI Backend -->
+      <div class="node" data-role="orch" data-id="backend" style="left: 22%; top: 38%;">
+        <div class="icon">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        </div>
+        <div class="label">FastAPI Backend</div>
+        <div class="tech">Python · SQLAlchemy · async</div>
+        <div class="port">:8000 · REST + MQTT</div>
+        <span class="step-badge">·</span>
+      </div>
+
+      <!-- Database -->
+      <div class="node" data-role="vector" data-id="db" style="left: 48%; top: 38%;">
+        <div class="icon">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0 0 18 0V5"/><path d="M3 12a9 3 0 0 0 18 0"/></svg>
+        </div>
+        <div class="label" data-label-dev="SQLite" data-label-prod="PostgreSQL">SQLite</div>
+        <div class="tech" data-tech-dev="aiosqlite · fleet.db" data-tech-prod="psycopg2 · fleet@host">aiosqlite · fleet.db</div>
+        <div class="port" data-port-dev="file-based" data-port-prod=":5432">file-based</div>
+        <span class="step-badge">·</span>
+      </div>
+
+      <!-- Mosquitto MQTT Broker -->
+      <div class="node" data-role="orch" data-id="mqtt" style="left: 22%; top: 70%;">
+        <div class="icon">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 11a9 9 0 0 1 9 9"/><path d="M4 4a16 16 0 0 1 16 16"/><circle cx="5" cy="19" r="2"/></svg>
+        </div>
+        <div class="label">Mosquitto MQTT</div>
+        <div class="tech">eclipse-mosquitto:2 · pub/sub</div>
+        <div class="port">:1883 · iot/fleet/#</div>
+        <span class="step-badge">·</span>
+      </div>
+
+      <!-- Device Simulators -->
+      <div class="node" data-role="compute" data-id="simulator" style="left: 74%; top: 70%;">
+        <div class="icon">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg>
+        </div>
+        <div class="label">Device Simulator</div>
+        <div class="tech">5 virtual devices · 20% fail rate</div>
+        <div class="port">MQTT · heartbeat 10s</div>
+        <span class="step-badge">·</span>
+      </div>
+
+      <!-- Prometheus -->
+      <div class="node" data-role="embed" data-id="prometheus" style="left: 48%; top: 8%;">
+        <div class="icon">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+        </div>
+        <div class="label">Prometheus</div>
+        <div class="tech">v2.53.0 · 7d retention</div>
+        <div class="port">:9090 · scrapes /metrics</div>
+        <span class="step-badge">·</span>
+      </div>
+
+      <!-- Grafana -->
+      <div class="node" data-role="compute" data-id="grafana" style="left: 74%; top: 8%;">
+        <div class="icon">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>
+        </div>
+        <div class="label">Grafana</div>
+        <div class="tech">11.1.0 · pre-provisioned</div>
+        <div class="port">:3000 · admin/admin</div>
+        <span class="step-badge">·</span>
+      </div>
+
+      <!-- Alert Channels -->
+      <div class="node" data-role="seed" data-id="alerts" style="left: 74%; top: 38%;">
+        <div class="icon">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+        </div>
+        <div class="label">Alert Channels</div>
+        <div class="tech">Slack · Email · Webhook</div>
+        <div class="port">SMTP :587</div>
+        <span class="step-badge">·</span>
+      </div>
+
+      <svg class="wires" id="wires" aria-hidden="true">
+        <defs>
+          <marker id="ah-mint"   markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto" markerUnits="strokeWidth">
+            <path d="M0,0 L6,3 L0,6 Z" fill="var(--brand-mint)"/>
+          </marker>
+          <marker id="ah-sky"    markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto" markerUnits="strokeWidth">
+            <path d="M0,0 L6,3 L0,6 Z" fill="var(--c-orch)"/>
+          </marker>
+          <marker id="ah-amber"  markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto" markerUnits="strokeWidth">
+            <path d="M0,0 L6,3 L0,6 Z" fill="var(--c-embed)"/>
+          </marker>
+          <marker id="ah-violet" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto" markerUnits="strokeWidth">
+            <path d="M0,0 L6,3 L0,6 Z" fill="var(--c-vector)"/>
+          </marker>
+          <marker id="ah-mag"    markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto" markerUnits="strokeWidth">
+            <path d="M0,0 L6,3 L0,6 Z" fill="var(--c-compute)"/>
+          </marker>
+          <marker id="ah-orange" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto" markerUnits="strokeWidth">
+            <path d="M0,0 L6,3 L0,6 Z" fill="var(--c-seed)"/>
+          </marker>
+        </defs>
+      </svg>
+    </div>
+  </section>
+
+  <aside aria-label="Current step details" id="sidepanel">
+    <div class="panel-head">
+      <div class="panel-step">STEP <strong id="panelStepIdx">--</strong> / <span id="panelStepTotal">--</span></div>
+      <div class="panel-mode" id="panelMode" data-mode="dev">DEV</div>
+    </div>
+    <div class="panel-title" id="panelTitle">--</div>
+    <div class="panel-route" id="panelRoute"></div>
+    <p class="panel-desc" id="panelDesc">Select a flow and press Play to see details.</p>
+    <pre class="panel-payload" id="panelPayload"></pre>
+    <div class="panel-meta" id="panelMeta"></div>
+    <div class="step-nav">
+      <button id="btnPrev2">&larr; Previous</button>
+      <button id="btnNext2">Next &rarr;</button>
+    </div>
+  </aside>
+</main>
+
+<script>
+const flows = {
+  /* ───── Flow 1: Device Registration & Heartbeat ───── */
+  flow_register: {
+    name: "Device Registration (MQTT)",
+    note: "Device auto-registers on first connect, then sends periodic heartbeats",
+    steps: [
+      {
+        from:"simulator", to:"mqtt", color:"--c-compute",
+        title:"Device Connects & Registers",
+        route:"PUB iot/fleet/register",
+        desc:"Each simulated device connects to Mosquitto and publishes a registration message with its <em>device_id</em>, <em>name</em>, <em>firmware_version</em>, and <em>ip_address</em>.",
+        payload:
+`PUB iot/fleet/register QOS 1
+{
+  "device_id": "uuid-xxxx",
+  "name": "Device-001",
+  "firmware_version": "1.0.0",
+  "ip_address": "10.0.0.42"
+}`,
+        chips:["auto-register","QOS 1","on connect"]
+      },
+      {
+        from:"mqtt", to:"backend", color:"--c-orch",
+        title:"Backend Handles Registration",
+        route:"route register",
+        desc:"The MqttClient <code>_on_message</code> callback routes registration messages to <code>handle_mqtt_register()</code>. It checks for an existing device by <em>mqtt_client_id</em>, <em>id</em>, or <em>name</em>.",
+        payload:
+`# Incoming registration
+topic: iot/fleet/register
+handler: handle_mqtt_register()
+
+existing = find_device(mqtt_client_id)
+if existing:
+    existing.status = "online"
+    existing.last_seen = utcnow()
+    active_devices.inc()
+else:
+    device = Device(name=name, ...)
+    db.add(device)
+    active_devices.inc()
+    total_devices.inc()`,
+        chips:["~15ms","upsert logic"]
+      },
+      {
+        from:"backend", to:"db", color:"--c-vector",
+        title:"Persist Device Record",
+        route:"INSERT / UPDATE",
+        desc:"The device record is committed to the database — newly registered devices get a row inserted; returning devices get their <em>status</em> and <em>last_seen</em> updated.",
+        payload:
+`-- SQLite / PostgreSQL
+INSERT INTO devices (id, name, firmware_version,
+    status, last_seen, ip_address, mqtt_client_id)
+VALUES ('uuid-xxxx', 'Device-001', '1.0.0',
+    'online', '2026-06-15T10:30:00Z',
+    '10.0.0.42', 'sim-xxxxxx')
+
+-- OR (re-registration)
+UPDATE devices
+SET status = 'online',
+    last_seen = '2026-06-15T10:30:00Z',
+    ip_address = '10.0.0.42'
+WHERE mqtt_client_id = 'sim-xxxxxx'`,
+        chipsDev:["SQLite · fleet.db"],
+        chipsProd:["PostgreSQL · fleet DB"],
+        chips:["~5ms write"]
+      },
+      {
+        from:"simulator", to:"mqtt", color:"--c-compute",
+        title:"Periodic Heartbeat",
+        route:"PUB iot/fleet/{id}/heartbeat",
+        desc:"Every <em>10 seconds</em> each simulated device publishes a heartbeat with uptime, signal strength, and (for EV devices) battery telemetry: <em>SoC</em>, <em>SoH</em>, <em>temperature</em>, <em>plug_status</em>.",
+        payload:
+`PUB iot/fleet/device-xxx/heartbeat QOS 1
+{
+  "uptime_percentage": 98.2,
+  "signal_strength": -67,
+  "soc": 80.0,
+  "soh": 99.9,
+  "battery_temp": 25.3,
+  "plug_status": "connected"
+}`,
+        chips:["every 10s","~10ms","V2G telemetry"]
+      },
+      {
+        from:"mqtt", to:"backend", color:"--c-orch",
+        title:"Backend Processes Heartbeat",
+        route:"route heartbeat",
+        desc:"Heartbeats are routed to <code>handle_mqtt_heartbeat()</code> which updates the device's <em>last_seen</em> to keep it online, tracks uptime/signal, updates battery metrics, and fires Prometheus gauge updates for SoC and V2G discharge status.",
+        payload:
+`# Heartbeat handler
+device.last_seen = utcnow()
+device.uptime = payload["uptime_percentage"]
+device.signal_strength = payload["signal_strength"]
+device.status = "online"
+
+if "soc" in payload:
+    device.soc = payload["soc"]
+    device_soc.labels(device=name).set(soc)
+
+if plug_status == "discharging":
+    v2g_active_discharges.inc()`,
+        chips:["~10ms update","Prometheus metrics"]
+      },
+      {
+        from:"backend", to:"db", color:"--c-vector",
+        title:"Update Device State",
+        route:"UPDATE",
+        desc:"The heartbeat data is committed to the database, keeping the device record fresh. If a device hasn't sent a heartbeat in 60+ seconds, the list view shows it as <em>offline</em> (transient, not persisted).",
+        payload:
+`UPDATE devices
+SET last_seen = '2026-06-15T10:30:10Z',
+    uptime_percentage = 98.2,
+    signal_strength = -67,
+    soc = 80.0,
+    soh = 99.9
+WHERE id = 'uuid-xxxx'`,
+        chips:["60s offline timeout","transient"]
+      }
+    ]
+  },
+
+  /* ───── Flow 2: OTA Firmware Update ───── */
+  flow_ota: {
+    name: "OTA Firmware Update",
+    note: "Upload → trigger → device lifecycle → success or hash_mismatch → rollback",
+    steps: [
+      {
+        from:"user", to:"backend", color:"--c-user",
+        title:"Upload Firmware Binary",
+        route:"POST /ota/upload",
+        desc:"Admin uploads a firmware binary via the REST API. The backend computes a <em>SHA256 hash</em>, stores the file, and creates a <code>Firmware</code> record in the database.",
+        payload:
+`POST /ota/upload
+Content-Type: multipart/form-data
+
+version: "2.0.0"
+file: firmware.bin (4.2 MB)
+
+← Response →
+{
+  "id": "fw-uuid",
+  "version": "2.0.0",
+  "filename": "firmware.bin",
+  "sha256_hash": "a1b2c3d4...",
+  "file_size": 4404019
+}`,
+        chips:["SHA256 hashing","< 100MB limit"]
+      },
+      {
+        from:"backend", to:"db", color:"--c-vector",
+        title:"Persist Firmware Record",
+        route:"INSERT firmware",
+        desc:"The firmware metadata is saved to the database with the computed SHA256 hash and file path. Duplicate version numbers are rejected (HTTP 409).",
+        payload:
+`INSERT INTO firmware (id, version, filename,
+    sha256_hash, binary_path, file_size)
+VALUES ('fw-uuid', '2.0.0', 'firmware.bin',
+    'a1b2c3d4...', '/app/firmware/firmware.bin',
+    4404019)`,
+        chips:["version unique","409 on dup"]
+      },
+      {
+        from:"user", to:"backend", color:"--c-user",
+        title:"Trigger OTA Deployment",
+        route:"POST /ota/trigger",
+        desc:"Admin triggers an OTA campaign targeting <em>all devices</em> or specific <em>device_ids</em>. The backend creates an <code>OtaDeployment</code> for each target device and publishes MQTT commands.",
+        payload:
+`POST /ota/trigger
+{
+  "firmware_id": "fw-uuid",
+  "all_devices": true
+}
+
+← Response →
+{
+  "message": "OTA triggered for 5 devices",
+  "deployment_ids": ["dep-1", "dep-2", ...],
+  "firmware_version": "2.0.0"
+}`,
+        chips:["bulk or targeted","QOS 1"]
+      },
+      {
+        from:"backend", to:"mqtt", color:"--c-orch",
+        title:"Publish OTA Command via MQTT",
+        route:"PUB iot/fleet/{id}/command/ota",
+        desc:"For each device, the backend publishes an OTA command to <code>iot/fleet/{device_id}/command/ota</code> containing the <em>firmware_url</em>, <em>sha256_hash</em>, and <em>deployment_id</em>. A timeout watcher starts for each deployment.",
+        payload:
+`PUB iot/fleet/device-xxx/command/ota QOS 1
+{
+  "firmware_url": "http://backend:8000/firmware/firmware.bin",
+  "sha256_hash": "a1b2c3d4...",
+  "deployment_id": "dep-1",
+  "timestamp": "2026-06-15T10:31:00Z"
+}`,
+        chips:["timeout 120s","retry ×3"]
+      },
+      {
+        from:"mqtt", to:"simulator", color:"--c-compute",
+        title:"Device Receives & Applies Update",
+        route:"SUB iot/fleet/{id}/command/ota",
+        desc:"The simulated device subscribes to its command topic and receives the OTA payload. It simulates the full lifecycle: <em>downloading</em> (1-3s), <em>applying</em> (1-2s), <em>verifying</em> (0.5-1.5s), then publishes status updates.",
+        payload:
+`// Device OTA lifecycle
+[downloading]  1-3s → PUB status
+[applying]     1-2s → PUB status
+[verifying]   0.5-1.5s → PUB status
+
+if random() < 0.2 (FAILURE_RATE):
+    // Hash mismatch!
+    PUB status: "hash_mismatch"
+    PUB status: "rollback"
+    firmware = previous_firmware
+    PUB status: "rolled_back"
+else:
+    firmware = new_version
+    PUB status: "success"`,
+        chips:["20% fail rate","auto rollback"]
+      },
+      {
+        from:"simulator", to:"mqtt", color:"--c-compute",
+        title:"Device Reports Status",
+        route:"PUB iot/fleet/{id}/status/ota",
+        desc:"The device publishes its OTA status back through MQTT. On <em>hash_mismatch</em>, the device auto-reverts to the previous firmware and reports <em>rolled_back</em>.",
+        payload:
+`PUB iot/fleet/device-xxx/status/ota QOS 1
+{
+  "status": "success",
+  "deployment_id": "dep-1",
+  "device_id": "uuid-xxxx",
+  "timestamp": 1718452260.5
+}
+
+// OR on failure:
+{
+  "status": "hash_mismatch",
+  "deployment_id": "dep-1",
+  "error": "SHA256 hash mismatch",
+  "device_id": "uuid-xxxx"
+}`,
+        chips:["state machine","hash_mismatch→rollback"]
+      },
+      {
+        from:"mqtt", to:"backend", color:"--c-orch",
+        title:"Backend Processes Status",
+        route:"route OTA status",
+        desc:"The <code>OtaStateMachine.handle_ota_status()</code> validates the state transition. On hash_mismatch, it auto-transitions through <em>hash_mismatch → rollback → rolled_back</em> and updates the device's firmware version to the previous one.",
+        payload:
+`# OTA State Machine
+pending → downloading → applying
+    → verifying → success
+    → verifying → hash_mismatch
+    → rollback → rolled_back
+    → failed (timeout / max retries)
+
+if status == "hash_mismatch":
+    update_deployment_status(id, hash_mismatch)
+    update_deployment_status(id, rollback)
+    update_deployment_status(id, rolled_back)
+    device.firmware_version = previous_version`,
+        chips:["state machine","auto rollback"]
+      },
+      {
+        from:"backend", to:"db", color:"--c-vector",
+        title:"Update Deployment & Device",
+        route:"UPDATE deployments",
+        desc:"The OtaDeployment record and Device firmware version are updated in the database. Success updates the device's firmware; rollback restores the previous version.",
+        payload:
+`-- On success:
+UPDATE ota_deployments SET status = 'success'
+WHERE id = 'dep-1'
+
+UPDATE devices
+SET previous_firmware_version = firmware_version,
+    firmware_version = '2.0.0',
+    current_ota_id = NULL
+WHERE id = 'uuid-xxxx'
+
+-- On rollback:
+UPDATE ota_deployments SET status = 'rolled_back'
+WHERE id = 'dep-1'
+
+UPDATE devices
+SET firmware_version = previous_firmware_version,
+    current_ota_id = NULL
+WHERE id = 'uuid-xxxx'`,
+        chips:["success + rollback","Prometheus counters"]
+      }
+    ]
+  },
+
+  /* ───── Flow 3: Fleet Dashboard ───── */
+  flow_dashboard: {
+    name: "Fleet Dashboard (UI)",
+    note: "User views the live fleet monitoring dashboard with auto-refresh",
+    steps: [
+      {
+        from:"user", to:"backend", color:"--c-user",
+        title:"Load Dashboard Page",
+        route:"GET /",
+        desc:"The admin user navigates to the fleet dashboard. The backend renders a Jinja2 template with auth check — users must pass Google OAuth or admin basic auth.",
+        payload:
+`GET /
+← Response: HTML (Jinja2 template)
+
+// Auth flow
+if get_current_user(request) or admin:
+    return TemplateResponse("dashboard.html")
+else:
+    return Redirect("/auth/login")`,
+        chips:["auth gate","Jinja2 SSR"]
+      },
+      {
+        from:"backend", to:"db", color:"--c-vector",
+        title:"Query Device List",
+        route:"SELECT devices",
+        desc:"The dashboard backend queries all devices to show the device table, including status, firmware, signal strength, and battery data. Devices not seen in 60+ seconds are shown as <em>offline</em>.",
+        payload:
+`SELECT id, name, firmware_version, status,
+    signal_strength, last_seen, soc, soh
+FROM devices
+ORDER BY last_seen DESC
+
+// Transient offline detection
+for device in devices:
+    if device.status == "online":
+        elapsed = now - device.last_seen
+        if elapsed > 60:
+            device.status = "offline"
+            // Not persisted — heartbeat keeps it online`,
+        chips:["60s threshold","transient"]
+      },
+      {
+        from:"backend", to:"user", color:"--c-user",
+        title:"Render Dashboard HTML",
+        route:"200 OK · HTML",
+        desc:"The dashboard renders with HTMX-powered auto-refresh: the device table refreshes every <em>5 seconds</em>, agent panels every <em>30 seconds</em>, and alert badge every <em>10 seconds</em>.",
+        payload:
+`<!-- Dashboard auto-refresh -->
+<div hx-get="/devices" hx-trigger="every 5s">
+  Device Table
+</div>
+
+<div hx-get="/alerts/active" hx-trigger="every 10s">
+  Alert Badge
+</div>
+
+<div hx-get="/agents/recommendations"
+     hx-trigger="every 30s">
+  Agent Panels
+</div>`,
+        chips:["5s table","10s alerts","30s agents"]
+      },
+      {
+        from:"backend", to:"prometheus", color:"--c-embed",
+        title:"Prometheus Scrapes Metrics",
+        route:"GET /metrics",
+        desc:"Prometheus scrapes the backend's <code>/metrics</code> endpoint every 15s, collecting fleet size, OTA deployment counts, API latency histograms, MQTT message counts, V2G revenue projections, and alert totals.",
+        payload:
+`# Prometheus scrape config
+scrape_configs:
+  - job_name: 'fleet-backend'
+    scrape_interval: 15s
+    static_configs:
+      - targets: ['backend:8000']
+
+# Available metrics:
+fleet_active_devices
+fleet_total_devices
+fleet_ota_deployments_total{status}
+fleet_api_request_latency_seconds
+fleet_mqtt_messages_received_total{topic}
+fleet_alerts_total{severity,type}
+fleet_v2g_projected_revenue_dollars`,
+        chips:["15s scrape","7d retention"]
+      },
+      {
+        from:"prometheus", to:"grafana", color:"--c-compute",
+        title:"Grafana Visualizes Metrics",
+        route:"PromQL queries",
+        desc:"Grafana queries Prometheus to render pre-provisioned dashboards: active device timeline, OTA deployment funnel, V2G revenue charts, and alert severity breakdowns.",
+        payload:
+`// Grafana dashboard queries
+// Fleet size over time
+avg_over_time(fleet_active_devices[5m])
+
+// OTA success rate
+sum(fleet_ota_deployments_total{status="success"})
+/
+sum(fleet_ota_deployments_total)
+
+// V2G projected revenue
+fleet_v2g_projected_revenue_dollars`,
+        chips:["pre-provisioned","PromQL"]
+      }
+    ]
+  },
+
+  /* ───── Flow 4: Agent Recommendations ───── */
+  flow_agents: {
+    name: "Agent Recommendations (GET /agents/recommendations)",
+    note: "AI agents analyze fleet state and return structured recommendations",
+    steps: [
+      {
+        from:"user", to:"backend", color:"--c-user",
+        title:"Request Fleet Analysis",
+        route:"GET /agents/recommendations",
+        desc:"The user triggers all three Phase 1 agents: <em>OTA Campaign Strategist</em>, <em>Fleet Health Monitor</em>, and <em>Device Group Manager</em>. Each runs concurrently with individual error handling.",
+        payload:
+`GET /agents/recommendations?notify=true
+
+// Runs all 3 agents
+results = []
+results.append(run_ota_agent(firmware))
+results.append(run_anomaly_agent(notify))
+results.append(run_group_agent(min_size))
+
+return {"agents": results}`,
+        chips:["×3 agents","parallel","~500ms"]
+      },
+      {
+        from:"backend", to:"db", color:"--c-vector",
+        title:"Query Fleet State",
+        route:"SELECT devices, firmware, deployments",
+        desc:"Each agent queries the database to gather fleet data: OTA agent checks device versions and firmware; anomaly agent checks signal strengths, OTA statuses, and heartbeat recency; group agent reads all device metadata.",
+        payload:
+`-- OTA agent: what's available
+SELECT * FROM firmware ORDER BY created_at DESC
+SELECT * FROM devices
+
+-- Anomaly agent: what's abnormal
+SELECT id, signal_strength, last_seen
+FROM devices OFFSET 0
+
+-- Group agent: find clusters
+SELECT firmware_version, COUNT(*) as cnt
+FROM devices GROUP BY firmware_version
+
+SELECT
+    CASE WHEN signal_strength >= -60 THEN 'good'
+         WHEN signal_strength >= -80 THEN 'moderate'
+         ELSE 'poor'
+    END as band, COUNT(*) as cnt
+FROM devices GROUP BY band`,
+        chips:["×3 queries","heuristic logic"]
+      },
+      {
+        from:"db", to:"backend", color:"--c-vector",
+        title:"Agents Process Results",
+        route:"heuristic analysis",
+        desc:"Each agent runs its heuristic logic: OTA designs a canary rollout plan, anomaly detects weak signals/stuck OTAs/failure spikes, group manager clusters by firmware and signal strength.",
+        payload:
+`// OTA Campaign Agent
+{
+  "agent": "OTA Campaign Strategist",
+  "recommendation": "Canary 1 device → 30% → 60% → 100%",
+  "canary_group": ["Device-003"],
+  "rollout_phases": [
+    {"phase": 1, "pct": 30, "gate": "24h no failures"},
+    {"phase": 2, "pct": 60, "gate": "12h no failures"},
+    {"phase": 3, "pct": 100, "gate": "monitor 48h"}
+  ],
+  "risk_assessment": "low"
+}`,
+        chips:["canary strategy","heuristic","no LLM needed"]
+      },
+      {
+        from:"backend", to:"user", color:"--c-user",
+        title:"Return Structured JSON",
+        route:"200 OK · JSON",
+        desc:"The backend returns a JSON response with all three agent results. The dashboard renders them in agent panels that auto-refresh every 30 seconds. Human input is required for OTA and group recommendations.",
+        payload:
+`{
+  "agents": [
+    {
+      "agent": "OTA Campaign Strategist",
+      "summary": "Canary 1 device → 30% → 60% → 100%",
+      "human_input_required": true
+    },
+    {
+      "agent": "Fleet Health Monitor",
+      "summary": "No anomalies. Fleet healthy.",
+      "status": "healthy"
+    },
+    {
+      "agent": "Device Group Manager",
+      "summary": "3 groups by firmware version",
+      "groups": [...]
+    }
+  ]
+}`,
+        chips:["dashboard every 30s","structured JSON"]
+      }
+    ]
+  },
+
+  /* ───── Flow 5: Alert Pipeline ───── */
+  flow_alerts: {
+    name: "Alert Pipeline (GET /agents/fleet-health)",
+    note: "Anomaly detection → AlertEngine dedup/cooldown → multi-channel notification",
+    steps: [
+      {
+        from:"user", to:"backend", color:"--c-user",
+        title:"Trigger Fleet Health Check",
+        route:"GET /agents/fleet-health",
+        desc:"The fleet health endpoint runs anomaly detection and always processes results through the AlertEngine. Unlike the read-only <code>/anomaly-check</code>, this endpoint fires notifications.",
+        payload:
+`GET /agents/fleet-health
+
+// Always fires alerts
+anomalies = detect_anomalies()
+engine.process_anomalies(anomalies)
+return {"anomalies": anomalies, "processed": processed}`,
+        chips:["always notifies","alert vs check"]
+      },
+      {
+        from:"backend", to:"db", color:"--c-vector",
+        title:"Detect Anomalies from Fleet Data",
+        route:"SELECT · heuristic checks",
+        desc:"The anomaly detector runs multiple heuristic checks: <em>device_offline</em> (no heartbeat > 120s), <em>weak_signal</em> (< -80 dBm), <em>stuck_ota</em> (pending > 5min), <em>v2g_revenue_drop</em> (negative revenue).",
+        payload:
+`// Anomaly detection checks
+anomalies = []
+
+// Device offline check (>120s no heartbeat)
+for d in devices:
+    if last_seen > 120s:
+        anomalies.push({
+            type: "device_offline",
+            severity: "warning",
+            message: "Device-003 offline for 130s",
+            affected_device_ids: ["uuid-xxx"]
+        })
+
+// Weak signal check
+    if signal_strength < -80:
+        anomalies.push({
+            type: "weak_signal", severity: "warning",
+            ...
+        })
+
+// OTA failure spike
+    if failure_rate > 30%:
+        anomalies.push({
+            type: "ota_failure_spike",
+            severity: "critical",
+            ...
+        })`,
+        chips:["×4 anomaly types","Prometheus counters"]
+      },
+      {
+        from:"backend", to:"db", color:"--c-vector",
+        title:"Persist Alert via AlertEngine",
+        route:"INSERT alerts",
+        desc:"The AlertEngine processes each anomaly through dedup (by <em>type + device_id</em>), cooldown (300-3600s per type), and persistence. New alerts are created; existing ones are incremented and potentially <em>escalated</em> from warning to critical.",
+        payload:
+`INSERT INTO alerts (id, type, severity, message,
+    device_ids, status, dedup_key, count)
+VALUES ('alert-uuid', 'device_offline',
+    'warning', 'Device-003 offline for 130s',
+    'uuid-xxx', 'active',
+    'device_offline:uuid-xxx', 1)
+
+-- Escalation after 3rd occurrence:
+if alert.count >= 3 and severity == "warning":
+    severity = "critical"
+    message = "[ESCALATED] " + message`,
+        chips:["dedup key","cooldown 600s","escalation ×3"]
+      },
+      {
+        from:"backend", to:"alerts", color:"--c-seed",
+        title:"Send Notifications",
+        route:"Slack · Email · Webhook",
+        desc:"The AlertEngine fans out to all configured channels: Slack (rich attachment with severity color), Email (SMTP with plain-text body), and generic Webhook (JSON POST). Each channel is optional — configured via environment variables.",
+        payload:
+`// Slack channel
+POST https://hooks.slack.com/services/...
+{
+  "attachments": [{
+    "color": "#f59f00",
+    "title": "FLEET COMMANDER — WARNING",
+    "text": "Device-003 offline for 130s",
+    "fields": [
+      {"title": "Type", "value": "device_offline"},
+      {"title": "Count", "value": "1"}
+    ]
+  }]
+}
+
+// Webhook channel
+POST https://hooks.example.com/alerts
+{
+  "source": "fleet-commander",
+  "type": "device_offline",
+  "severity": "warning",
+  "message": "Device-003 offline for 130s"
+}`,
+        chipsDev:["Slack only"],
+        chipsProd:["Slack + Email + Webhook"],
+        chips:["optional channels","env-configured"]
+      },
+      {
+        from:"backend", to:"user", color:"--c-user",
+        title:"Return Processed Alert Status",
+        route:"200 OK · JSON",
+        desc:"The endpoint returns the processed alerts with IDs, statuses, and dedup info. The dashboard's alert panel (10s auto-refresh) shows active alerts with acknowledge/resolve buttons.",
+        payload:
+`{
+  "anomalies": [
+    { "type": "device_offline", "severity": "warning" }
+  ],
+  "processed": [
+    {
+      "id": "alert-uuid",
+      "type": "device_offline",
+      "severity": "warning",
+      "status": "active",
+      "count": 1,
+      "action": "created"
+    }
+  ],
+  "notifications_sent": true
+}`,
+        chips:["dashboard 10s refresh","ack/resolve UI"]
+      }
+    ]
+  }
+};
+
+const state = {
+  mode: "dev",
+  flow: "flow_register",
+  step: 0,
+  playing: false,
+  timer: null,
+  stepMs: 1800
+};
+
+const stage = document.getElementById("stage");
+const svgWires = document.getElementById("wires");
+const nodes = Array.from(document.querySelectorAll(".node"));
+const flowName = document.getElementById("flowName");
+const stepIdx = document.getElementById("stepIdx");
+const btnPlay = document.getElementById("btnPlay");
+const playIcon = document.getElementById("playIcon");
+const btnPrev = document.getElementById("btnPrev");
+const btnNext = document.getElementById("btnNext");
+const btnPrev2 = document.getElementById("btnPrev2");
+const btnNext2 = document.getElementById("btnNext2");
+const panelStepIdx = document.getElementById("panelStepIdx");
+const panelStepTotal = document.getElementById("panelStepTotal");
+const panelTitle = document.getElementById("panelTitle");
+const panelRoute = document.getElementById("panelRoute");
+const panelDesc = document.getElementById("panelDesc");
+const panelPayload = document.getElementById("panelPayload");
+const panelMeta = document.getElementById("panelMeta");
+const panelMode = document.getElementById("panelMode");
+
+function nodeById(id){ return nodes.find(n=>n.dataset.id===id); }
+
+function applyModeToNodes(){
+  const modeKey = state.mode.charAt(0).toUpperCase() + state.mode.slice(1);
+  nodes.forEach(n=>{
+    ["label","tech","port"].forEach(cls=>{
+      const el = n.querySelector(`.${cls}`);
+      if(!el) return;
+      const val = el.dataset[cls + modeKey];
+      if(val !== undefined) el.textContent = val;
+    });
+    const allowedModes = n.dataset.modes;
+    const visible = !allowedModes || allowedModes.split(",").includes(state.mode);
+    n.classList.toggle("hidden", !visible);
+  });
+  panelMode.textContent = state.mode === "dev" ? "DEV" : "PROD";
+  panelMode.dataset.mode = state.mode;
+}
+
+function nodeCenter(node){
+  const sRect = stage.getBoundingClientRect();
+  const r = node.getBoundingClientRect();
+  return {
+    x: r.left - sRect.left + r.width/2,
+    y: r.top  - sRect.top  + r.height/2,
+    w: r.width, h: r.height
+  };
+}
+
+function nodeAnchor(node, towards){
+  const c = nodeCenter(node);
+  const dx = towards.x - c.x;
+  const dy = towards.y - c.y;
+  const dist = Math.hypot(dx, dy);
+  const hw = c.w/2, hh = c.h/2;
+  const pad = 6;
+  if(dist < 1) return { x: c.x + hw + pad, y: c.y };
+  const tx = Math.abs(dx) > 0.001 ? hw / Math.abs(dx) : 1e6;
+  const ty = Math.abs(dy) > 0.001 ? hh / Math.abs(dy) : 1e6;
+  const t = Math.min(tx, ty);
+  return { x: c.x + dx * t + (dx / dist) * pad, y: c.y + dy * t + (dy / dist) * pad };
+}
+
+function computeWireGeometry(){
+  const flow = flows[state.flow];
+  const geom = [];
+  flow.steps.forEach((s, i) => {
+    const a = nodeById(s.from);
+    const b = nodeById(s.to);
+    if(!a || !b || a.classList.contains("hidden") || b.classList.contains("hidden")){
+      geom.push(null);
+      return;
+    }
+    const ca = nodeCenter(a);
+    const cb = nodeCenter(b);
+    const A = nodeAnchor(a, cb);
+    const B = nodeAnchor(b, ca);
+    const ddx = B.x - A.x;
+    const ddy = B.y - A.y;
+    const len = Math.hypot(ddx, ddy) || 1;
+    let nx, ny;
+    if(len < 5){ nx = 0; ny = -1; }
+    else { nx = -ddy/len; ny = ddx/len; }
+    const mx = (A.x + B.x) / 2;
+    const my = (A.y + B.y) / 2;
+    const curveAmount = Math.max(12, Math.min(50, len * 0.12));
+    const offset = curveAmount * (i % 2 === 0 ? 1 : -1);
+    const cx = mx + nx * offset;
+    const cy = my + ny * offset;
+    const d = "M " + A.x + " " + A.y + " Q " + cx + " " + cy + " " + B.x + " " + B.y;
+    geom.push({ d, cx, cy });
+  });
+  return geom;
+}
+
+function drawWires(){
+  Array.from(svgWires.querySelectorAll(".wire, .packet, .wire-label")).forEach(el=>el.remove());
+  const sRect = stage.getBoundingClientRect();
+  svgWires.setAttribute("viewBox", "0 0 " + sRect.width + " " + sRect.height);
+  svgWires.setAttribute("width", sRect.width);
+  svgWires.setAttribute("height", sRect.height);
+  const flow = flows[state.flow];
+  const geom = computeWireGeometry();
+  const ahMap = {
+    "--c-user":"ah-mint","--c-orch":"ah-sky","--c-embed":"ah-amber",
+    "--c-vector":"ah-violet","--c-compute":"ah-mag","--c-seed":"ah-orange"
+  };
+  flow.steps.forEach((s, i)=>{
+    const g = geom[i];
+    if(!g) return;
+    const path = document.createElementNS("http://www.w3.org/2000/svg","path");
+    path.setAttribute("class","wire");
+    path.setAttribute("data-step", i);
+    path.setAttribute("d", g.d);
+    path.style.setProperty("--wire-color", "var(" + s.color + ")");
+    path.setAttribute("marker-end", "url(#" + (ahMap[s.color] || "ah-mint") + ")");
+    svgWires.appendChild(path);
+    const lab = document.createElementNS("http://www.w3.org/2000/svg","text");
+    lab.setAttribute("class","wire-label");
+    lab.setAttribute("data-step", i);
+    lab.setAttribute("x", g.cx);
+    lab.setAttribute("y", g.cy + 4);
+    lab.setAttribute("text-anchor","middle");
+    lab.style.setProperty("--wire-color", "var(" + s.color + ")");
+    lab.textContent = (i+1);
+    svgWires.appendChild(lab);
+    const pkt = document.createElementNS("http://www.w3.org/2000/svg","circle");
+    pkt.setAttribute("class","packet");
+    pkt.setAttribute("data-step", i);
+    pkt.setAttribute("cx", 0);
+    pkt.setAttribute("cy", 0);
+    pkt.style.setProperty("--wire-color", "var(" + s.color + ")");
+    svgWires.appendChild(pkt);
+    const m = document.createElementNS("http://www.w3.org/2000/svg","animateMotion");
+    m.setAttribute("dur","1.5s");
+    m.setAttribute("repeatCount","1");
+    m.setAttribute("fill","freeze");
+    m.setAttribute("begin","indefinite");
+    m.setAttribute("path", g.d);
+    pkt.appendChild(m);
+  });
+}
+
+function updateWirePaths(){
+  const sRect = stage.getBoundingClientRect();
+  svgWires.setAttribute("viewBox", "0 0 " + sRect.width + " " + sRect.height);
+  svgWires.setAttribute("width", sRect.width);
+  svgWires.setAttribute("height", sRect.height);
+  const geom = computeWireGeometry();
+  const flow = flows[state.flow];
+  flow.steps.forEach((s, i) => {
+    const g = geom[i];
+    const wire = svgWires.querySelector('.wire[data-step="' + i + '"]');
+    const label = svgWires.querySelector('.wire-label[data-step="' + i + '"]');
+    const packet = svgWires.querySelector('.packet[data-step="' + i + '"]');
+    if(!g){
+      if(wire) wire.setAttribute("d", "");
+      return;
+    }
+    if(wire) wire.setAttribute("d", g.d);
+    if(label){ label.setAttribute("x", g.cx); label.setAttribute("y", g.cy + 4); }
+    if(packet){
+      const motion = packet.querySelector("animateMotion");
+      if(motion) motion.setAttribute("path", g.d);
+    }
+  });
+}
+
+function applyStep(){
+  const flow = flows[state.flow];
+  const total = flow.steps.length;
+  const step = flow.steps[state.step];
+  stepIdx.textContent = (state.step+1) + " / " + total;
+  panelStepIdx.textContent = String(state.step+1).padStart(2,"0");
+  panelStepTotal.textContent = String(total).padStart(2,"0");
+  flowName.textContent = flow.name;
+  const participantIds = new Set();
+  flow.steps.forEach(s=>{ participantIds.add(s.from); participantIds.add(s.to); });
+  nodes.forEach(n=>{
+    n.classList.remove("active","active-from","participant","dimmed","has-badge");
+    n.querySelector(".step-badge").textContent = "·";
+  });
+  const a = nodeById(step.from);
+  const b = nodeById(step.to);
+  if(a){ a.classList.add("active-from"); }
+  if(b){
+    b.classList.add("active","has-badge");
+    b.querySelector(".step-badge").textContent = state.step+1;
+    b.querySelector(".step-badge").style.background = "var(" + step.color + ")";
+  }
+  nodes.forEach(n=>{
+    if(n===a || n===b) return;
+    if(n.classList.contains("hidden")) return;
+    if(participantIds.has(n.dataset.id)){ n.classList.add("participant"); }
+    else { n.classList.add("dimmed"); }
+  });
+  Array.from(svgWires.querySelectorAll(".wire, .wire-label, .packet")).forEach(el=>{
+    const s = parseInt(el.dataset.step,10);
+    el.classList.remove("active","preview","muted","run");
+    if(s === state.step){
+      if(el.classList.contains("wire") || el.classList.contains("wire-label")) el.classList.add("active");
+      if(el.classList.contains("packet")){
+        el.classList.add("run");
+        const motion = el.querySelector("animateMotion");
+        if(motion){ try{ motion.beginElement(); }catch(e){} }
+      }
+    } else if(!isNaN(s) && s >= 0 && s < total){
+      if(el.classList.contains("wire") || el.classList.contains("wire-label")) el.classList.add("preview");
+    } else { el.classList.add("muted"); }
+  });
+  panelTitle.textContent = step.title;
+  panelRoute.innerHTML = '<span class="from">' + prettyId(step.from) + '</span><span class="arrow">→</span><span class="to">' + prettyId(step.to) + '</span><span style="margin-left:6px;color:var(--muted)">' + (step.route || "") + '</span>';
+  panelDesc.innerHTML = step.desc;
+  let payload = "";
+  if(step.payload) payload = step.payload;
+  else if(state.mode === "dev" && step.payloadDev) payload = step.payloadDev;
+  else if(state.mode === "prod" && step.payloadProd) payload = step.payloadProd;
+  panelPayload.textContent = payload;
+  let chips = step.chips;
+  if(state.mode==="dev" && step.chipsDev) chips = step.chipsDev;
+  if(state.mode==="prod" && step.chipsProd) chips = step.chipsProd;
+  panelMeta.innerHTML = (chips || []).map(function(c){
+    var cls = /\d+\s*(?:ms|s|min)\b/.test(c) ? "chip lat" : (/dim|×|loaded|rules|count/.test(c) ? "chip size" : "chip");
+    return '<span class="' + cls + '">' + c + '</span>';
+  }).join("");
+  btnPrev.disabled = btnPrev2.disabled = state.step === 0;
+  btnNext.disabled = btnNext2.disabled = state.step === total-1;
+  var pct = total > 1 ? ((state.step) / (total - 1)) * 100 : 100;
+  document.getElementById("progressFill").style.width = pct + "%";
+}
+
+function esc(s){ const d=document.createElement("span"); d.textContent=s; return d.innerHTML; }
+
+function prettyId(id){
+  const node = nodeById(id);
+  if(!node) return esc(id);
+  const label = node.querySelector(".label");
+  return label ? esc(label.textContent) : esc(id);
+}
+
+function setPlaying(p){
+  state.playing = p;
+  btnPlay.setAttribute("aria-pressed", p ? "true" : "false");
+  playIcon.innerHTML = p
+    ? '<rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/>'
+    : '<polygon points="6 4 20 12 6 20 6 4"/>';
+  clearTimeout(state.timer);
+  if(p){ state.timer = setTimeout(tick, state.stepMs); }
+}
+function tick(){
+  if(!state.playing) return;
+  const total = flows[state.flow].steps.length;
+  state.step = (state.step + 1) % total;
+  applyStep();
+  state.timer = setTimeout(tick, state.stepMs);
+}
+
+function go(delta){
+  const total = flows[state.flow].steps.length;
+  state.step = Math.max(0, Math.min(total-1, state.step + delta));
+  applyStep();
+}
+function pickFlow(key){
+  if(!flows[key]) return;
+  state.flow = key;
+  state.step = 0;
+  document.querySelectorAll(".flowtab").forEach(b=>{
+    b.setAttribute("aria-pressed", b.dataset.flow === key ? "true" : "false");
+  });
+  applyModeToNodes();
+  drawWires();
+  applyStep();
+}
+function pickMode(m){
+  state.mode = m;
+  document.querySelectorAll(".modepick button").forEach(b=>{
+    b.setAttribute("aria-pressed", b.dataset.mode === m ? "true" : "false");
+  });
+  if(flows[state.flow].onlyMode && flows[state.flow].onlyMode !== m){
+    pickFlow(flows[CONFIG.fallbackFlow] ? CONFIG.fallbackFlow : Object.keys(flows)[0]);
+    return;
+  }
+  applyModeToNodes();
+  drawWires();
+  applyStep();
+}
+
+const CONFIG = {
+  fallbackFlow: "flow_register",
+  keyboardFlowOrder: ["flow_register", "flow_ota", "flow_dashboard", "flow_agents", "flow_alerts"],
+  toggleModes: ["dev", "prod"]
+};
+
+const btnTheme = document.getElementById("btnTheme");
+function toggleTheme(){
+  document.body.classList.toggle("light");
+  const isLight = document.body.classList.contains("light");
+  try{ localStorage.setItem("arch-theme", isLight ? "light" : "dark"); }catch(e){}
+  drawWires();
+  applyStep();
+}
+btnTheme.addEventListener("click", toggleTheme);
+try{
+  if(localStorage.getItem("arch-theme") === "light") document.body.classList.add("light");
+}catch(e){}
+
+document.querySelectorAll(".modepick button").forEach(b=>{
+  b.addEventListener("click", ()=>pickMode(b.dataset.mode));
+});
+document.querySelectorAll(".flowtab").forEach(b=>{
+  b.addEventListener("click", ()=>pickFlow(b.dataset.flow));
+});
+btnPlay.addEventListener("click", ()=>setPlaying(!state.playing));
+btnPrev.addEventListener("click", ()=>{ setPlaying(false); go(-1); });
+btnNext.addEventListener("click", ()=>{ setPlaying(false); go(+1); });
+btnPrev2.addEventListener("click", ()=>{ setPlaying(false); go(-1); });
+btnNext2.addEventListener("click", ()=>{ setPlaying(false); go(+1); });
+
+const DRAG_THRESHOLD = 5;
+const SNAP_PX = 32;
+let dragState = null;
+
+function stageRect(){ return stage.getBoundingClientRect(); }
+
+function startDrag(n, clientX, clientY){
+  const sr = stageRect();
+  const nr = n.getBoundingClientRect();
+  dragState = {
+    node: n, startX: clientX, startY: clientY,
+    offsetX: clientX - nr.left, offsetY: clientY - nr.top,
+    dragging: false
+  };
+}
+
+let dragRAF = null;
+
+function moveDrag(clientX, clientY){
+  if(!dragState) return;
+  const dx = clientX - dragState.startX;
+  const dy = clientY - dragState.startY;
+  if(!dragState.dragging && Math.hypot(dx, dy) < DRAG_THRESHOLD) return;
+  if(!dragState.dragging){ dragState.dragging = true; dragState.node.classList.add("dragging"); }
+  const sr = stageRect();
+  let rawX = clientX - sr.left - dragState.offsetX;
+  let rawY = clientY - sr.top  - dragState.offsetY;
+  rawX = Math.round(rawX / SNAP_PX) * SNAP_PX;
+  rawY = Math.round(rawY / SNAP_PX) * SNAP_PX;
+  const pctX = Math.max(0, Math.min(92, (rawX / sr.width) * 100));
+  const pctY = Math.max(0, Math.min(92, (rawY / sr.height) * 100));
+  dragState.node.style.left = pctX + "%";
+  dragState.node.style.top  = pctY + "%";
+  if(!dragRAF){
+    dragRAF = requestAnimationFrame(()=>{ updateWirePaths(); dragRAF = null; });
+  }
+}
+
+function endDrag(){
+  if(!dragState) return;
+  const wasDrag = dragState.dragging;
+  const n = dragState.node;
+  n.classList.remove("dragging");
+  if(wasDrag){ saveLayout(); showResetBtn(); drawWires(); applyStep(); }
+  dragState = null;
+  return wasDrag;
+}
+
+nodes.forEach(n=>{
+  n.addEventListener("pointerdown", (e)=>{
+    if(e.button !== 0) return;
+    e.preventDefault();
+    n.setPointerCapture(e.pointerId);
+    startDrag(n, e.clientX, e.clientY);
+  });
+  n.addEventListener("pointermove", (e)=>{ moveDrag(e.clientX, e.clientY); });
+  n.addEventListener("pointerup", (e)=>{
+    const wasDrag = endDrag();
+    if(!wasDrag) handleNodeClick(n);
+  });
+  n.addEventListener("pointercancel", ()=>{ endDrag(); });
+  n.tabIndex = 0;
+  n.addEventListener("keydown", (e)=>{
+    if(e.key === "Enter" || e.key === " "){ e.preventDefault(); handleNodeClick(n); }
+  });
+});
+
+function handleNodeClick(n){
+  const flow = flows[state.flow];
+  const i = flow.steps.findIndex(s=> s.from===n.dataset.id || s.to===n.dataset.id );
+  if(i>=0){ setPlaying(false); state.step = i; applyStep(); }
+  else {
+    n.style.animation = "none";
+    void n.offsetWidth;
+    n.style.animation = "node-shake .4s ease";
+    setTimeout(()=>{ n.style.animation = ""; }, 450);
+  }
+}
+
+const LAYOUT_KEY = "arch-layout-" + document.title.replace(/\s/g,"-").toLowerCase();
+
+function saveLayout(){
+  const positions = {};
+  nodes.forEach(n=>{ positions[n.dataset.id] = { left: n.style.left, top: n.style.top }; });
+  try{ localStorage.setItem(LAYOUT_KEY, JSON.stringify(positions)); }catch(e){}
+}
+
+function loadLayout(){
+  try{
+    const saved = localStorage.getItem(LAYOUT_KEY);
+    if(!saved) return false;
+    const positions = JSON.parse(saved);
+    let applied = false;
+    nodes.forEach(n=>{
+      const p = positions[n.dataset.id];
+      if(p){ n.style.left = p.left; n.style.top = p.top; applied = true; }
+    });
+    return applied;
+  }catch(e){ return false; }
+}
+
+function resetLayout(){
+  try{ localStorage.removeItem(LAYOUT_KEY); }catch(e){}
+  nodes.forEach(n=>{
+    const orig = n.dataset.origLeft;
+    const origT = n.dataset.origTop;
+    if(orig) n.style.left = orig;
+    if(origT) n.style.top = origT;
+  });
+  drawWires(); applyStep();
+  hideResetBtn();
+}
+
+nodes.forEach(n=>{
+  n.dataset.origLeft = n.style.left;
+  n.dataset.origTop  = n.style.top;
+});
+
+const btnResetLayout = document.getElementById("btnResetLayout");
+function showResetBtn(){ btnResetLayout.classList.add("has-custom"); }
+function hideResetBtn(){ btnResetLayout.classList.remove("has-custom"); }
+btnResetLayout.addEventListener("click", resetLayout);
+
+if(loadLayout()) showResetBtn();
+
+const canvas = document.querySelector(".canvas");
+const btnFullscreen = document.getElementById("btnFullscreen");
+
+function toggleFullscreen(){
+  canvas.classList.toggle("is-fullscreen");
+  setTimeout(()=>{ drawWires(); applyStep(); }, 50);
+}
+btnFullscreen.addEventListener("click", toggleFullscreen);
+
+window.addEventListener("keydown",(e)=>{
+  if(e.target.closest("input,textarea")) return;
+  if(e.code === "Space"){ e.preventDefault(); setPlaying(!state.playing); }
+  else if(e.key === "ArrowRight"){ setPlaying(false); go(+1); }
+  else if(e.key === "ArrowLeft"){ setPlaying(false); go(-1); }
+  else if(e.key === "t" || e.key === "T"){ toggleTheme(); }
+  else if(e.key === "f" || e.key === "F"){ toggleFullscreen(); }
+  else if(e.key === "r" || e.key === "R"){ if(btnResetLayout.classList.contains("has-custom")) resetLayout(); }
+  else if(e.key === "Escape"){ if(canvas.classList.contains("is-fullscreen")) toggleFullscreen(); }
+  else if(e.key === "o" || e.key === "O"){
+    const [a, b] = CONFIG.toggleModes;
+    pickMode(state.mode === a ? b : a);
+  }
+  else if(/^[1-9]$/.test(e.key)){
+    const idx = parseInt(e.key,10)-1;
+    const key = CONFIG.keyboardFlowOrder[idx];
+    if(key && flows[key]) pickFlow(key);
+  }
+});
+
+let rrTimer;
+window.addEventListener("resize", ()=>{
+  clearTimeout(rrTimer);
+  rrTimer = setTimeout(()=>{ drawWires(); applyStep(); }, 80);
+});
+
+applyModeToNodes();
+requestAnimationFrame(()=>{
+  drawWires();
+  applyStep();
+});
+</script>
+</body>
+</html>

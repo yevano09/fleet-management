@@ -27,6 +27,15 @@ v2g_projected_revenue_dollars = Gauge("fleet_v2g_projected_revenue_dollars", "To
 battery_degradation_cost_dollars = Gauge("fleet_battery_degradation_cost_dollars", "Accumulated battery degradation cost")
 device_soc = Gauge("fleet_device_soc", "Per-device state of charge", ["device"])
 
+# Alert metrics
+alerts_total = Counter(
+    "fleet_alerts_total", "Total alerts fired", ["severity", "type"]
+)
+alerts_active = Gauge("fleet_alerts_active", "Currently active alerts")
+alert_notifications_total = Counter(
+    "fleet_alert_notifications_total", "Alert notifications sent", ["channel"]
+)
+
 # MQTT metrics
 mqtt_messages_published = Counter(
     "fleet_mqtt_messages_published_total", "MQTT messages published", ["topic"]

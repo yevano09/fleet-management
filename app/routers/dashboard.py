@@ -4,7 +4,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 import os
 
-from app.auth import get_current_user
+from app.auth import get_current_user, get_current_admin
 
 logger = logging.getLogger(__name__)
 
@@ -17,8 +17,11 @@ templates = Jinja2Templates(directory=templates_path)
 @router.get("/", response_class=HTMLResponse)
 async def dashboard(request: Request):
     user = await get_current_user(request)
-    if not user:
+    admin = get_current_admin(request)
+    if not user and not admin:
         return RedirectResponse(url="/auth/login")
+    if admin:
+        user = admin
     return templates.TemplateResponse(
         "dashboard.html",
         {"request": request, "user": user},

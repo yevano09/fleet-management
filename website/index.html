@@ -1,0 +1,870 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Fleet Commander — IoT-Forge</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@500;600;700&family=Inter:wght@400;450;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚡</text></svg>">
+<meta name="description" content="Fleet Commander — Production-grade IoT fleet management system by IoT-Forge">
+</head>
+<body>
+
+<a href="#main-content" class="skip-link">Skip to main content</a>
+
+<button class="mobile-toggle" id="sidebarToggle" aria-label="Toggle navigation">☰</button>
+
+<aside class="sidebar" id="sidebar" role="navigation" aria-label="Documentation navigation">
+  <div class="sidebar-brand">
+    <div class="parent-brand">IoT-Forge</div>
+    <div class="product-name">Fleet Commander</div>
+  </div>
+  <nav class="sidebar-nav">
+    <div class="nav-section">Getting Started</div>
+    <a href="#overview" class="active">Overview</a>
+    <a href="#quickstart">Quick Start</a>
+    <a href="#architecture">Architecture</a>
+    <a href="architecture.html" target="_blank">Interactive Diagram ↗</a>
+
+    <div class="nav-section">Core Features</div>
+    <a href="#devices">Device Management</a>
+    <a href="#ota">OTA Updates</a>
+    <a href="#mqtt">MQTT Topics</a>
+    <a href="#config">Remote Config</a>
+
+    <div class="nav-section">Observability</div>
+    <a href="#metrics">Prometheus Metrics</a>
+    <a href="#grafana">Grafana Dashboards</a>
+    <a href="#alerts">Alerting Pipeline</a>
+
+    <div class="nav-section">AI Agents</div>
+    <a href="#agents">Phase 1 Agents</a>
+    <a href="#onboarding">Device Onboarding</a>
+    <a href="#v2g">V2G Arbitrage</a>
+
+    <div class="nav-section">Operations</div>
+    <a href="#api">API Reference</a>
+    <a href="#testing">Testing</a>
+    <a href="#security">Security</a>
+    <a href="#scaling">Production Scaling</a>
+
+    <div class="nav-section">Project</div>
+    <a href="#structure">Project Structure</a>
+    <a href="#sessions">Session History</a>
+  </nav>
+  <div class="sidebar-footer">
+    <a class="github-link" href="https://github.com/yevano09/fleet-management" target="_blank" rel="noopener">
+      <svg width="18" height="18" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+      GitHub
+    </a>
+  </div>
+</aside>
+
+<main class="main" id="main-content">
+
+  <!-- ─── Hero ─────────────────────────────────────── -->
+  <section class="hero">
+    <div class="parent-label">IoT-Forge — IoT Product Suite</div>
+    <h1>Fleet Commander</h1>
+    <p class="tagline">
+      Production-grade IoT fleet management system. Device registration, remote configuration,
+      OTA firmware updates with automatic rollback, AI agents, and full observability —
+      all running on FastAPI, MQTT, Prometheus, and Grafana.
+    </p>
+    <div class="badges">
+      <span class="badge badge-teal">FastAPI</span>
+      <span class="badge badge-green">MQTT</span>
+      <span class="badge badge-purple">AI Agents</span>
+      <span class="badge badge-amber">OTA Updates</span>
+      <span class="badge badge-red">Prometheus + Grafana</span>
+    </div>
+
+    <!-- Fleet Activity Monitor -->
+    <div class="fleet-monitor" role="region" aria-label="Live fleet activity feed">
+      <div class="fleet-monitor-header">
+        <span class="indicator">
+          <span class="dot" aria-hidden="true"></span>
+          Fleet Activity
+        </span>
+        <span>Live</span>
+      </div>
+      <div class="fleet-stats">
+        <div class="fleet-stat">
+          <div class="stat-value" id="stat-online">12</div>
+          <div class="stat-label">Online</div>
+        </div>
+        <div class="fleet-stat">
+          <div class="stat-value offline" id="stat-offline">2</div>
+          <div class="stat-label">Offline</div>
+        </div>
+        <div class="fleet-stat">
+          <div class="stat-value ota" id="stat-ota">3</div>
+          <div class="stat-label">OTA In Progress</div>
+        </div>
+        <div class="fleet-stat">
+          <div class="stat-value rate" id="stat-rate">94%</div>
+          <div class="stat-label">Success Rate</div>
+        </div>
+      </div>
+      <div class="event-feed" aria-live="polite" aria-label="Recent fleet events">
+        <div class="event-list" id="event-list"></div>
+      </div>
+    </div>
+  </section>
+
+  <div class="content">
+
+    <!-- ─── Overview ───────────────────────────────── -->
+    <section id="overview" class="section">
+      <h2>Overview</h2>
+      <p>
+        <strong>Fleet Commander</strong> is an IoT fleet management module built by
+        <strong>IoT-Forge</strong> — a suite of interconnected IoT products.
+        It provides a complete backend for managing fleets of connected devices:
+        registration, heartbeat monitoring, remote configuration via MQTT,
+        over-the-air (OTA) firmware updates with automatic rollback on failure,
+        AI-powered fleet analytics, and a full alerting pipeline.
+      </p>
+      <div class="card-grid">
+        <div class="card">
+          <div class="card-icon">📡</div>
+          <h4>MQTT Command &amp; Control</h4>
+          <p>Bi-directional communication with devices over MQTT topics. Publish OTA commands, remote configs, and receive heartbeats.</p>
+        </div>
+        <div class="card">
+          <div class="card-icon">🔄</div>
+          <h4>OTA with Rollback</h4>
+          <p>State-machine driven firmware updates. Hash mismatch detection triggers automatic rollback to previous firmware version.</p>
+        </div>
+        <div class="card">
+          <div class="card-icon">🤖</div>
+          <h4>AI Agents</h4>
+          <p>Phase 1 Crew AI agents for OTA campaign planning, anomaly detection, device grouping, device onboarding, and V2G arbitrage.</p>
+        </div>
+        <div class="card">
+          <div class="card-icon">📊</div>
+          <h4>Full Observability</h4>
+          <p>Prometheus metrics (fleet size, OTA deploys, API latency, MQTT throughput) + pre-built Grafana dashboards.</p>
+        </div>
+        <div class="card">
+          <div class="card-icon">🔔</div>
+          <h4>Alerting Pipeline</h4>
+          <p>Active alert system with dedup, cooldown, escalation, and multi-channel delivery (Slack, Email, Webhook).</p>
+        </div>
+        <div class="card">
+          <div class="card-icon">⚡</div>
+          <h4>V2G Arbitrage</h4>
+          <p>Vehicle-to-Grid optimizer schedules EV battery charge/discharge to maximise revenue, accounting for battery degradation cost.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ─── Quick Start ────────────────────────────── -->
+    <section id="quickstart" class="section">
+      <h2>Quick Start</h2>
+      <h3>Prerequisites</h3>
+      <ul>
+        <li>Docker &amp; Docker Compose v2</li>
+        <li>Git</li>
+      </ul>
+
+      <h3>Start the Full Environment</h3>
+      <pre><code>git clone https://github.com/yevano09/fleet-management.git
+cd fleet-management
+
+# Start all services (backend, MQTT, Prometheus, Grafana, simulator)
+docker compose --profile demo up --build -d
+
+# Check that everything is healthy
+docker compose ps</code></pre>
+
+      <h3>Access the Interfaces</h3>
+      <table>
+        <thead>
+          <tr><th>Service</th><th>URL</th><th>Credentials</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Fleet Dashboard</td><td><code>http://localhost:8181</code></td><td>Admin login or Google OAuth</td></tr>
+          <tr><td>API Docs (Swagger)</td><td><code>http://localhost:8181/docs</code></td><td>—</td></tr>
+          <tr><td>Prometheus</td><td><code>http://localhost:9090</code></td><td>—</td></tr>
+          <tr><td>Grafana</td><td><code>http://localhost:3000</code></td><td><code>admin / admin</code></td></tr>
+          <tr><td>MQTT Broker</td><td><code>localhost:1883</code></td><td>—</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <!-- ─── Architecture ───────────────────────────── -->
+    <section id="architecture" class="section">
+      <h2>Architecture</h2>
+      <p>
+        Fleet Commander uses a microservices-inspired architecture with MQTT as the
+        device communication backbone and a FastAPI backend for REST API, business
+        logic, and dashboard serving.
+      </p>
+      <p style="margin-bottom:1.5rem">
+        <a href="architecture.html" class="btn-arch" target="_blank" rel="noopener">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>
+          Open Interactive Architecture Diagram ↗
+        </a>
+      </p>
+      <div class="diagram"><span class="node">┌─────────────┐</span>    <span class="muted">MQTT</span>     <span class="node">┌─────────────┐</span>   <span class="muted">HTTP</span>    <span class="node">┌────────────┐</span>
+<span class="node">│  Device     │</span><span class="arrow">◄───────────►│</span>  <span class="highlight">Mosquitto</span>   │<span class="arrow">◄─────────►│</span>  <span class="highlight">FastAPI</span>   │
+<span class="node">│  Simulators │</span>  <span class="muted">iot/fleet/</span>  │  <span class="muted">(Broker)</span>   │  <span class="muted">REST API</span>  │  <span class="highlight">Backend</span>   │
+<span class="node">│  (x5-N)     │</span>  <span class="muted">.../command</span>  │             │           │  :8000     │
+<span class="node">└─────────────┘</span>  <span class="muted">.../status</span>  <span class="node">└──────┬──────┘</span>           <span class="node">└─────┬──────┘</span>
+                                    │                        │
+                                    │                 <span class="node">┌──────┴──────┐</span>
+                                    │                 │  SQLite/    │
+                                    │                 │  Postgres   │
+                                    │                 <span class="node">└─────────────┘</span>
+                            <span class="node">┌───────┴───────┐</span>
+                            │   Prometheus   │
+                            │   :9090        │
+                            <span class="node">└───────┬───────┘</span>
+                                    │
+                            <span class="node">┌───────┴───────┐</span>
+                            │   Grafana     │
+                            │   :3000       │
+                            <span class="node">└───────────────┘</span></div>
+
+      <h3>Technology Stack</h3>
+      <table>
+        <thead><tr><th>Component</th><th>Technology</th><th>Purpose</th></tr></thead>
+        <tbody>
+          <tr><td>Backend</td><td>FastAPI (Python)</td><td>REST API, dashboard, business logic</td></tr>
+          <tr><td>Database</td><td>SQLite (dev) / PostgreSQL (prod)</td><td>Device registry, OTA state, alerts</td></tr>
+          <tr><td>Message Broker</td><td>Eclipse Mosquitto</td><td>MQTT pub/sub for device communication</td></tr>
+          <tr><td>Metrics</td><td>Prometheus</td><td>Fleet metrics collection &amp; alerting</td></tr>
+          <tr><td>Visualization</td><td>Grafana</td><td>Pre-built fleet monitoring dashboards</td></tr>
+          <tr><td>Auth</td><td>Google OAuth + Admin JWT</td><td>Dashboard authentication</td></tr>
+          <tr><td>AI Agents</td><td>Crew AI (heuristic mode)</td><td>OTA planning, anomaly detection, device groups</td></tr>
+          <tr><td>Simulator</td><td>Python asyncio</td><td>Virtual devices with configurable failure rates</td></tr>
+          <tr><td>Orchestration</td><td>Docker Compose</td><td>Multi-service container management</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <!-- ─── Device Management ──────────────────────── -->
+    <section id="devices" class="section">
+      <h2>Device Management</h2>
+      <p>
+        Devices auto-register on their first MQTT heartbeat or can be registered manually
+        via the REST API. Each device tracks firmware version, IP address, MQTT client ID,
+        signal strength, uptime percentage, and online/offline status.
+      </p>
+
+      <h3>Auto-Registration</h3>
+      <p>
+        When a device sends its first heartbeat to the <code>iot/fleet/register</code> topic,
+        the backend automatically creates a device record. Devices are identified by their
+        MQTT client ID for deduplication.
+      </p>
+
+      <h3>Heartbeat Monitoring</h3>
+      <pre><code>curl -X POST http://localhost:8181/devices/{device_id}/heartbeat \
+  -H "Content-Type: application/json" \
+  -d '{"uptime_percentage": 99.2, "signal_strength": -58}'</code></pre>
+      <p>
+        Heartbeats include uptime percentage, signal strength (dBm), and for EV devices:
+        state of charge (SOC), state of health (SOH), battery temperature, and plug status.
+        Devices not seen for 60+ seconds are marked offline.
+      </p>
+    </section>
+
+    <!-- ─── OTA Updates ────────────────────────────── -->
+    <section id="ota" class="section">
+      <h2>OTA Firmware Updates</h2>
+      <p>
+        The OTA (Over-The-Air) update system uses a formal state machine with automatic
+        rollback on failure. The backend tracks every deployment and provides real-time
+        status via the dashboard and API.
+      </p>
+
+      <h3>State Machine</h3>
+      <div class="state-machine">
+        <span class="state">pending</span>
+        <span class="transition">→</span>
+        <span class="state">downloading</span>
+        <span class="transition">→</span>
+        <span class="state">applying</span>
+        <span class="transition">→</span>
+        <span class="state">verifying</span>
+        <span class="transition">→</span>
+        <span class="state success">success</span>
+        <br>
+        <span class="transition" style="margin-left:18.5rem">→</span>
+        <span class="state fail">hash_mismatch</span>
+        <span class="transition">→</span>
+        <span class="state warn">rollback</span>
+        <span class="transition">→</span>
+        <span class="state">rolled_back</span>
+        <br>
+        <span class="transition" style="margin-left:18.5rem">→</span>
+        <span class="state fail">failed</span>
+        <span class="transition">(timeout / max retries)</span>
+      </div>
+
+      <h3>Upload &amp; Trigger</h3>
+      <pre><code># Upload firmware binary (auto-generates SHA256 hash)
+curl -X POST http://localhost:8181/ota/upload \
+  -F "version=2.0.0" \
+  -F "file=@firmware.bin"
+
+# Get the firmware ID from response, then trigger:
+curl -X POST http://localhost:8181/ota/trigger \
+  -H "Content-Type: application/json" \
+  -d '{"firmware_id": "&lt;FW_ID&gt;", "all_devices": true}'</code></pre>
+
+      <h3>Rollback on Hash Mismatch</h3>
+      <p>
+        When a device reports <code>hash_mismatch</code> after applying firmware, the
+        backend automatically: (1) logs the failure, (2) sets the deployment status to
+        <code>rolled_back</code>, (3) reverts the device's firmware to its previous version.
+        The simulator has a configurable 20% failure rate to demonstrate this behavior.
+      </p>
+    </section>
+
+    <!-- ─── MQTT Topics ────────────────────────────── -->
+    <section id="mqtt" class="section">
+      <h2>MQTT Topic Structure</h2>
+      <p>All device communication happens over MQTT topics under the <code>iot/fleet/</code> hierarchy.</p>
+      <table>
+        <thead><tr><th>Topic Pattern</th><th>Direction</th><th>Purpose</th></tr></thead>
+        <tbody>
+          <tr><td><code>iot/fleet/{id}/command/ota</code></td><td>Backend → Device</td><td>OTA firmware update command (URL + SHA256)</td></tr>
+          <tr><td><code>iot/fleet/{id}/command/config</code></td><td>Backend → Device</td><td>Remote configuration push</td></tr>
+          <tr><td><code>iot/fleet/{id}/command/v2g</code></td><td>Backend → Device</td><td>V2G charge/discharge command</td></tr>
+          <tr><td><code>iot/fleet/{id}/status/ota</code></td><td>Device → Backend</td><td>OTA lifecycle status updates</td></tr>
+          <tr><td><code>iot/fleet/{id}/status/v2g</code></td><td>Device → Backend</td><td>V2G status (discharging, SOC, etc.)</td></tr>
+          <tr><td><code>iot/fleet/{id}/heartbeat</code></td><td>Device → Backend</td><td>Periodic heartbeat with uptime &amp; signal</td></tr>
+          <tr><td><code>iot/fleet/register</code></td><td>Device → Backend</td><td>Auto-registration on first connect</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <!-- ─── Remote Config ──────────────────────────── -->
+    <section id="config" class="section">
+      <h2>Remote Configuration</h2>
+      <p>
+        Configuration can be pushed to individual devices via MQTT or REST API.
+        The system publishes to <code>iot/fleet/{id}/command/config</code> and
+        logs device acknowledgement.
+      </p>
+      <pre><code>curl -X POST http://localhost:8181/devices/{device_id}/config \
+  -H "Content-Type: application/json" \
+  -d '{
+    "heartbeat_interval_seconds": 10,
+    "ota_poll_interval_seconds": 60,
+    "log_level": "INFO"
+  }'</code></pre>
+    </section>
+
+    <!-- ─── Prometheus Metrics ─────────────────────── -->
+    <section id="metrics" class="section">
+      <h2>Prometheus Metrics</h2>
+      <p>
+        Fleet Commander exposes a comprehensive set of Prometheus metrics at
+        <code>/metrics/</code> for fleet monitoring and alerting.
+      </p>
+      <table>
+        <thead><tr><th>Metric</th><th>Type</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td><code>fleet_active_devices</code></td><td>Gauge</td><td>Number of currently online devices</td></tr>
+          <tr><td><code>fleet_total_devices</code></td><td>Gauge</td><td>Total registered devices</td></tr>
+          <tr><td><code>fleet_ota_deployments_total</code></td><td>Counter</td><td>OTA deployments by status</td></tr>
+          <tr><td><code>fleet_ota_duration_seconds</code></td><td>Histogram</td><td>OTA deployment duration</td></tr>
+          <tr><td><code>fleet_api_request_duration_seconds</code></td><td>Histogram</td><td>API request latency (P95)</td></tr>
+          <tr><td><code>fleet_mqtt_messages_total</code></td><td>Counter</td><td>MQTT messages by topic</td></tr>
+          <tr><td><code>fleet_alerts_total</code></td><td>Counter</td><td>Alerts triggered by type/severity</td></tr>
+          <tr><td><code>fleet_alerts_active</code></td><td>Gauge</td><td>Currently active alerts</td></tr>
+          <tr><td><code>fleet_alert_notifications_total</code></td><td>Counter</td><td>Alert notifications sent by channel</td></tr>
+          <tr><td><code>v2g_active_discharges</code></td><td>Gauge</td><td>Currently discharging V2G devices</td></tr>
+          <tr><td><code>battery_degradation_cost_total</code></td><td>Counter</td><td>Accumulated battery wear cost</td></tr>
+          <tr><td><code>v2g_projected_revenue_total</code></td><td>Counter</td><td>Projected V2G arbitrage revenue</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <!-- ─── Grafana ────────────────────────────────── -->
+    <section id="grafana" class="section">
+      <h2>Grafana Dashboards</h2>
+      <p>
+        A pre-provisioned Grafana dashboard is automatically available when the stack starts.
+        It provides real-time visibility into fleet health with the following panels:
+      </p>
+      <div class="card-grid">
+        <div class="card">
+          <h4>Active / Total Devices</h4>
+          <p>Gauge showing the number of currently online devices out of total registered.</p>
+        </div>
+        <div class="card">
+          <h4>OTA In Progress</h4>
+          <p>Current OTA deployments tracked in real time.</p>
+        </div>
+        <div class="card">
+          <h4>OTA Success Rate</h4>
+          <p><code>rate()</code> query showing deployment success percentage.</p>
+        </div>
+        <div class="card">
+          <h4>API Latency (P95)</h4>
+          <p>Histogram quantile as a timeseries for request duration.</p>
+        </div>
+        <div class="card">
+          <h4>OTA Deployments by Status</h4>
+          <p>Pie chart breaking down deployments by current status.</p>
+        </div>
+        <div class="card">
+          <h4>MQTT Throughput</h4>
+          <p>Rate of published and received MQTT messages.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ─── Alerting Pipeline ──────────────────────── -->
+    <section id="alerts" class="section">
+      <h2>Alerting &amp; Notification Pipeline</h2>
+      <p>
+        The alerting system converts passive anomaly detection into active, actionable
+        alerts with full lifecycle management, deduplication, cooldown periods,
+        escalation, and multi-channel delivery.
+      </p>
+
+      <h3>Alert Lifecycle</h3>
+      <div class="state-machine">
+        <span class="state">active</span>
+        <span class="transition">→</span>
+        <span class="state">acknowledged</span>
+        <span class="transition">→</span>
+        <span class="state success">resolved</span>
+      </div>
+
+      <h3>Alert Channels</h3>
+      <ul>
+        <li><strong>Slack</strong> — Webhook integration</li>
+        <li><strong>Email</strong> — SMTP-based delivery</li>
+        <li><strong>Generic Webhook</strong> — Custom HTTP endpoint</li>
+      </ul>
+
+      <h3>Anomaly Types</h3>
+      <table>
+        <thead><tr><th>Type</th><th>Description</th><th>Cooldown</th></tr></thead>
+        <tbody>
+          <tr><td><code>device_offline</code></td><td>Per-device offline detection (&gt;5min no heartbeat)</td><td>10 min</td></tr>
+          <tr><td><code>stuck_ota</code></td><td>OTA stuck in non-terminal state beyond timeout</td><td>2 min</td></tr>
+          <tr><td><code>ota_failure_spike</code></td><td>Sudden increase in OTA failure rate</td><td>10 min</td></tr>
+          <tr><td><code>mass_offline</code></td><td>&gt;50% of fleet goes offline simultaneously</td><td>30 min</td></tr>
+          <tr><td><code>v2g_revenue_drop</code></td><td>Negative projected V2G arbitrage revenue</td><td>60 min</td></tr>
+        </tbody>
+      </table>
+
+      <p>Escalation: if the same alert re-fires 3+ times, severity bumps from <code>warning</code> to <code>critical</code>.</p>
+    </section>
+
+    <!-- ─── Phase 1 Agents ─────────────────────────── -->
+    <section id="agents" class="section">
+      <h2>Phase 1 Crew AI Agents</h2>
+      <p>
+        Fleet Commander includes four AI agents that run in either <strong>in-backend</strong>
+        mode (direct SQLAlchemy) or <strong>CLI</strong> mode (HTTP-based), avoiding
+        self-referencing deadlocks in the single-worker FastAPI process.
+      </p>
+
+      <div class="card-grid">
+        <div class="card">
+          <h4>OTA Campaign Agent</h4>
+          <p>Generates canary-based rollout plans: canary → Phase 1 (30%) → Phase 2 (60%) → Phase 3 (100%) with pass/fail gates between phases.</p>
+        </div>
+        <div class="card">
+          <h4>Anomaly Detection Agent</h4>
+          <p>Scans for weak signals, stuck OTAs, failure spikes, offline devices, and V2G revenue drops. Reports structured findings with severity.</p>
+        </div>
+        <div class="card">
+          <h4>Device Group Manager</h4>
+          <p>Groups devices by firmware version cohorts and signal strength buckets (Good / Moderate / Poor) for targeted rollouts.</p>
+        </div>
+        <div class="card">
+          <h4>Device Onboarding Agent</h4>
+          <p>Guides new device introduction with conflict checking, firmware recommendation, auto-registration, and heartbeat verification.</p>
+        </div>
+      </div>
+
+      <h3>REST API</h3>
+      <pre><code># Run all agents
+curl http://localhost:8181/agents/recommendations
+
+# OTA campaign for a firmware
+curl 'http://localhost:8181/agents/ota-campaign?firmware_version=2.0.0'
+
+# Anomaly check
+curl 'http://localhost:8181/agents/anomaly-check'
+
+# Device groups
+curl 'http://localhost:8181/agents/device-groups'
+
+# Fleet health (triggers alerts)
+curl 'http://localhost:8181/agents/fleet-health'</code></pre>
+
+      <h3>CLI Runner</h3>
+      <pre><code># Run all agents
+python run_agents.py
+
+# OTA campaign only
+python run_agents.py --ota --firmware 2.0.0
+
+# Anomaly check
+python run_agents.py --anomaly
+
+# JSON output
+python run_agents.py --json | jq .</code></pre>
+    </section>
+
+    <!-- ─── Device Onboarding ──────────────────────── -->
+    <section id="onboarding" class="section">
+      <h2>Device Onboarding Agent</h2>
+      <p>
+        The Device Onboarding Agent guides operators through introducing new devices
+        into the fleet. It supports both <strong>recommendation mode</strong> (dry-run
+        with plan) and <strong>auto-register mode</strong> (full automated onboarding).
+      </p>
+
+      <div class="diagram">
+Operator submits device name
+        │
+        ▼
+Device Onboarding Agent
+  1. Check name/MQTT ID conflicts  ──► Database lookup
+  2. Recommend latest firmware      ──► Firmware list
+  3. Generate initial config        ──► heartbeat interval, OTA poll
+  4. Register device (if approved)  ──► INSERT Device + metrics
+  5. Push MQTT config               ──► publish_remote_config
+  6. Verify first heartbeat         ──► Check last_seen
+        │
+        ▼
+Onboarding Report (JSON → CLI / Dashboard UI)</div>
+
+      <pre><code># Recommendation mode (read-only plan)
+curl 'http://localhost:8181/agents/onboarding?name=Sensor-042'
+
+# Auto-register mode
+curl 'http://localhost:8181/agents/onboarding?name=Sensor-042&auto_register=true'
+
+# Via CLI
+python run_agents.py --onboard "Sensor-042" --onboard-auto</code></pre>
+    </section>
+
+    <!-- ─── V2G Arbitrage ──────────────────────────── -->
+    <section id="v2g" class="section">
+      <h2>V2G Arbitrage Optimizer</h2>
+      <p>
+        The V2G (Vehicle-to-Grid) arbitrage module schedules EV battery charge/discharge
+        to maximize net revenue, accounting for battery degradation costs. It uses a
+        heuristic optimizer over a configurable time horizon.
+      </p>
+
+      <h3>Battery Degradation Model</h3>
+      <p>The degradation cost per kWh cycled is computed as:</p>
+      <pre><code>C_deg = replacement_cost × base_fade_per_cycle / capacity × SOH_factor × temp_factor</code></pre>
+      <ul>
+        <li><strong>SOH_factor</strong>: <code>(80% / SOH)²</code> when SOH &lt; 80%, otherwise 1.0</li>
+        <li><strong>Temp_factor</strong>: Arrhenius model — doubles every 10°C above 25°C</li>
+        <li>No discharge allowed when SOH &lt; 70%</li>
+        <li>Default replacement cost: $35,000 (configurable)</li>
+      </ul>
+
+      <h3>Sample Schedule</h3>
+      <pre><code>curl 'http://localhost:8181/agents/v2g-dispatch'</code></pre>
+      <pre><code>{
+  "agent": "V2G Arbitrage Optimizer",
+  "summary": "Projected revenue: $12.45, degradation cost: $0.08, net: $12.37.",
+  "total_projected_revenue_dollars": 12.45,
+  "schedule": [
+    {
+      "start_time": "2025-01-15T03:00:00",
+      "end_time": "2025-01-15T04:00:00",
+      "action": "charge",
+      "power_kw": 7.2,
+      "spot_price_per_kwh": 0.04,
+      "net_revenue_dollars": -0.29
+    },
+    {
+      "start_time": "2025-01-15T18:00:00",
+      "end_time": "2025-01-15T19:00:00",
+      "action": "discharge",
+      "power_kw": 7.2,
+      "spot_price_per_kwh": 0.35,
+      "deg_cost_per_kwh": 0.0105,
+      "net_revenue_dollars": 2.44
+    }
+  ]
+}</code></pre>
+    </section>
+
+    <!-- ─── API Reference ──────────────────────────── -->
+    <section id="api" class="section">
+      <h2>API Reference</h2>
+      <p>Full interactive API documentation is available at <code>/docs</code> (Swagger UI) when the backend is running.</p>
+
+      <h3>Devices</h3>
+      <table>
+        <thead><tr><th>Method</th><th>Endpoint</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td><code>POST</code></td><td><code>/devices/register</code></td><td>Register a device</td></tr>
+          <tr><td><code>POST</code></td><td><code>/devices/{id}/heartbeat</code></td><td>Update last_seen, uptime, signal strength</td></tr>
+          <tr><td><code>POST</code></td><td><code>/devices/{id}/config</code></td><td>Push MQTT remote config</td></tr>
+          <tr><td><code>GET</code></td><td><code>/devices</code></td><td>List all devices with firmware, status, signal</td></tr>
+        </tbody>
+      </table>
+
+      <h3>OTA</h3>
+      <table>
+        <thead><tr><th>Method</th><th>Endpoint</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td><code>POST</code></td><td><code>/ota/upload</code></td><td>Upload firmware binary (generates SHA256)</td></tr>
+          <tr><td><code>POST</code></td><td><code>/ota/trigger</code></td><td>Trigger targeted or bulk OTA update</td></tr>
+          <tr><td><code>GET</code></td><td><code>/ota/status</code></td><td>View OTA deployment statuses</td></tr>
+          <tr><td><code>GET</code></td><td><code>/ota/firmware</code></td><td>List uploaded firmware versions</td></tr>
+        </tbody>
+      </table>
+
+      <h3>Alerts</h3>
+      <table>
+        <thead><tr><th>Method</th><th>Endpoint</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td><code>GET</code></td><td><code>/alerts</code></td><td>List all alerts (filterable by status)</td></tr>
+          <tr><td><code>POST</code></td><td><code>/alerts/{id}/acknowledge</code></td><td>Acknowledge an alert</td></tr>
+          <tr><td><code>POST</code></td><td><code>/alerts/{id}/resolve</code></td><td>Resolve an alert</td></tr>
+          <tr><td><code>POST</code></td><td><code>/alerts/prune</code></td><td>Prune resolved alerts older than N days</td></tr>
+        </tbody>
+      </table>
+
+      <h3>Observability</h3>
+      <table>
+        <thead><tr><th>Method</th><th>Endpoint</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td><code>GET</code></td><td><code>/metrics/</code></td><td>Prometheus metrics endpoint</td></tr>
+          <tr><td><code>GET</code></td><td><code>/</code></td><td>Fleet UI Dashboard</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <!-- ─── Testing ────────────────────────────────── -->
+    <section id="testing" class="section">
+      <h2>Testing</h2>
+      <p>
+        Fleet Commander includes 22 end-to-end integration tests covering device
+        registration, heartbeat, OTA lifecycle, alerts, agent recommendations,
+        and Prometheus metrics.
+      </p>
+      <pre><code># Run E2E tests against a fresh environment
+docker compose down --volumes --remove-orphans
+docker compose --profile testing run --build --rm tests
+
+# Tests cover:
+# - Device registration &amp; heartbeat
+# - OTA upload, trigger, state transitions, rollback
+# - Agent recommendations
+# - Device onboarding
+# - Alert lifecycle (creation, acknowledge, resolve)
+# - Prometheus metrics presence</code></pre>
+    </section>
+
+    <!-- ─── Security ───────────────────────────────── -->
+    <section id="security" class="section">
+      <h2>Security &amp; Dependency Management</h2>
+      <p>
+        All Python dependencies are pinned to exact versions in <code>requirements.txt</code>.
+        Dependabot is configured for automated vulnerability alerts on the GitHub repository.
+      </p>
+
+      <h3>Recent Hardening (Session 2)</h3>
+      <p>
+        11 packages were upgraded to patch known CVEs, including critical fixes:
+      </p>
+      <ul>
+        <li><strong>python-multipart</strong> — Path traversal → RCE (CVSS 8.6)</li>
+        <li><strong>jinja2</strong> — Sandbox escape (CVSS 8.8)</li>
+        <li><strong>requests</strong> — Credential leak via session certificate bypass</li>
+        <li><strong>pytest</strong> — Local tmpdir privilege escalation</li>
+      </ul>
+      <p>
+        All 3 Dockerfiles were hardened with <code>apt-get upgrade -y</code> at build time
+        and include cleanup of package lists to reduce attack surface.
+      </p>
+    </section>
+
+    <!-- ─── Production Scaling ─────────────────────── -->
+    <section id="scaling" class="section">
+      <h2>Production Scaling</h2>
+      <p>For larger deployments, Fleet Commander supports several scaling strategies:</p>
+      <div class="card-grid">
+        <div class="card">
+          <h4>PostgreSQL</h4>
+          <p>Switch from SQLite to PostgreSQL via <code>DATABASE_URL</code>. Use the <code>production</code> Docker Compose profile.</p>
+        </div>
+        <div class="card">
+          <h4>Backend Scaling</h4>
+          <p>Horizontal scaling behind a reverse proxy: <code>docker compose up -d --scale backend=3</code></p>
+        </div>
+        <div class="card">
+          <h4>MQTT Clustering</h4>
+          <p>Replace single Mosquitto node with a cluster or use a managed MQTT service (e.g., HiveMQ, AWS IoT Core).</p>
+        </div>
+        <div class="card">
+          <h4>S3 Firmware Storage</h4>
+          <p>Mount an S3-compatible bucket or NFS volume instead of the local Docker volume for firmware binaries.</p>
+        </div>
+        <div class="card">
+          <h4>Prometheus Retention</h4>
+          <p>Increase retention period and add alerting rules for device offline events and anomaly thresholds.</p>
+        </div>
+        <div class="card">
+          <h4>Advanced Optimization</h4>
+          <p>TimescaleDB hypertables for time-series SOC/SOH data. MILP via PuLP/OR-Tools for stochastic V2G optimization.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ─── Project Structure ──────────────────────── -->
+    <section id="structure" class="section">
+      <h2>Project Structure</h2>
+      <pre><code>fleet-management/
+├── app/                      # FastAPI application
+│   ├── main.py               # App entry point, lifespan, routes
+│   ├── config.py             # Pydantic settings (env-based)
+│   ├── database.py           # SQLAlchemy async engine &amp; session
+│   ├── models.py             # ORM models (Device, Firmware, OtaDeployment, Alert)
+│   ├── schemas.py            # Pydantic request/response schemas
+│   ├── auth.py               # Google OAuth + Admin JWT auth
+│   ├── mqtt_client.py        # MQTT client wrapper with reconnection
+│   ├── ota_manager.py        # OTA state machine + timeout watcher
+│   ├── alert_engine.py       # Alert lifecycle, dedup, notification channels
+│   ├── metrics.py            # Prometheus metrics definitions
+│   ├── routers/              # API route handlers
+│   │   ├── devices.py        # Device registration, heartbeat, listing, config
+│   │   ├── ota.py            # Firmware upload, OTA trigger, status
+│   │   ├── dashboard.py      # Dashboard HTML serving
+│   │   ├── auth.py           # Login, callback, admin auth, session mgmt
+│   │   ├── alerts.py         # Alert CRUD (list, acknowledge, resolve, prune)
+│   │   └── admin.py          # Admin panel routes
+│   └── templates/            # Jinja2 templates
+│       └── dashboard.html    # Fleet UI dashboard
+├── agents/                   # Phase 1 Crew AI agents
+│   ├── tools.py              # HTTP-based tools (CLI mode)
+│   ├── async_tools.py        # Async DB-backed tools (in-backend mode)
+│   ├── phase1_crew.py        # Crew AI agent definitions + fallbacks
+│   └── routers.py            # FastAPI router (/agents/*)
+├── simulator/
+│   └── simulator.py          # Virtual device simulator (5 devices, 20% failure)
+├── tests/
+│   └── test_e2e.py           # 22 end-to-end integration tests
+├── website/                  # This documentation site
+├── docker/
+│   ├── prometheus/           # Prometheus scrape config
+│   ├── grafana/              # Grafana provisioning + dashboards
+│   └── mosquitto/            # Mosquitto MQTT broker config
+├── docker-compose.yml        # Multi-service orchestration
+├── Dockerfile                # Backend container image
+├── Dockerfile.simulator      # Simulator container image
+├── Dockerfile.tests          # Test runner container image
+├── requirements.txt          # Python dependencies (pinned)
+├── .env.example              # Environment variable templates
+├── behindproxy.sh            # Corporate proxy helper
+├── noproxy.sh                # Proxy cleanup
+├── README.md                 # Project documentation
+├── DEMO_GUIDE.md             # Presentation scripts
+├── AGENTS.md                 # Session context (this file)
+└── SCALING.md                # Scaling strategy</code></pre>
+    </section>
+
+    <!-- ─── Session History ────────────────────────── -->
+    <section id="sessions" class="section">
+      <h2>Session History</h2>
+
+      <h3>Session 1 — Initial Build</h3>
+      <ul>
+        <li>Full FastAPI application with async SQLAlchemy, Pydantic schemas, routers</li>
+        <li>MQTT client with topic routing (<code>iot/fleet/{id}/command/ota</code>, <code>heartbeat</code>, <code>register</code>)</li>
+        <li>OTA state machine: <code>pending → downloading → applying → verifying → success | hash_mismatch → rollback → rolled_back</code></li>
+        <li>Prometheus metrics for fleet size, OTA deployments, API latency, MQTT messages</li>
+        <li>Fleet UI dashboard (Jinja2/HTMX) with 5s/30s auto-refresh</li>
+        <li>Device simulator (5 virtual devices, 20% OTA failure rate)</li>
+        <li>10 E2E integration tests</li>
+        <li>Docker Compose with all services</li>
+        <li>Phase 1 Crew AI agents (3 crews, dual execution mode)</li>
+      </ul>
+
+      <h3>Session 2 — Security Vulnerability Fixes</h3>
+      <p><strong>Trigger:</strong> Dependabot reported 10 vulnerabilities on GitHub</p>
+      <ul>
+        <li>Upgraded 11 packages to patched versions (fastapi, sqlalchemy, jinja2, python-multipart, requests, pytest, etc.)</li>
+        <li>Docker hardening: added <code>apt-get upgrade -y</code> to all 3 Dockerfiles</li>
+        <li>Critical fixes: <code>python-multipart</code> (path traversal → RCE, CVSS 8.6), <code>jinja2</code> (sandbox escape, CVSS 8.8)</li>
+        <li>Verification: all 10 E2E tests passing</li>
+      </ul>
+
+      <h3>Session 3 — Device Onboarding Agent</h3>
+      <p><strong>Trigger:</strong> Feature request for AI-guided device introduction</p>
+      <ul>
+        <li>New async tool <code>async_onboard_device()</code> with conflict checking, firmware recommendation, auto-registration</li>
+        <li>New endpoint <code>GET /agents/onboarding</code> with <code>auto_register</code> query param</li>
+        <li>MQTT config push via <code>POST /devices/{id}/config</code></li>
+        <li>CLI flags: <code>--onboard</code>, <code>--onboard-firmware</code>, <code>--onboard-mqtt-id</code>, <code>--onboard-ip</code>, <code>--onboard-auto</code></li>
+        <li>Dashboard UI: "Onboard Device" button + modal + result panel</li>
+        <li>Bug fix: MQTT client ID conflict detection (missing field in device list serialization)</li>
+      </ul>
+
+      <h3>Session 4 — Alerting &amp; Notification Pipeline</h3>
+      <p><strong>Trigger:</strong> Convert passive anomaly detection into active alerting system</p>
+      <ul>
+        <li>New <code>Alert</code> model with status lifecycle (active → acknowledged → resolved)</li>
+        <li>Alert engine with dedup, cooldown, escalation, and Slack/Email/Webhook channels</li>
+        <li>Full REST API: list, acknowledge, resolve, re-notify, prune</li>
+        <li>New anomaly types: <code>device_offline</code>, <code>v2g_revenue_drop</code></li>
+        <li>Dashboard alert panel with severity badges, ack/resolve buttons, auto-refresh</li>
+        <li>Prometheus alert metrics: <code>fleet_alerts_total</code>, <code>fleet_alerts_active</code>, <code>fleet_alert_notifications_total</code></li>
+        <li>4 new E2E tests — all 22 passing</li>
+      </ul>
+
+      <h3>Session 5 — Port Configuration &amp; Auth UX</h3>
+      <p><strong>Trigger:</strong> User feedback on login flow and port configurability</p>
+      <ul>
+        <li>Made host port configurable via <code>HOST_PORT</code> env var throughout docker-compose, settings, and CLI</li>
+        <li>Added <code>EXTERNAL_PORT</code> to settings, auto-derives OTA base URL and Google redirect URI</li>
+        <li>Replaced hardcoded Google-only login redirect with a landing page offering both Google OAuth and Admin Sign In</li>
+        <li>Dashboard now supports both Google-authenticated users and admin cookie users</li>
+      </ul>
+
+      <p>
+        <br>
+        <a href="https://github.com/yevano09/fleet-management" target="_blank" rel="noopener">
+          View the full project on GitHub →
+        </a>
+      </p>
+    </section>
+
+    <!-- ─── Footer ──────────────────────────────────── -->
+    <footer class="footer">
+      <div class="brand-line">
+        <span>IoT-Forge</span>
+        <span>·</span>
+        <strong>Fleet Commander</strong>
+      </div>
+      <p>
+        Built with FastAPI · MQTT · Prometheus · Grafana · Docker
+      </p>
+      <p>
+        <a href="https://github.com/yevano09/fleet-management" target="_blank" rel="noopener">GitHub</a>
+        &nbsp;·&nbsp;
+        <a href="https://github.com/yevano09/fleet-management/issues" target="_blank" rel="noopener">Report Issue</a>
+      </p>
+    </footer>
+
+  </div>
+</main>
+
+<script src="js/main.js"></script>
+</body>
+</html>

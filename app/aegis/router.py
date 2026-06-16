@@ -2,7 +2,7 @@ import json
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, HTTPException
 from sqlalchemy import select, func, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -117,3 +117,41 @@ async def prune_history(
     )
     await db.commit()
     return {"deleted": result.rowcount, "older_than_days": older_than_days}
+
+
+@router.get("/scan")
+async def trigger_scan(
+    db: AsyncSession = Depends(get_db),
+):
+    """Trigger an on-demand Aegis remediation scan cycle."""
+    engine = get_engine()
+    await engine.run_cycle(db)
+    return {"message": "Aegis scan cycle completed"}
+
+
+@router.get("/summary")
+async def get_aegis_summary(
+    db: AsyncSession = Depends(get_db),
+):
+    """Return summary data for the dashboard Aegis panel."""
+    result = await db.execute(
+        select(Remediation).order_by(Remediation.started_at.desc()).limit(20)
+    )
+    remediations = result.scalars().all()
+
+    active = [r for r in remediations if r.status == "in_progress"]
+    success = [r for r in remediations if r.status == "success"]
+    failed = [r for r in remediations if r.status in ("failed", "dlq")]
+    escalated = [r for r in remediations if r.status == "escalated"]
+    pending = [r for r in remediations if r.status in ("pending", "dry_run")]
+
+    return {
+        "total": len(remediations),
+        "active": len(active),
+        "auto_resolved": len(success),
+        "escalated": len(escalated),
+        "pending": len(pending),
+        "failed": len(failed),
+        "remediations": [_remediation_to_dict(r) for r in remediations],
+        "active_remediations": [_remediation_to_dict(r) for r in active],
+    }

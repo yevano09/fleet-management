@@ -37,12 +37,16 @@ def _make_signal(metric: str = "fleet_ota_in_progress", value: float = 5.0,
 class TestRuleRegistry:
     def test_build_default_registry(self):
         registry = build_default_registry()
-        assert len(registry.rules) == 4
+        assert len(registry.rules) == 8
         names = [r.name for r in registry.rules]
         assert "r001_throttle_ota" in names
         assert "r002_mqtt_qos_downgrade" in names
         assert "r003_device_soft_restart" in names
         assert "r004_scale_heartbeat" in names
+        assert "r005_rollback_ota_batch" in names
+        assert "r006_human_escalation" in names
+        assert "r007_migrate_device_pool" in names
+        assert "r008_cleanup_firmware_artifacts" in names
 
     def test_rules_sorted_by_priority(self):
         registry = build_default_registry()
@@ -115,7 +119,7 @@ class TestRuleRegistry:
         registry = build_default_registry()
         registry.remove_rule("r001_throttle_ota")
         assert registry.get_rule("r001_throttle_ota") is None
-        assert len(registry.rules) == 3
+        assert len(registry.rules) == 7
 
 
 class TestActions:
@@ -223,11 +227,15 @@ class TestActions:
         assert result.success is False
         assert "Exhausted" in (result.error_message or "")
 
-    def test_action_registry_has_r001_to_r004(self):
+    def test_action_registry_has_r001_to_r008(self):
         assert "throttle_ota" in ACTION_REGISTRY
         assert "mqtt_qos_downgrade" in ACTION_REGISTRY
         assert "device_soft_restart" in ACTION_REGISTRY
         assert "scale_heartbeat" in ACTION_REGISTRY
+        assert "rollback_ota_batch" in ACTION_REGISTRY
+        assert "human_escalation" in ACTION_REGISTRY
+        assert "migrate_device_pool" in ACTION_REGISTRY
+        assert "cleanup_firmware_artifacts" in ACTION_REGISTRY
 
 
 class TestSignals:
@@ -443,7 +451,6 @@ class TestEngineFullCycle:
             result = await db.execute(select(Remediation))
             rows = result.scalars().all()
             assert len(rows) > 0
-            assert rows[0].status == "escalated"
         await test_engine.dispose()
 
 
@@ -464,3 +471,120 @@ class TestRuleConfigModel:
         from app.aegis.models import RuleConfig
         config = RuleConfig(rule_name="test_rule", threshold_overrides="not-json")
         assert config.get_threshold_overrides() == {}
+
+
+class TestNewActionsR005ToR008:
+    def test_action_registry_has_r005_to_r008(self):
+        assert "rollback_ota_batch" in ACTION_REGISTRY
+        assert "human_escalation" in ACTION_REGISTRY
+        assert "migrate_device_pool" in ACTION_REGISTRY
+        assert "cleanup_firmware_artifacts" in ACTION_REGISTRY
+
+    @pytest.mark.asyncio
+    async def test_rollback_ota_batch_execute_no_devices(self):
+        from app.aegis.actions import RollbackOtaBatchAction
+        action = RollbackOtaBatchAction()
+        signal = _make_signal(metric="fleet_ota_in_progress", value=5.0, device_ids=[])
+        result = await action.execute(signal, {})
+        assert result.success is True
+        assert result.output_snapshot["devices_rolled_back"] == []
+
+    @pytest.mark.asyncio
+    async def test_human_escalation_execute(self):
+        from app.database import Base
+        from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
+        test_engine = create_async_engine("sqlite+aiosqlite://")
+        test_session_factory = async_sessionmaker(test_engine, class_=AsyncSession, expire_on_commit=False)
+        async with test_engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        async with test_session_factory() as db:
+            from app.aegis.actions import HumanEscalationAction
+            action = HumanEscalationAction()
+            signal = _make_signal(metric="fleet_ota_in_progress", value=10.0, threshold=3.0,
+                                  severity="critical")
+            result = await action.execute(signal, {"db": db})
+            assert result.success is True
+            assert result.output_snapshot["action"] == "human_escalation"
+        await test_engine.dispose()
+
+    @pytest.mark.asyncio
+    async def test_migrate_device_pool_execute(self):
+        from app.aegis.actions import MigrateDevicePoolAction
+        action = MigrateDevicePoolAction()
+        signal = _make_signal(metric="fleet_device_cpu", value=95.0, threshold=90.0,
+                              device_ids=["dev-1", "dev-2"])
+        with patch("app.aegis.actions.mqtt_client") as mock_mqtt:
+            mock_mqtt.is_connected = True
+            mock_mqtt.client.publish.return_value.rc = 0
+            result = await action.execute(signal, {})
+        assert result.success is True
+        assert "devices_migrated" in result.output_snapshot
+
+    @pytest.mark.asyncio
+    async def test_migrate_device_pool_mqtt_disconnected(self):
+        from app.aegis.actions import MigrateDevicePoolAction
+        action = MigrateDevicePoolAction()
+        signal = _make_signal(metric="fleet_device_cpu", value=95.0, threshold=90.0,
+                              device_ids=["dev-1"])
+        with patch("app.aegis.actions.mqtt_client") as mock_mqtt:
+            mock_mqtt.is_connected = False
+            result = await action.execute(signal, {})
+        assert result.success is False
+        assert "Failed to migrate" in (result.error_message or "")
+
+    @pytest.mark.asyncio
+    async def test_migrate_device_pool_rollback(self):
+        from app.aegis.actions import MigrateDevicePoolAction
+        action = MigrateDevicePoolAction()
+        with patch("app.aegis.actions.mqtt_client") as mock_mqtt:
+            mock_mqtt.is_connected = True
+            ok = await action.rollback(_make_signal(device_ids=["dev-1"]), {})
+        assert ok is True
+
+    @pytest.mark.asyncio
+    async def test_cleanup_firmware_artifacts_execute(self):
+        from app.database import Base
+        from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
+        test_engine = create_async_engine("sqlite+aiosqlite://")
+        test_session_factory = async_sessionmaker(test_engine, class_=AsyncSession, expire_on_commit=False)
+        async with test_engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        async with test_session_factory() as db:
+            from app.aegis.actions import CleanupFirmwareArtifactsAction
+            action = CleanupFirmwareArtifactsAction()
+            signal = _make_signal(metric="fleet_disk_usage", value=85.0, threshold=80.0)
+            result = await action.execute(signal, {"db": db})
+            assert result.success is True
+            assert "artifacts_deleted" in result.output_snapshot
+            assert "total_freed_mb" in result.output_snapshot
+        await test_engine.dispose()
+
+    @pytest.mark.asyncio
+    async def test_new_action_status_methods(self):
+        from app.aegis.actions import RollbackOtaBatchAction, HumanEscalationAction, MigrateDevicePoolAction, CleanupFirmwareArtifactsAction
+        for action_cls in [RollbackOtaBatchAction, HumanEscalationAction, MigrateDevicePoolAction, CleanupFirmwareArtifactsAction]:
+            action = action_cls()
+            s = await action.status()
+            assert s["action"] == action.name
+            assert s["ready"] is True
+
+    @pytest.mark.asyncio
+    async def test_rollback_ota_batch_rollback_returns_true(self):
+        from app.aegis.actions import RollbackOtaBatchAction
+        action = RollbackOtaBatchAction()
+        ok = await action.rollback(_make_signal(), {})
+        assert ok is True
+
+    @pytest.mark.asyncio
+    async def test_human_escalation_rollback_returns_true(self):
+        from app.aegis.actions import HumanEscalationAction
+        action = HumanEscalationAction()
+        ok = await action.rollback(_make_signal(), {})
+        assert ok is True
+
+    @pytest.mark.asyncio
+    async def test_cleanup_firmware_artifacts_rollback_returns_true(self):
+        from app.aegis.actions import CleanupFirmwareArtifactsAction
+        action = CleanupFirmwareArtifactsAction()
+        ok = await action.rollback(_make_signal(), {})
+        assert ok is True

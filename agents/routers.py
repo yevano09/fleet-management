@@ -7,21 +7,25 @@ Uses async database-backed tools for in-backend execution (no self-referencing H
 
 from __future__ import annotations
 
+import uuid
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
+from app.utils import utcnow
 from app.config import settings as app_settings
 from agents.async_tools import (
     async_plan_ota_campaign,
     async_detect_anomalies,
     async_suggest_device_groups,
+    async_onboard_device,
     async_list_devices,
     async_list_firmware,
     async_list_v2g_schedules,
+    async_process_anomalies,
 )
 from app.v2g_optimizer import heuristic_optimize, mock_spot_prices, degradation_cost_per_kwh, DegradationParams
 from app.schemas import V2gDispatchResponse, V2gDispatchSlot
@@ -79,12 +83,9 @@ async def _run_anomaly_agent(db: AsyncSession, notify: bool = True) -> dict:
     critical = [a for a in anomalies if a["severity"] == "critical"]
     warnings = [a for a in anomalies if a["severity"] == "warning"]
 
-    if notify and critical:
-        for ca in critical:
-            http_tools.send_slack_alert(ca["message"], severity="critical")
-    if notify and warnings:
-        for wa in warnings:
-            http_tools.send_slack_alert(wa["message"], severity="warning")
+    processed = []
+    if notify:
+        processed = await async_process_anomalies(db, anomalies)
 
     return {
         "agent": "Fleet Health Monitor",
@@ -95,6 +96,7 @@ async def _run_anomaly_agent(db: AsyncSession, notify: bool = True) -> dict:
             f"warning anomalies."
         ),
         "anomalies": anomalies,
+        "processed": processed,
         "notifications_sent": notify,
     }
 
@@ -174,6 +176,19 @@ async def get_anomaly_check(
 ):
     """Run the Fleet Health agent: detect anomalies and optionally alert."""
     result = await _run_anomaly_agent(db, notify=notify)
+    return result
+
+
+@router.get("/fleet-health")
+async def get_fleet_health(
+    db: AsyncSession = Depends(get_db),
+):
+    """Run anomaly detection and process through the alert engine.
+
+    This endpoint always fires alerts (notify=True) unlike /anomaly-check
+    which is read-only by default.
+    """
+    result = await _run_anomaly_agent(db, notify=True)
     return result
 
 
@@ -282,3 +297,202 @@ async def get_v2g_dispatch(
         schedule=full_schedule,
         devices_used=devices_used,
     )
+
+
+# ---------------------------------------------------------------------------
+# Device Onboarding Agent
+# ---------------------------------------------------------------------------
+
+async def _run_onboarding_agent(
+    db: AsyncSession,
+    name: str,
+    firmware_version: str = "",
+    ip_address: str = "",
+    mqtt_client_id: str = "",
+    auto_register: bool = False,
+) -> dict:
+    """Async device onboarding agent using DB access."""
+    if not name:
+        return {"error": "Device name is required for onboarding."}
+
+    plan = await async_onboard_device(
+        db,
+        name=name,
+        firmware_version=firmware_version,
+        ip_address=ip_address,
+        mqtt_client_id=mqtt_client_id,
+        auto_register=auto_register,
+    )
+
+    if not plan.get("onboarding_possible"):
+        return {
+            "agent": "Device Onboarding Agent",
+            "type": "device_onboarding",
+            "summary": f"Cannot onboard '{name}' due to conflicts.",
+            "details": {
+                "onboarding_possible": False,
+                "conflicts": plan.get("conflicts", []),
+                "recommended_firmware": plan.get("recommended_firmware"),
+                "initial_config": plan.get("initial_config"),
+                "fleet_state": plan.get("fleet_state"),
+            },
+        }
+
+    device = plan.get("device")
+    registration_status = plan.get("registration_status", "skipped")
+    mqtt_config_pushed = False
+    verification_status = "pending"
+
+    if auto_register and device:
+        mqtt_client.publish_remote_config(
+            device_id=device["id"],
+            config=plan["initial_config"],
+        )
+        mqtt_config_pushed = True
+
+        devices_after = await async_list_devices(db)
+        for d in devices_after.get("devices", []):
+            if d["id"] == device["id"] and d.get("status") == "online":
+                verification_status = "verified"
+                break
+
+    return {
+        "agent": "Device Onboarding Agent",
+        "type": "device_onboarding",
+        "summary": (
+            f"Device '{name}' onboarded successfully."
+            if registration_status == "created"
+            else f"Onboarding plan for '{name}' ready for review."
+        ),
+        "human_input_required": not auto_register,
+        "details": {
+            "onboarding_possible": plan["onboarding_possible"],
+            "conflicts": plan.get("conflicts", []),
+            "recommended_firmware": plan["recommended_firmware"],
+            "initial_config": plan.get("initial_config"),
+            "device": device,
+            "registration_status": registration_status,
+            "verification_status": verification_status,
+            "mqtt_config_pushed": mqtt_config_pushed,
+            "fleet_state": plan.get("fleet_state"),
+        },
+    }
+
+
+@router.get("/onboarding")
+async def get_onboarding_recommendation(
+    name: str = Query(..., description="Device name to onboard"),
+    firmware_version: Optional[str] = Query(None, description="Firmware version to assign"),
+    ip_address: str = Query("", description="Device IP address"),
+    mqtt_client_id: Optional[str] = Query(None, description="MQTT client identifier"),
+    auto_register: bool = Query(False, description="Execute onboarding (register + push config)"),
+    db: AsyncSession = Depends(get_db),
+):
+    """Run the Device Onboarding Agent: recommend or execute adding a new device to the fleet."""
+    result = await _run_onboarding_agent(
+        db,
+        name=name,
+        firmware_version=firmware_version or "",
+        ip_address=ip_address,
+        mqtt_client_id=mqtt_client_id or "",
+        auto_register=auto_register,
+    )
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Aegis Remediation Agent (Sprint 2)
+# ---------------------------------------------------------------------------
+
+async def _run_remediation_agent(db: AsyncSession) -> dict:
+    """Async Aegis remediation agent using DB access."""
+    from agents.async_tools import async_detect_resource_pressure, async_run_remediation_cycle, async_get_remediation_history
+
+    pressure = await async_detect_resource_pressure(db)
+    if pressure.get("pressure_detected"):
+        cycle_result = await async_run_remediation_cycle(db)
+    else:
+        cycle_result = {"cycle_completed": False, "remediations_created": 0}
+
+    history = await async_get_remediation_history(db, limit=5)
+
+    return {
+        "agent": "Aegis Remediation Agent",
+        "type": "remediation",
+        "summary": (
+            cycle_result.get("summary", "No cycle executed")
+            if pressure.get("pressure_detected")
+            else "No resource pressure detected"
+        ),
+        "details": {
+            "pressure_detected": pressure.get("pressure_detected", False),
+            "signals": pressure.get("signals", []),
+            "metrics_summary": pressure.get("metrics_summary", ""),
+            "cycle_completed": cycle_result.get("cycle_completed", False),
+            "remediations_created": cycle_result.get("remediations_created", 0),
+            "recent_remediations": history.get("remediations", []),
+            "total_history": history.get("total", 0),
+        },
+    }
+
+
+@router.get("/aegis/scan")
+async def get_aegis_scan(
+    db: AsyncSession = Depends(get_db),
+):
+    """Run the Aegis Remediation Agent: check pressure and run a cycle if needed."""
+    result = await _run_remediation_agent(db)
+    return result
+
+
+@router.get("/aegis/history")
+async def get_aegis_history(
+    status: Optional[str] = Query(None, description="Filter by status"),
+    action: Optional[str] = Query(None, description="Filter by action name"),
+    limit: int = Query(50, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    db: AsyncSession = Depends(get_db),
+):
+    """Fetch Aegis remediation history via agent interface."""
+    from agents.async_tools import async_get_remediation_history
+    result = await async_get_remediation_history(
+        db, status=status, action=action, limit=limit, offset=offset
+    )
+    return result
+
+
+@router.post("/aegis/rerun/{remediation_id}")
+async def rerun_remediation(
+    remediation_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Re-run a specific remediation action from history."""
+    from app.aegis.models import Remediation
+    from app.aegis.engine import get_engine
+    from sqlalchemy import select
+
+    result = await db.execute(select(Remediation).where(Remediation.id == remediation_id))
+    remediation = result.scalar_one_or_none()
+    if not remediation:
+        raise HTTPException(status_code=404, detail="Remediation not found")
+
+    from app.aegis.schemas import RemediationSignal
+    from datetime import datetime
+    signal = RemediationSignal(
+        id=remediation.signal_id or str(uuid.uuid4()),
+        metric_name=remediation.metric_name,
+        value=remediation.value,
+        threshold=remediation.threshold,
+        severity=remediation.severity,
+        timestamp=utcnow(),
+        device_ids=remediation.device_ids.split(",") if remediation.device_ids else [],
+        window_seconds=60,
+    )
+
+    engine = get_engine()
+    rule = engine.registry.get_rule(remediation.rule_name) if remediation.rule_name else None
+    if rule:
+        await engine._execute_remediation(db, signal, rule)
+        return {"success": True, "message": f"Remediation {remediation_id[:8]} re-run", "status": "completed"}
+    else:
+        return {"success": False, "message": f"Rule '{remediation.rule_name}' not found", "status": "failed"}

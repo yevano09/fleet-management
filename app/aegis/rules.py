@@ -150,4 +150,40 @@ def build_default_registry() -> RuleRegistry:
         priority=40,
     ))
 
+    registry.add_rule(RemediationRule(
+        name="r005_rollback_ota_batch",
+        condition=lambda s: s.metric_name == "fleet_ota_in_progress" and s.value > s.threshold * 1.3,
+        action_name="rollback_ota_batch",
+        cooldown_seconds=600,
+        max_retries=1,
+        priority=50,
+    ))
+
+    registry.add_rule(RemediationRule(
+        name="r006_human_escalation",
+        condition=lambda s: s.severity == "critical" and s.value > s.threshold * 2,
+        action_name="human_escalation",
+        cooldown_seconds=900,
+        max_retries=1,
+        priority=60,
+    ))
+
+    registry.add_rule(RemediationRule(
+        name="r007_migrate_device_pool",
+        condition=lambda s: ("cpu" in s.metric_name.lower() or "memory" in s.metric_name.lower()) and s.value > s.threshold,
+        action_name="migrate_device_pool",
+        cooldown_seconds=300,
+        max_retries=2,
+        priority=70,
+    ))
+
+    registry.add_rule(RemediationRule(
+        name="r008_cleanup_firmware_artifacts",
+        condition=lambda s: "disk" in s.metric_name.lower() and s.value > s.threshold,
+        action_name="cleanup_firmware_artifacts",
+        cooldown_seconds=1800,
+        max_retries=1,
+        priority=80,
+    ))
+
     return registry

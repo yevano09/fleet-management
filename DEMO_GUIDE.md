@@ -389,6 +389,114 @@ See `SCALING.md` for details on:
 - **Database**: TimescaleDB hypertables for time-series battery/SOC data
 - **Optimization**: MILP via PuLP/OR-Tools with stochastic price scenarios
 
+### 11. Device Onboarding Agent
+
+The Device Onboarding Agent guides you through introducing a new device to the fleet. It checks for naming conflicts, recommends the optimal firmware, registers the device, pushes initial MQTT configuration, and verifies it comes online.
+
+#### How It Works
+
+```
+Operator submits device name
+        │
+        ▼
+Device Onboarding Agent
+  1. Check name/MQTT ID conflicts  ──► Database lookup
+  2. Recommend latest firmware      ──► Firmware list
+  3. Generate initial config        ──► heartbeat interval, OTA poll
+  4. Register device (if approved)  ──► INSERT Device + metrics
+  5. Push MQTT config               ──► publish_remote_config
+  6. Verify first heartbeat         ──► Check last_seen
+        │
+        ▼
+Onboarding Report (JSON → CLI / Dashboard UI)
+```
+
+#### From the Dashboard
+
+1. Click **"Onboard Device"** button (green) in the toolbar
+2. Enter a device name (required), optionally specify firmware, IP, MQTT client ID
+3. Check "Auto-register" to skip the review step
+4. Click **"Onboard Device"**
+5. The result panel shows:
+   - **Conflicts** if the name or MQTT ID is already in use
+   - **Onboarding plan** if in review mode (recommendation only)
+   - **Success** with device ID, firmware, verification status if registered
+
+#### Via REST API
+
+```bash
+# Recommendation mode (read-only plan)
+curl 'http://localhost:8000/agents/onboarding?name=Sensor-042&firmware_version=2.0.0'
+
+# Auto-register mode (creates device + pushes config)
+curl 'http://localhost:8000/agents/onboarding?name=Sensor-042&auto_register=true'
+
+# With all parameters
+curl 'http://localhost:8000/agents/onboarding?name=Sensor-042&firmware_version=2.0.0&ip_address=10.0.0.100&mqtt_client_id=esp32-s042&auto_register=true'
+```
+
+Sample response:
+```json
+{
+  "agent": "Device Onboarding Agent",
+  "type": "device_onboarding",
+  "summary": "Device 'Sensor-042' onboarded successfully.",
+  "details": {
+    "onboarding_possible": true,
+    "conflicts": [],
+    "recommended_firmware": {"id": "...", "version": "2.0.0"},
+    "initial_config": {
+      "heartbeat_interval_seconds": 10,
+      "ota_poll_interval_seconds": 60,
+      "log_level": "INFO"
+    },
+    "device": {
+      "id": "a1b2c3d4-...",
+      "name": "Sensor-042",
+      "firmware_version": "2.0.0",
+      "status": "online",
+      "ip_address": "10.0.0.100"
+    },
+    "registration_status": "created",
+    "verification_status": "verified",
+    "mqtt_config_pushed": true,
+    "fleet_state": {"total_devices": 6, "online_devices": 6}
+  }
+}
+```
+
+#### Via CLI Runner
+
+```bash
+# Recommendation mode (shows plan, human_input_required=True)
+python run_agents.py --onboard "Sensor-042"
+
+# With specific firmware
+python run_agents.py --onboard "Sensor-042" --onboard-firmware 2.0.0
+
+# Auto-register mode
+python run_agents.py --onboard "Sensor-042" --onboard-auto
+
+# Full parameters
+python run_agents.py --onboard "Sensor-042" --onboard-firmware 2.0.0 --onboard-ip 10.0.0.100 --onboard-mqtt-id esp32-s042 --onboard-auto
+```
+
+#### Conflict Detection
+
+If a device with the same name or MQTT client ID already exists, the agent reports structured conflicts instead of registering a duplicate:
+
+```json
+"conflicts": [
+  {
+    "type": "name",
+    "existing_device_id": "e5f6g7h8-...",
+    "message": "Device name 'Sensor-042' is already used by device e5f6g7h8..."
+  }
+]
+```
+
+You can resolve the conflict by choosing a different name and re-submitting.
+
 #### CLI Runner
 
 ```bash
@@ -400,6 +508,9 @@ python run_agents.py --ota
 
 # V2G dispatch
 python run_agents.py --v2g
+
+# Onboard a device
+python run_agents.py --onboard "Sensor-042" --onboard-auto
 
 # JSON output for scripting
 python run_agents.py --json | jq .

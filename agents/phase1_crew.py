@@ -5,13 +5,14 @@ Three AI agent crews for the Assisted Phase:
   1. OTA Campaign Agent — Recommends canary-based rollout plans
   2. Anomaly Detection Agent — Detects fleet anomalies and alerts
   3. Device Group Manager — Suggests device groupings
+  4. Device Onboarding Agent — Guides new device introduction to the fleet
 
 Each crew can run in two modes:
   - LLM mode (with Crew AI + API key) for natural-language reasoning
   - Tool-only mode (heuristic logic) for standalone operation
 
 Usage:
-  from agents.phase1_crew import run_all_agents, run_ota_agent, run_anomaly_agent, run_group_agent
+  from agents.phase1_crew import run_all_agents, run_ota_agent, run_anomaly_agent, run_group_agent, run_onboarding_agent
 """
 
 import logging
@@ -311,13 +312,97 @@ if USE_CREWAI:
 
 
 # ---------------------------------------------------------------------------
+# 4. Device Onboarding Agent
+# ---------------------------------------------------------------------------
+
+def run_onboarding_agent(
+    name: str = "",
+    firmware_version: str = "",
+    ip_address: str = "",
+    mqtt_client_id: str = "",
+    auto_register: bool = False,
+) -> dict:
+    """Recommend and optionally execute onboarding of a new device into the fleet.
+
+    When auto_register=False (default), returns the onboarding plan for
+    human review with human_input_required=True.
+    When auto_register=True, registers the device, pushes initial config,
+    and checks heartbeat verification.
+    """
+    if not name:
+        return {"error": "Device name is required for onboarding."}
+
+    plan = tools.onboard_device(
+        name=name,
+        firmware_version=firmware_version,
+        ip_address=ip_address,
+        mqtt_client_id=mqtt_client_id,
+        auto_register=auto_register,
+    )
+
+    if not plan.get("onboarding_possible"):
+        return {
+            "agent": "Device Onboarding Agent",
+            "type": "device_onboarding",
+            "summary": f"Cannot onboard '{name}' due to conflicts.",
+            "details": {
+                "onboarding_possible": False,
+                "conflicts": plan.get("conflicts", []),
+                "recommended_firmware": plan.get("recommended_firmware"),
+                "initial_config": plan.get("initial_config"),
+                "fleet_state": plan.get("fleet_state"),
+            },
+        }
+
+    device = plan.get("device")
+    registration_status = plan.get("registration_status", "skipped")
+    mqtt_config_pushed = False
+    verification_status = "pending"
+
+    if auto_register and device:
+        mqtt_result = tools.push_remote_config(
+            device_id=device["id"],
+            config=plan["initial_config"],
+        )
+        mqtt_config_pushed = mqtt_result
+
+        devices_after = tools.list_devices()
+        for d in devices_after.get("devices", []):
+            if d["id"] == device["id"] and d.get("status") == "online":
+                verification_status = "verified"
+                break
+
+    return {
+        "agent": "Device Onboarding Agent",
+        "type": "device_onboarding",
+        "summary": (
+            f"Device '{name}' onboarded successfully."
+            if registration_status == "created"
+            else f"Onboarding plan for '{name}' ready for review."
+        ),
+        "human_input_required": not auto_register,
+        "details": {
+            "onboarding_possible": plan["onboarding_possible"],
+            "conflicts": plan.get("conflicts", []),
+            "recommended_firmware": plan["recommended_firmware"],
+            "initial_config": plan.get("initial_config"),
+            "device": device,
+            "registration_status": registration_status,
+            "verification_status": verification_status,
+            "mqtt_config_pushed": mqtt_config_pushed,
+            "fleet_state": plan.get("fleet_state"),
+        },
+    }
+
+
+# ---------------------------------------------------------------------------
 # Orchestrator — runs all Phase 1 agents
 # ---------------------------------------------------------------------------
 
 def run_all_agents(notify: bool = True,
                    firmware_version: Optional[str] = None,
                    min_group_size: int = 3) -> list[dict]:
-    """Run all three Phase 1 agents and return their recommendations.
+    """Run all Phase 1 agents and return their recommendations.
 
     Returns a list of agent result dicts suitable for dashboard display.
     """
@@ -345,3 +430,40 @@ def run_all_agents(notify: bool = True,
                         "error": str(e)})
 
     return results
+
+
+# ---------------------------------------------------------------------------
+# 5. Aegis Remediation Agent (Sprint 2)
+# ---------------------------------------------------------------------------
+
+def run_remediation_agent() -> dict:
+    """Run the Aegis remediation cycle: check resource pressure, evaluate, remediate.
+
+    Returns agent dict with signal summary and remediation results.
+    """
+    try:
+        result = tools.run_remediation_cycle()
+        history = tools.get_remediation_history(limit=5)
+
+        if result.get("cycle_completed"):
+            return {
+                "agent": "Aegis Remediation Agent",
+                "type": "remediation",
+                "summary": "Remediation cycle completed. Check history for details.",
+                "details": {
+                    "cycle_completed": True,
+                    "recent_remediations": history.get("remediations", []),
+                    "total_history": history.get("total", 0),
+                },
+            }
+        else:
+            return {
+                "agent": "Aegis Remediation Agent",
+                "type": "remediation",
+                "summary": f"Remediation cycle failed: {result.get('error', 'unknown')}",
+                "details": {"cycle_completed": False, "error": result.get("error")},
+            }
+    except Exception as e:
+        logger.exception("Remediation agent failed")
+        return {"agent": "Aegis Remediation Agent", "type": "remediation",
+                "error": str(e)}

@@ -10,7 +10,9 @@ from app.schemas import (
     DeviceRegisterRequest, DeviceRegisterResponse,
     HeartbeatRequest, DeviceResponse, DeviceListResponse,
 )
+from pydantic import BaseModel
 from app.metrics import active_devices, total_devices
+from app.mqtt_client import mqtt_client
 from app.utils import utcnow
 
 logger = logging.getLogger(__name__)
@@ -28,6 +30,8 @@ async def register_device(req: DeviceRegisterRequest, db: AsyncSession = Depends
         existing.status = DeviceStatus.online
         existing.last_seen = utcnow()
         existing.ip_address = req.ip_address or existing.ip_address
+        if req.mqtt_client_id:
+            existing.mqtt_client_id = req.mqtt_client_id
         if was_offline:
             active_devices.inc()
         await db.commit()
@@ -38,6 +42,7 @@ async def register_device(req: DeviceRegisterRequest, db: AsyncSession = Depends
             name=existing.name,
             firmware_version=existing.firmware_version,
             status=existing.status.value,
+            mqtt_client_id=existing.mqtt_client_id,
         )
 
     device = Device(
@@ -46,6 +51,7 @@ async def register_device(req: DeviceRegisterRequest, db: AsyncSession = Depends
         status=DeviceStatus.online,
         last_seen=utcnow(),
         ip_address=req.ip_address,
+        mqtt_client_id=req.mqtt_client_id,
     )
     db.add(device)
     await db.commit()
@@ -60,6 +66,7 @@ async def register_device(req: DeviceRegisterRequest, db: AsyncSession = Depends
         name=device.name,
         firmware_version=device.firmware_version,
         status=device.status.value,
+        mqtt_client_id=device.mqtt_client_id,
     )
 
 
@@ -80,6 +87,21 @@ async def device_heartbeat(
     await db.commit()
 
     return {"status": "ok", "last_seen": device.last_seen.isoformat()}
+
+
+class RemoteConfigRequest(BaseModel):
+    config: dict
+
+
+@router.post("/{device_id}/config")
+async def push_remote_config(device_id: str, req: RemoteConfigRequest):
+    """Push a remote configuration to a device via MQTT."""
+    mqtt_topic_id = device_id
+    success = mqtt_client.publish_remote_config(mqtt_topic_id, req.config)
+    if not success:
+        raise HTTPException(status_code=503, detail="MQTT broker not connected")
+    logger.info("Remote config pushed to device %s: %s", device_id, req.config)
+    return {"status": "config_published", "device_id": device_id}
 
 
 @router.get("", response_model=DeviceListResponse)

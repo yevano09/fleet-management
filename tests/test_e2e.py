@@ -17,7 +17,8 @@ import os
 import hashlib
 from typing import Generator
 
-BASE_URL = os.environ.get("BASE_URL", "http://localhost:8000")
+DEFAULT_PORT = os.environ.get("FLEET_PORT", "8181")
+BASE_URL = os.environ.get("BASE_URL", f"http://localhost:{DEFAULT_PORT}")
 DEVICE_COUNT = int(os.environ.get("TEST_DEVICE_COUNT", 3))
 TIMEOUT = int(os.environ.get("TEST_TIMEOUT", 30))
 
@@ -274,3 +275,91 @@ class TestE2E:
         data = r.json()
         assert data["file_size"] == 0
         assert data["version"] == "0.0.0"
+
+    def test_16_alerts_list_empty(self):
+        """Alert list should be empty initially."""
+        r = requests.get(f"{BASE_URL}/alerts/", timeout=10)
+        assert r.status_code == 200
+        data = r.json()
+        assert data["total"] == 0
+        assert data["alerts"] == []
+
+    def test_17_fleet_health_triggers_alert(self):
+        """Fleet health check should detect anomalies and create alerts."""
+        # Trigger fleet health with notify=true
+        r = requests.get(f"{BASE_URL}/agents/fleet-health", timeout=10)
+        assert r.status_code == 200
+        data = r.json()
+        assert data["status"] in ("healthy", "anomalies_found")
+
+    def test_18_alert_lifecycle(self):
+        """Full alert lifecycle: create, acknowledge, resolve, prune."""
+        # 1. Trigger anomaly detection to create alerts
+        r = requests.get(f"{BASE_URL}/agents/fleet-health", timeout=10)
+        assert r.status_code == 200
+
+        # 2. List active alerts
+        time.sleep(1)
+        r = requests.get(f"{BASE_URL}/alerts/active", timeout=10)
+        assert r.status_code == 200
+        data = r.json()
+        alerts = data.get("alerts", [])
+        total = data.get("total", 0)
+        assert total >= 0
+
+        # 3. If there are alerts, test acknowledge and resolve
+        if alerts:
+            alert_id = alerts[0]["id"]
+
+            # Acknowledge
+            r = requests.post(
+                f"{BASE_URL}/alerts/{alert_id}/acknowledge",
+                json={"user": "e2e-test"},
+                timeout=10,
+            )
+            assert r.status_code == 200
+            ack_data = r.json()
+            assert "message" in ack_data
+
+            # Verify acknowledged
+            r = requests.get(f"{BASE_URL}/alerts/", timeout=10)
+            assert r.status_code == 200
+            all_data = r.json()
+            ack_alert = next((a for a in all_data.get("alerts", []) if a["id"] == alert_id), None)
+            if ack_alert:
+                assert ack_alert["status"] == "acknowledged"
+                assert ack_alert["acknowledged_by"] == "e2e-test"
+
+            # Resolve
+            r = requests.post(f"{BASE_URL}/alerts/{alert_id}/resolve", timeout=10)
+            assert r.status_code == 200
+            res_data = r.json()
+            assert "message" in res_data
+
+            # Verify resolved
+            r = requests.get(f"{BASE_URL}/alerts/", timeout=10)
+            assert r.status_code == 200
+            all_data = r.json()
+            res_alert = next((a for a in all_data.get("alerts", []) if a["id"] == alert_id), None)
+            if res_alert:
+                assert res_alert["status"] == "resolved"
+                assert res_alert["resolved_at"] is not None
+
+            # Prune old (days must be >= 1)
+            r = requests.delete(f"{BASE_URL}/alerts/old?days=1", timeout=10)
+            assert r.status_code == 200
+            pr_data = r.json()
+            assert "deleted" in pr_data
+
+    def test_19_alert_metrics_present(self):
+        """Verify alert metrics are present in /metrics."""
+        r = requests.get(f"{BASE_URL}/metrics", timeout=10)
+        assert r.status_code == 200
+        text = r.text
+        expected = [
+            "fleet_alerts_total",
+            "fleet_alerts_active",
+            "fleet_alert_notifications_total",
+        ]
+        for name in expected:
+            assert name in text, f"Alert metric {name} not found in /metrics"

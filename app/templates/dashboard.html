@@ -4,73 +4,113 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Fleet Commander Dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <script src="https://unpkg.com/htmx.org@2.0.3"></script>
 <style>
+:root {
+  --bg-deep: #0A0D1A;
+  --bg-surface: #111629;
+  --bg-raised: #1A2040;
+  --teal: #2DD4BF;
+  --teal-glow: rgba(45,212,191,0.12);
+  --amber: #F59E0B;
+  --text-title: #EAEEF5;
+  --text-body: #B8C5D4;
+  --text-muted: #636E85;
+  --border: #1E2740;
+  --green: #22C55E;
+  --red: #EF4444;
+  --purple: #A78BFA;
+  --font-display: 'Sora', system-ui, sans-serif;
+  --font-body: 'Inter', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+}
 * { margin:0; padding:0; box-sizing:border-box; }
-body { font-family: system-ui, -apple-system, sans-serif; background:#0f172a; color:#e2e8f0; min-height:100vh; }
-header { background:#1e293b; border-bottom:1px solid #334155; padding:1rem 2rem; display:flex; justify-content:space-between; align-items:center; }
-header h1 { font-size:1.5rem; color:#38bdf8; }
-header .subtitle { color:#94a3b8; font-size:0.875rem; }
+body { font-family: var(--font-body); background:var(--bg-deep); color:var(--text-body); min-height:100vh; -webkit-font-smoothing:antialiased; }
+header { background:var(--bg-surface); border-bottom:1px solid var(--border); padding:1rem 2rem; display:flex; justify-content:space-between; align-items:center; }
+header h1 { font-family:var(--font-display); font-size:1.4rem; color:var(--teal); letter-spacing:-0.02em; }
+header .subtitle { color:var(--text-muted); font-size:0.8rem; }
 .stats { display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:1rem; padding:1.5rem 2rem; }
-.stat-card { background:#1e293b; border:1px solid #334155; border-radius:0.5rem; padding:1.25rem; }
-.stat-card .label { color:#94a3b8; font-size:0.75rem; text-transform:uppercase; letter-spacing:0.05em; }
-.stat-card .value { font-size:2rem; font-weight:700; margin-top:0.25rem; }
-.stat-card.online .value { color:#4ade80; }
-.stat-card.offline .value { color:#f87171; }
-.stat-card.ota .value { color:#38bdf8; }
+.stat-card { background:var(--bg-surface); border:1px solid var(--border); border-radius:0.625rem; padding:1.25rem; transition:border-color 0.2s; }
+.stat-card:hover { border-color:rgba(45,212,191,0.2); }
+.stat-card .label { color:var(--text-muted); font-size:0.7rem; text-transform:uppercase; letter-spacing:0.08em; }
+.stat-card .value { font-family:var(--font-display); font-size:1.75rem; font-weight:600; margin-top:0.25rem; letter-spacing:-0.02em; }
+.stat-card.online .value { color:var(--green); }
+.stat-card.offline .value { color:var(--red); }
+.stat-card.ota .value { color:var(--teal); }
 main { padding:0 2rem 2rem; }
 .toolbar { display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem; }
-.toolbar h2 { font-size:1.25rem; }
+.toolbar h2 { font-family:var(--font-display); font-size:1.15rem; color:var(--text-title); letter-spacing:-0.01em; }
 .toolbar .actions { display:flex; gap:0.5rem; }
-.btn { padding:0.5rem 1rem; border:none; border-radius:0.375rem; font-size:0.875rem; cursor:pointer; font-weight:600; transition:all 0.15s; }
-.btn-primary { background:#2563eb; color:white; }
-.btn-primary:hover { background:#1d4ed8; }
-.btn-danger { background:#dc2626; color:white; }
-.btn-danger:hover { background:#b91c1c; }
-.btn-success { background:#16a34a; color:white; }
-.btn-success:hover { background:#15803d; }
-.btn-outline { background:transparent; border:1px solid #475569; color:#e2e8f0; }
-.btn-outline:hover { background:#1e293b; }
-table { width:100%; border-collapse:collapse; background:#1e293b; border-radius:0.5rem; overflow:hidden; border:1px solid #334155; }
-th { text-align:left; padding:0.75rem 1rem; background:#0f172a; color:#94a3b8; font-size:0.75rem; text-transform:uppercase; letter-spacing:0.05em; border-bottom:1px solid #334155; }
-td { padding:0.75rem 1rem; border-bottom:1px solid #1e293b; }
+.btn { padding:0.45rem 1rem; border:none; border-radius:0.5rem; font-size:0.85rem; cursor:pointer; font-weight:500; transition:all 0.15s; font-family:var(--font-body); }
+.btn:focus-visible { outline:2px solid var(--teal); outline-offset:2px; }
+.btn-primary { background:var(--teal); color:#0A0D1A; }
+.btn-primary:hover { background:#5EEAD4; }
+.btn-danger { background:rgba(239,68,68,0.15); color:var(--red); border:1px solid rgba(239,68,68,0.2); }
+.btn-danger:hover { background:rgba(239,68,68,0.25); }
+.btn-success { background:rgba(34,197,94,0.15); color:var(--green); border:1px solid rgba(34,197,94,0.2); }
+.btn-success:hover { background:rgba(34,197,94,0.25); }
+.btn-outline { background:transparent; border:1px solid var(--border); color:var(--text-body); }
+.btn-outline:hover { background:var(--bg-surface); border-color:rgba(45,212,191,0.3); }
+table { width:100%; border-collapse:collapse; background:var(--bg-surface); border-radius:0.625rem; overflow:hidden; border:1px solid var(--border); }
+th { text-align:left; padding:0.65rem 1rem; background:var(--bg-deep); color:var(--text-muted); font-size:0.7rem; text-transform:uppercase; letter-spacing:0.06em; border-bottom:1px solid var(--border); font-weight:600; }
+td { padding:0.65rem 1rem; border-bottom:1px solid var(--border); font-size:0.85rem; }
 tr:last-child td { border-bottom:none; }
-.badge { display:inline-flex; align-items:center; gap:0.375rem; padding:0.25rem 0.625rem; border-radius:9999px; font-size:0.75rem; font-weight:600; }
-.badge-online { background:rgba(74,222,128,0.15); color:#4ade80; }
-.badge-offline { background:rgba(248,113,113,0.15); color:#f87171; }
-.badge-pending { background:rgba(148,163,184,0.15); color:#94a3b8; }
-.badge-success { background:rgba(74,222,128,0.15); color:#4ade80; }
-.badge-failed { background:rgba(248,113,113,0.15); color:#f87171; }
-.badge-rolled_back { background:rgba(251,191,36,0.15); color:#fbbf24; }
-.badge-downloading { background:rgba(56,189,248,0.15); color:#38bdf8; }
-.badge-applying { background:rgba(192,132,252,0.15); color:#c084fc; }
-.badge-verifying { background:rgba(251,191,36,0.15); color:#fbbf24; }
-.progress-bar { width:100%; height:6px; background:#334155; border-radius:3px; overflow:hidden; margin-top:0.5rem; }
-.progress-bar .fill { height:100%; border-radius:3px; transition:width 0.5s ease; }
-.progress-bar .fill.green { background:#4ade80; }
-.progress-bar .fill.yellow { background:#fbbf24; }
-.progress-bar .fill.red { background:#f87171; }
-.progress-bar .fill.blue { background:#38bdf8; }
+tr:hover td { background:rgba(45,212,191,0.02); }
+.badge { display:inline-flex; align-items:center; gap:0.3rem; padding:0.2rem 0.55rem; border-radius:9999px; font-size:0.72rem; font-weight:500; font-family:var(--font-mono); }
+.badge-online { background:rgba(34,197,94,0.1); color:var(--green); border:1px solid rgba(34,197,94,0.15); }
+.badge-offline { background:rgba(239,68,68,0.1); color:var(--red); border:1px solid rgba(239,68,68,0.15); }
+.badge-pending { background:rgba(99,110,133,0.1); color:var(--text-muted); border:1px solid rgba(99,110,133,0.15); }
+.badge-success { background:rgba(34,197,94,0.1); color:var(--green); border:1px solid rgba(34,197,94,0.15); }
+.badge-failed { background:rgba(239,68,68,0.1); color:var(--red); border:1px solid rgba(239,68,68,0.15); }
+.badge-rolled_back { background:rgba(245,158,11,0.1); color:var(--amber); border:1px solid rgba(245,158,11,0.15); }
+.badge-downloading { background:var(--teal-glow); color:var(--teal); border:1px solid rgba(45,212,191,0.15); }
+.badge-applying { background:rgba(167,139,250,0.1); color:var(--purple); border:1px solid rgba(167,139,250,0.15); }
+.badge-verifying { background:rgba(245,158,11,0.1); color:var(--amber); border:1px solid rgba(245,158,11,0.15); }
 .ota-section { margin-top:2rem; }
-.ota-section h3 { margin-bottom:1rem; }
-.modal-overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.6); z-index:100; justify-content:center; align-items:center; }
+.ota-section h3 { font-family:var(--font-display); font-size:1.05rem; color:var(--text-title); margin-bottom:0.75rem; letter-spacing:-0.01em; }
+.modal-overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.65); z-index:100; justify-content:center; align-items:center; }
 .modal-overlay.active { display:flex; }
-.modal { background:#1e293b; border:1px solid #334155; border-radius:0.75rem; padding:2rem; width:90%; max-width:500px; }
-.modal h3 { margin-bottom:1rem; }
-.modal form { display:flex; flex-direction:column; gap:1rem; }
-.modal form label { font-size:0.875rem; color:#94a3b8; }
-.modal form input, .modal form select { padding:0.5rem 0.75rem; background:#0f172a; border:1px solid #334155; border-radius:0.375rem; color:#e2e8f0; }
-.modal-actions { display:flex; gap:0.5rem; justify-content:flex-end; margin-top:1rem; }
-.header-status { display:flex; gap:1rem; align-items:center; }
-.header-status .mqtt-badge { font-size:0.75rem; padding:0.25rem 0.5rem; border-radius:9999px; }
-.mqtt-badge.connected { background:rgba(74,222,128,0.15); color:#4ade80; }
-.mqtt-badge.disconnected { background:rgba(248,113,113,0.15); color:#f87171; }
-.toast { position:fixed; bottom:2rem; right:2rem; padding:1rem 1.5rem; border-radius:0.5rem; background:#1e293b; border:1px solid #334155; box-shadow:0 4px 12px rgba(0,0,0,0.3); transform:translateY(200%); transition:transform 0.3s ease; z-index:200; }
+.modal { background:var(--bg-surface); border:1px solid var(--border); border-radius:0.75rem; padding:1.5rem; width:90%; max-width:500px; box-shadow:0 8px 32px rgba(0,0,0,0.4); }
+.modal h3 { font-family:var(--font-display); font-size:1.1rem; color:var(--text-title); margin-bottom:1rem; }
+.modal form { display:flex; flex-direction:column; gap:0.875rem; }
+.modal form label { font-size:0.8rem; color:var(--text-muted); }
+.modal form input, .modal form select { padding:0.5rem 0.75rem; background:var(--bg-deep); border:1px solid var(--border); border-radius:0.375rem; color:var(--text-body); font-family:var(--font-body); font-size:0.85rem; }
+.modal form input:focus, .modal form select:focus { outline:none; border-color:var(--teal); }
+.modal-actions { display:flex; gap:0.5rem; justify-content:flex-end; margin-top:0.75rem; }
+.header-status { display:flex; gap:0.75rem; align-items:center; }
+.header-status .mqtt-badge { font-size:0.7rem; padding:0.2rem 0.5rem; border-radius:9999px; font-weight:500; }
+.mqtt-badge.connected { background:rgba(34,197,94,0.1); color:var(--green); border:1px solid rgba(34,197,94,0.15); }
+.mqtt-badge.disconnected { background:rgba(239,68,68,0.1); color:var(--red); border:1px solid rgba(239,68,68,0.15); }
+.toast { position:fixed; bottom:2rem; right:2rem; padding:0.875rem 1.25rem; border-radius:0.5rem; background:var(--bg-surface); border:1px solid var(--border); box-shadow:0 4px 16px rgba(0,0,0,0.4); transform:translateY(200%); transition:transform 0.3s ease; z-index:200; font-size:0.875rem; }
 .toast.show { transform:translateY(0); }
-.toast.success { border-color:#4ade80; }
-.toast.error { border-color:#f87171; }
-.toast.info { border-color:#38bdf8; }
-input[type="checkbox"] { accent-color:#2563eb; width:1rem; height:1rem; cursor:pointer; }
+.toast.success { border-color:var(--green); }
+.toast.error { border-color:var(--red); }
+.toast.info { border-color:var(--teal); }
+input[type="checkbox"] { accent-color:var(--teal); width:1rem; height:1rem; cursor:pointer; }
+td code { font-family:var(--font-mono); font-size:0.78em; background:rgba(45,212,191,0.08); color:var(--teal); padding:0.1em 0.3em; border-radius:0.2rem; }
+::selection { background:var(--teal); color:var(--bg-deep); }
+::-webkit-scrollbar { width:6px; height:6px; }
+::-webkit-scrollbar-track { background:var(--bg-deep); }
+::-webkit-scrollbar-thumb { background:var(--border); border-radius:3px; }
+.aegis-signal { font-family:var(--font-mono); font-size:0.65rem; }
+.aegis-timeline-dot { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:0.35rem; flex-shrink:0; }
+.aegis-timeline-dot.success { background:var(--green); box-shadow:0 0 4px rgba(34,197,94,0.4); }
+.aegis-timeline-dot.failed { background:var(--red); box-shadow:0 0 4px rgba(239,68,68,0.4); }
+.aegis-timeline-dot.escalated { background:var(--amber); box-shadow:0 0 4px rgba(245,158,11,0.4); }
+.aegis-timeline-dot.in_progress { background:var(--teal); box-shadow:0 0 4px rgba(45,212,191,0.4); animation:aegis-pulse 1.5s ease-in-out infinite; }
+.aegis-timeline-dot.dry_run { background:var(--purple); box-shadow:0 0 4px rgba(167,139,250,0.4); }
+.aegis-timeline-dot.dlq { background:var(--red); box-shadow:0 0 4px rgba(239,68,68,0.4); }
+@keyframes aegis-pulse { 0%,100% { opacity:1; transform:scale(1); } 50% { opacity:0.5; transform:scale(1.3); } }
+.aegis-expandable { cursor:pointer; transition:background 0.15s; }
+.aegis-expandable:hover { background:rgba(45,212,191,0.03); }
+.aegis-detail { display:none; font-family:var(--font-mono); font-size:0.65rem; padding:0.5rem; background:var(--bg-deep); border-radius:0.375rem; margin-top:0.25rem; white-space:pre-wrap; word-break:break-all; max-height:200px; overflow-y:auto; border:1px solid var(--border); }
+.aegis-detail.open { display:block; }
+.aegis-severity-critical { color:var(--red); }
+.aegis-severity-warning { color:var(--amber); }
+.aegis-severity-info { color:var(--teal); }
 </style>
 </head>
 <body>
@@ -120,8 +160,29 @@ input[type="checkbox"] { accent-color:#2563eb; width:1rem; height:1rem; cursor:p
 
 <main>
 <div class="toolbar">
+<h2>Active Alerts <span id="alert-badge" style="font-size:0.75rem;padding:0.125rem 0.5rem;border-radius:9999px;background:rgba(248,113,113,0.15);color:#f87171;vertical-align:middle;display:none;">0</span></h2>
+<button class="btn btn-outline" onclick="loadAlerts()" style="font-size:0.75rem;">Refresh Alerts</button>
+</div>
+<div id="alerts-panel" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:0.75rem;margin-bottom:1.5rem;">
+<div class="stat-card" style="padding:1rem;"><div class="label" style="color:#64748b;">Loading alerts...</div></div>
+</div>
+
+<div class="ota-section" id="aegis-section">
+<h2 style="font-family:var(--font-display);font-size:1.15rem;color:var(--text-title);letter-spacing:-0.01em;margin-bottom:0.75rem;">
+  Aegis Remediation Engine
+  <span id="aegis-summary-bar" style="font-size:0.75rem;font-weight:400;color:var(--text-muted);margin-left:0.75rem;"></span>
+</h2>
+<div id="aegis-panel" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:0.75rem;margin-bottom:1.5rem;">
+  <div class="stat-card" style="padding:1rem;grid-column:1/-1;">
+    <div class="label" style="color:#64748b;">Loading Aegis status...</div>
+  </div>
+</div>
+</div>
+
+<div class="toolbar">
 <h2>Devices</h2>
 <div class="actions">
+<button class="btn btn-success" onclick="openOnboardModal()">Onboard Device</button>
 <button class="btn btn-primary" onclick="openOtaModal()">Trigger OTA Update</button>
 </div>
 </div>
@@ -216,9 +277,130 @@ All online devices
 </div>
 </div>
 
+<div class="modal-overlay" id="onboard-modal">
+<div class="modal">
+<h3>Onboard New Device</h3>
+<form id="onboard-form">
+<div>
+<label>Device Name *</label>
+<input type="text" id="onboard-name" placeholder="e.g. Sensor-042" required>
+</div>
+<div>
+<label>Firmware Version</label>
+<input type="text" id="onboard-firmware" placeholder="Leave empty for latest">
+</div>
+<div>
+<label>IP Address</label>
+<input type="text" id="onboard-ip" placeholder="e.g. 10.0.0.100">
+</div>
+<div>
+<label>MQTT Client ID</label>
+<input type="text" id="onboard-mqtt-id" placeholder="e.g. esp32-abc123">
+</div>
+<label style="display:flex;align-items:center;gap:0.5rem;margin-top:0.5rem;">
+<input type="checkbox" id="onboard-auto">
+Auto-register (skip review)
+</label>
+<div class="modal-actions">
+<button type="button" class="btn btn-outline" onclick="closeOnboardModal()">Cancel</button>
+<button type="submit" class="btn btn-success">Onboard Device</button>
+</div>
+</form>
+<div id="onboard-result" style="display:none;margin-top:1rem;padding:0.75rem;border-radius:0.375rem;font-size:0.875rem;"></div>
+</div>
+</div>
+
 <div class="toast" id="toast"></div>
 
 <script>
+function toggleAegisDetail(id) {
+  const el = document.getElementById('aegis-detail-' + id);
+  if (el) el.classList.toggle('open');
+}
+
+async function loadAegisPanel() {
+  try {
+    const data = await fetchJson('/aegis/summary');
+    const panel = document.getElementById('aegis-panel');
+    const bar = document.getElementById('aegis-summary-bar');
+    if (!data || !data.remediations) {
+      panel.innerHTML = '<div class="stat-card" style="padding:1rem;grid-column:1/-1;"><div class="label" style="color:#64748b;">Aegis data unavailable</div></div>';
+      bar.textContent = '';
+      return;
+    }
+
+    const autoResolved = data.auto_resolved || 0;
+    const escalated = data.escalated || 0;
+    const pending = data.pending || 0;
+    const active = data.active || 0;
+    bar.textContent = `${autoResolved} auto-resolved / ${escalated} escalated / ${pending + active} pending`;
+
+    const signals = (data.remediations || []).slice(0, 10);
+    const activeRem = (data.active_remediations || []).slice(0, 10);
+    const history = (data.remediations || []).slice(0, 20);
+
+    const signalsHtml = signals.map(s => {
+      const sevClass = `aegis-severity-${s.severity || 'info'}`;
+      return `<div class="aegis-expandable" onclick="toggleAegisDetail('sig-${s.id}')" style="padding:0.35rem 0;border-bottom:1px solid var(--border);font-size:0.75rem;">
+        <div style="display:flex;justify-content:space-between;align-items:center;">
+          <span><span class="${sevClass}" style="font-weight:600;">${(s.severity||'info').toUpperCase()}</span> ${s.metric_name||'?'}</span>
+          <span class="aegis-signal">${s.value != null ? s.value.toFixed(1) : '?'} / ${s.threshold != null ? s.threshold.toFixed(1) : '?'}</span>
+        </div>
+        <div class="aegis-detail" id="aegis-detail-sig-${s.id}">${escapeHtml(JSON.stringify({input: s.input_snapshot, output: s.output_snapshot, error: s.error_message}, null, 2))}</div>
+      </div>`;
+    }).join('');
+
+    const activeHtml = activeRem.length > 0 ? activeRem.map(a => {
+      return `<div class="aegis-expandable" onclick="toggleAegisDetail('act-${a.id}')" style="padding:0.35rem 0;border-bottom:1px solid var(--border);font-size:0.75rem;">
+        <div style="display:flex;align-items:center;gap:0.4rem;">
+          <span class="aegis-timeline-dot in_progress"></span>
+          <span style="font-weight:600;">${a.action_name||'?'}</span>
+          <span style="color:var(--text-muted);margin-left:auto;">${a.duration_ms||'?'}ms</span>
+        </div>
+        <div style="color:var(--text-muted);margin-top:0.15rem;">${a.rule_name||'?'} — ${a.metric_name||'?'}</div>
+        <div class="aegis-detail" id="aegis-detail-act-${a.id}">${escapeHtml(JSON.stringify({input: a.input_snapshot, output: a.output_snapshot}, null, 2))}</div>
+      </div>`;
+    }).join('') : '<div style="color:var(--text-muted);font-size:0.75rem;padding:0.5rem 0;">No active remediations</div>';
+
+    const historyHtml = history.map(r => {
+      const dotClass = r.status === 'success' ? 'success' : r.status === 'failed' || r.status === 'dlq' ? 'failed' : r.status === 'escalated' ? 'escalated' : r.status === 'in_progress' ? 'in_progress' : 'dry_run';
+      const color = r.status === 'success' ? 'var(--green)' : r.status === 'failed' || r.status === 'dlq' ? 'var(--red)' : r.status === 'escalated' ? 'var(--amber)' : 'var(--purple)';
+      return `<div class="aegis-expandable" onclick="toggleAegisDetail('hist-${r.id}')" style="display:flex;align-items:flex-start;gap:0.4rem;padding:0.35rem 0;border-bottom:1px solid var(--border);font-size:0.7rem;">
+        <span class="aegis-timeline-dot ${dotClass}" style="margin-top:0.2rem;"></span>
+        <div style="flex:1;min-width:0;">
+          <div style="display:flex;justify-content:space-between;">
+            <span style="font-weight:600;color:${color};">${r.action_name||'?'}</span>
+            <span style="color:var(--text-muted);">${r.duration_ms||'?'}ms</span>
+          </div>
+          <div style="color:var(--text-muted);">${r.metric_name||'?'} = ${r.value != null ? r.value.toFixed(1) : '?'} — ${r.status||'?'}</div>
+          <div class="aegis-detail" id="aegis-detail-hist-${r.id}">${escapeHtml(JSON.stringify({input: r.input_snapshot, output: r.output_snapshot, error: r.error_message}, null, 2))}</div>
+        </div>
+      </div>`;
+    }).join('');
+
+    panel.innerHTML = `
+      <div class="stat-card" style="padding:0.75rem;">
+        <div class="label" style="margin-bottom:0.5rem;font-size:0.7rem;">Incoming Signals (last 10)</div>
+        <div style="max-height:350px;overflow-y:auto;">${signalsHtml || '<div style="color:var(--text-muted);font-size:0.75rem;">No signals</div>'}</div>
+      </div>
+      <div class="stat-card" style="padding:0.75rem;">
+        <div class="label" style="margin-bottom:0.5rem;font-size:0.7rem;">Active Remediations</div>
+        <div style="max-height:350px;overflow-y:auto;">${activeHtml}</div>
+      </div>
+      <div class="stat-card" style="padding:0.75rem;">
+        <div class="label" style="margin-bottom:0.5rem;font-size:0.7rem;">History Timeline (last 20)</div>
+        <div style="max-height:350px;overflow-y:auto;">${historyHtml || '<div style="color:var(--text-muted);font-size:0.75rem;">No history</div>'}</div>
+      </div>`;
+  } catch (err) {
+    console.error('Aegis panel error:', err);
+  }
+}
+
+function escapeHtml(str) {
+  if (str == null) return '';
+  return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
 async function fetchJson(url) {
   const res = await fetch(url);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -386,6 +568,65 @@ function openOtaModal() {
   loadFirmware();
 }
 
+async function loadAlerts() {
+  try {
+    const data = await fetchJson('/alerts/active');
+    const panel = document.getElementById('alerts-panel');
+    const badge = document.getElementById('alert-badge');
+    const alerts = data.alerts || [];
+    const criticalCount = alerts.filter(a => a.severity === 'critical').length;
+    const warningCount = alerts.filter(a => a.severity === 'warning').length;
+
+    if (alerts.length === 0) {
+      panel.innerHTML = '<div class="stat-card" style="padding:1rem;"><div class="label" style="color:#64748b;">No active alerts</div></div>';
+      badge.style.display = 'none';
+    } else {
+      badge.style.display = 'inline';
+      badge.textContent = criticalCount > 0 ? `${criticalCount} critical` : `${warningCount} warning`;
+      panel.innerHTML = alerts.map(a => {
+        const borderColor = a.severity === 'critical' ? '#f87171' : a.severity === 'warning' ? '#f59f00' : '#38bdf8';
+        const icon = a.severity === 'critical' ? '!' : a.severity === 'warning' ? '!' : 'i';
+        return `<div class="stat-card" style="padding:1rem;border-left:3px solid ${borderColor};display:flex;flex-direction:column;gap:0.5rem;">
+          <div style="display:flex;justify-content:space-between;align-items:center;">
+            <div style="font-size:0.75rem;font-weight:600;color:${borderColor};text-transform:uppercase;letter-spacing:0.05em;">${icon} ${a.severity}</div>
+            <div style="font-size:0.7rem;color:#64748b;">x${a.count}</div>
+          </div>
+          <div style="font-size:0.85rem;">${a.message}</div>
+          <div style="font-size:0.7rem;color:#64748b;">Type: ${a.type} | Status: ${a.status}</div>
+          <div style="display:flex;gap:0.5rem;margin-top:0.25rem;">
+            <button class="btn btn-outline" style="padding:0.25rem 0.5rem;font-size:0.7rem;" onclick="ackAlert('${a.id}')">Acknowledge</button>
+            <button class="btn btn-outline" style="padding:0.25rem 0.5rem;font-size:0.7rem;" onclick="resolveAlert('${a.id}')">Resolve</button>
+          </div>
+        </div>`;
+      }).join('');
+    }
+  } catch (err) {
+    console.error('Alerts load error:', err);
+  }
+}
+
+async function ackAlert(id) {
+  try {
+    const res = await fetch(`/alerts/${id}/acknowledge`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user: 'dashboard' })
+    });
+    const data = await res.json();
+    if (data.error) { showToast(data.error, 'error'); }
+    else { showToast('Alert acknowledged', 'success'); loadAlerts(); }
+  } catch { showToast('Network error', 'error'); }
+}
+
+async function resolveAlert(id) {
+  try {
+    const res = await fetch(`/alerts/${id}/resolve`, { method: 'POST' });
+    const data = await res.json();
+    if (data.error) { showToast(data.error, 'error'); }
+    else { showToast('Alert resolved', 'success'); loadAlerts(); }
+  } catch { showToast('Network error', 'error'); }
+}
+
 async function loadAgentRecommendations() {
   try {
     const res = await fetch('/agents/recommendations?notify=false');
@@ -438,6 +679,27 @@ async function loadAgentRecommendations() {
           <div style="font-size:0.875rem;margin-bottom:0.5rem;">${a.summary}</div>
           <div style="font-size:0.75rem;color:#94a3b8;">
             ${groups.map(g => `<div style="margin-top:0.25rem;">• ${g.name} (${g.count} devices)</div>`).join('')}
+          </div>
+        </div>`;
+      }
+      if (a.type === 'device_onboarding') {
+        const d = a.details || {};
+        const conflicts = d.conflicts || [];
+        const device = d.device || {};
+        const fleet = d.fleet_state || {};
+        const regStatus = d.registration_status || 'pending';
+        const verStatus = d.verification_status || 'pending';
+        const borderColor = regStatus === 'created' ? '#4ade80' : conflicts.length > 0 ? '#f87171' : '#38bdf8';
+        return `<div class="stat-card" style="padding:1.25rem;border-left:3px solid ${borderColor};">
+          <div class="label" style="margin-bottom:0.25rem;">${a.agent}</div>
+          <div style="font-size:0.875rem;margin-bottom:0.5rem;">${a.summary}</div>
+          <div style="font-size:0.75rem;color:#94a3b8;">
+            ${conflicts.length > 0 ? `<div style="color:#f87171;margin-top:0.25rem;">Conflicts: ${conflicts.length}</div>` : ''}
+            ${device.name ? `<div>Device: ${device.name} (${(device.id||'').substring(0,8)}...)</div>` : ''}
+            <div>Registration: ${regStatus}</div>
+            <div>Verification: ${verStatus}</div>
+            <div>MQTT Config: ${d.mqtt_config_pushed ? 'Pushed' : 'Pending'}</div>
+            <div>Fleet: ${fleet.total_devices || '?'} total / ${fleet.online_devices || '?'} online</div>
           </div>
         </div>`;
       }
@@ -545,6 +807,15 @@ function closeOtaModal() {
   document.getElementById('ota-modal').classList.remove('active');
 }
 
+function openOnboardModal() {
+  document.getElementById('onboard-modal').classList.add('active');
+  document.getElementById('onboard-result').style.display = 'none';
+}
+
+function closeOnboardModal() {
+  document.getElementById('onboard-modal').classList.remove('active');
+}
+
 function refreshAll() {
   loadDashboard();
   checkMqttStatus();
@@ -587,14 +858,93 @@ document.getElementById('ota-form').addEventListener('submit', async (e) => {
   }
 });
 
+document.getElementById('onboard-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const name = document.getElementById('onboard-name').value.trim();
+  if (!name) { showToast('Device name is required', 'error'); return; }
+
+  const firmware = document.getElementById('onboard-firmware').value.trim();
+  const ip = document.getElementById('onboard-ip').value.trim();
+  const mqttId = document.getElementById('onboard-mqtt-id').value.trim();
+  const autoRegister = document.getElementById('onboard-auto').checked;
+
+  const params = new URLSearchParams({ name });
+  if (firmware) params.set('firmware_version', firmware);
+  if (ip) params.set('ip_address', ip);
+  if (mqttId) params.set('mqtt_client_id', mqttId);
+  if (autoRegister) params.set('auto_register', 'true');
+
+  const resultDiv = document.getElementById('onboard-result');
+  resultDiv.style.display = 'block';
+
+  try {
+    const res = await fetch(`/agents/onboarding?${params}`);
+    const data = await res.json();
+
+    if (data.error) {
+      resultDiv.style.borderLeft = '3px solid #f87171';
+      resultDiv.style.padding = '0.75rem';
+      resultDiv.innerHTML = `<div style="color:#f87171;">Error: ${data.error}</div>`;
+      return;
+    }
+
+    const details = data.details || {};
+    const conflicts = details.conflicts || [];
+    const device = details.device || {};
+    const fleet = details.fleet_state || {};
+
+    if (conflicts.length > 0) {
+      resultDiv.style.borderLeft = '3px solid #f87171';
+      resultDiv.style.background = 'rgba(248,113,113,0.1)';
+      let html = `<div style="color:#f87171;font-weight:600;margin-bottom:0.5rem;">Conflicts blocked onboarding</div>`;
+      conflicts.forEach(c => { html += `<div style="font-size:0.8rem;margin-top:0.25rem;">• ${c.message}</div>`; });
+      resultDiv.innerHTML = html;
+    } else if (details.registration_status === 'created') {
+      resultDiv.style.borderLeft = '3px solid #4ade80';
+      resultDiv.style.background = 'rgba(74,222,128,0.1)';
+      resultDiv.innerHTML = `
+        <div style="color:#4ade80;font-weight:600;">Device Onboarded Successfully</div>
+        <div style="margin-top:0.5rem;font-size:0.85rem;">
+          <div>Name: ${device.name || ''}</div>
+          <div>ID: ${(device.id || '').substring(0, 8)}...</div>
+          <div>Firmware: ${device.firmware_version || ''}</div>
+          <div>Status: ${device.status || ''}</div>
+          <div>Verification: ${details.verification_status || 'pending'}</div>
+          <div>MQTT Config: ${details.mqtt_config_pushed ? 'Pushed' : 'Pending'}</div>
+        </div>
+        <button class="btn btn-outline" style="margin-top:0.75rem;font-size:0.8rem;" onclick="closeOnboardModal(); loadDashboard();">Done</button>`;
+      showToast(`Device '${name}' onboarded`, 'success');
+    } else {
+      resultDiv.style.borderLeft = '3px solid #38bdf8';
+      resultDiv.style.background = 'rgba(56,189,248,0.1)';
+      const fw = details.recommended_firmware || {};
+      resultDiv.innerHTML = `
+        <div style="color:#38bdf8;font-weight:600;">Onboarding Plan Ready</div>
+        <div style="margin-top:0.5rem;font-size:0.85rem;">
+          <div>Conflicts: ${conflicts.length}</div>
+          <div>Recommended Firmware: ${fw.version || 'N/A'}</div>
+          <div>Fleet: ${fleet.total_devices || 0} total, ${fleet.online_devices || 0} online</div>
+        </div>
+        <div style="color:#fbbf24;font-size:0.8rem;margin-top:0.5rem;">Set "Auto-register" and submit again to execute.</div>`;
+    }
+  } catch {
+    resultDiv.style.borderLeft = '3px solid #f87171';
+    resultDiv.innerHTML = '<div style="color:#f87171;">Network error contacting onboarding agent</div>';
+  }
+});
+
 loadDashboard();
 loadFirmwareList();
 checkMqttStatus();
 loadAgentRecommendations();
+loadAlerts();
 setInterval(loadDashboard, 5000);
 setInterval(loadFirmwareList, 30000);
 setInterval(checkMqttStatus, 10000);
 setInterval(loadAgentRecommendations, 30000);
+setInterval(loadAlerts, 10000);
+setInterval(loadAegisPanel, 10000);
+loadAegisPanel();
 </script>
 </body>
 </html>

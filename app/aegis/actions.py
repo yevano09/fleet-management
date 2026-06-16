@@ -1,5 +1,6 @@
 import json
 import time
+import os
 import asyncio
 import logging
 from abc import ABC, abstractmethod
@@ -14,7 +15,7 @@ from app.aegis.config import (
     AEGIS_HEARTBEAT_FAST_INTERVAL,
     AEGIS_HEARTBEAT_NORMAL_INTERVAL,
 )
-from app.aegis.metrics import aegis_remediations_total, aegis_remediation_duration
+from app.aegis.metrics import aegis_remediation_duration
 
 logger = logging.getLogger(__name__)
 
@@ -49,13 +50,10 @@ class RemediationAction(ABC):
                 elapsed_ms = int((time.time() - start) * 1000)
                 result.duration_ms = elapsed_ms
                 aegis_remediation_duration.labels(action=self.name).observe(elapsed_ms / 1000.0)
-                status = "success" if result.success else "failed"
-                aegis_remediations_total.labels(action=self.name, status=status).inc()
                 return result
             except Exception as e:
                 last_error = str(e)
                 logger.warning("Action %s attempt %d failed: %s", self.name, attempt + 1, last_error)
-                aegis_remediations_total.labels(action=self.name, status="failed").inc()
                 if attempt < self.max_retries:
                     backoff = 2 ** attempt
                     await asyncio.sleep(backoff)
@@ -233,9 +231,281 @@ class ScaleHeartbeatAction(RemediationAction):
         return True
 
 
+class RollbackOtaBatchAction(RemediationAction):
+    name = "rollback_ota_batch"
+    timeout = 30
+
+    async def execute(self, signal: RemediationSignal, context: dict) -> RemediationResult:
+        device_ids = signal.device_ids
+        if not device_ids:
+            return RemediationResult(
+                success=True,
+                output_snapshot={
+                    "action": "rollback_ota_batch",
+                    "devices_rolled_back": [],
+                    "devices_failed": [],
+                    "alerts_created": 0,
+                    "note": "No device IDs provided",
+                },
+            )
+
+        rolled_back = []
+        failed = []
+
+        from sqlalchemy import select
+        from app.models import Device
+        from app.alert_engine import AlertEngine
+
+        db = context.get("db")
+        if db is None:
+            from app.database import async_session_factory
+            async with async_session_factory() as session:
+                return await self._do_rollback(session, device_ids)
+        return await self._do_rollback(db, device_ids)
+
+    async def _do_rollback(self, db, device_ids: list) -> RemediationResult:
+        from sqlalchemy import select
+        from app.models import Device
+        from app.alert_engine import AlertEngine
+
+        rolled_back = []
+        failed = []
+
+        for device_id in device_ids:
+            result = await db.execute(select(Device).where(Device.id == device_id))
+            device = result.scalar_one_or_none()
+            if device and device.previous_firmware_version:
+                device.firmware_version = device.previous_firmware_version
+                rolled_back.append(device_id)
+                if mqtt_client.is_connected:
+                    topic = f"iot/fleet/{device_id}/command/rollback"
+                    payload = json.dumps({
+                        "command": "rollback",
+                        "previous_firmware": device.previous_firmware_version,
+                        "timestamp": utcnow().isoformat(),
+                    })
+                    mqtt_client.client.publish(topic, payload, qos=1)
+            else:
+                failed.append(device_id)
+
+        await db.commit()
+
+        if rolled_back:
+            engine = AlertEngine(db)
+            anomalies = [{
+                "type": "ota_batch_rollback",
+                "severity": "critical",
+                "message": f"Rolled back OTA for {len(rolled_back)} devices due to failure spike > 30%",
+                "affected_device_ids": rolled_back,
+                "timestamp": utcnow().isoformat(),
+            }]
+            await engine.process_anomalies(anomalies)
+
+        return RemediationResult(
+            success=len(failed) == 0 or len(rolled_back) > 0,
+            output_snapshot={
+                "action": "rollback_ota_batch",
+                "devices_rolled_back": rolled_back,
+                "devices_failed": failed,
+                "alerts_created": 1 if rolled_back else 0,
+            },
+            error_message=f"Failed to rollback {len(failed)} devices" if failed else None,
+        )
+
+    async def rollback(self, signal: RemediationSignal, context: dict) -> bool:
+        return True
+
+    async def status(self) -> dict:
+        return {"action": self.name, "ready": True}
+
+
+class HumanEscalationAction(RemediationAction):
+    name = "human_escalation"
+    timeout = 15
+
+    async def execute(self, signal: RemediationSignal, context: dict) -> RemediationResult:
+        from app.alert_engine import AlertEngine
+        from app.database import async_session_factory
+
+        db = context.get("db")
+        if db is None:
+            async with async_session_factory() as session:
+                engine = AlertEngine(session)
+                anomalies = [{
+                    "type": "human_escalation",
+                    "severity": "critical",
+                    "message": (
+                        f"Aegis: Auto-remediation exhausted for signal "
+                        f"metric={signal.metric_name} value={signal.value} "
+                        f"threshold={signal.threshold}"
+                    ),
+                    "affected_device_ids": signal.device_ids,
+                    "timestamp": utcnow().isoformat(),
+                }]
+                await engine.process_anomalies(anomalies)
+        else:
+            engine = AlertEngine(db)
+            anomalies = [{
+                "type": "human_escalation",
+                "severity": "critical",
+                "message": (
+                    f"Aegis: Auto-remediation exhausted for signal "
+                    f"metric={signal.metric_name} value={signal.value} "
+                    f"threshold={signal.threshold}"
+                ),
+                "affected_device_ids": signal.device_ids,
+                "timestamp": utcnow().isoformat(),
+            }]
+            await engine.process_anomalies(anomalies)
+
+        return RemediationResult(
+            success=True,
+            output_snapshot={
+                "action": "human_escalation",
+                "metric": signal.metric_name,
+                "value": signal.value,
+                "alert_type": "human_escalation",
+                "severity": "critical",
+                "auto_assigned": "on-call",
+            },
+        )
+
+    async def rollback(self, signal: RemediationSignal, context: dict) -> bool:
+        return True
+
+    async def status(self) -> dict:
+        return {"action": self.name, "ready": True}
+
+
+class MigrateDevicePoolAction(RemediationAction):
+    name = "migrate_device_pool"
+    timeout = 20
+
+    async def execute(self, signal: RemediationSignal, context: dict) -> RemediationResult:
+        device_ids = signal.device_ids
+        migrated = []
+        failed = []
+
+        for device_id in device_ids:
+            if mqtt_client.is_connected:
+                topic = f"iot/fleet/{device_id}/command/maintenance"
+                payload = json.dumps({
+                    "command": "enter_maintenance",
+                    "reason": "resource_pressure",
+                    "timestamp": utcnow().isoformat(),
+                })
+                result = mqtt_client.client.publish(topic, payload, qos=1)
+                if result.rc == 0:
+                    migrated.append(device_id)
+                else:
+                    failed.append(device_id)
+            else:
+                failed.append(device_id)
+
+        return RemediationResult(
+            success=len(failed) == 0,
+            output_snapshot={
+                "action": "migrate_device_pool",
+                "devices_migrated": migrated,
+                "devices_failed": failed,
+                "mode": "maintenance",
+            },
+            error_message=f"Failed to migrate {len(failed)} devices" if failed else None,
+        )
+
+    async def rollback(self, signal: RemediationSignal, context: dict) -> bool:
+        for device_id in signal.device_ids:
+            if mqtt_client.is_connected:
+                topic = f"iot/fleet/{device_id}/command/maintenance"
+                payload = json.dumps({
+                    "command": "exit_maintenance",
+                    "reason": "rollback",
+                    "timestamp": utcnow().isoformat(),
+                })
+                mqtt_client.client.publish(topic, payload, qos=1)
+        return True
+
+    async def status(self) -> dict:
+        return {"action": self.name, "ready": True}
+
+
+class CleanupFirmwareArtifactsAction(RemediationAction):
+    name = "cleanup_firmware_artifacts"
+    timeout = 30
+
+    async def execute(self, signal: RemediationSignal, context: dict) -> RemediationResult:
+        from sqlalchemy import select
+        from app.models import OtaDeployment, OtaStatus
+
+        artifacts_deleted = 0
+        total_freed_bytes = 0
+        storage_path = settings.firmware_storage_path
+        storage_path = os.path.realpath(storage_path)
+
+        db = context.get("db")
+        if db is None:
+            from app.database import async_session_factory
+            async with async_session_factory() as session:
+                return await self._do_cleanup(session, storage_path)
+        return await self._do_cleanup(db, storage_path)
+
+    async def _do_cleanup(self, db, storage_path: str) -> RemediationResult:
+        from sqlalchemy import select
+        from app.models import OtaDeployment, OtaStatus
+
+        artifacts_deleted = 0
+        total_freed_bytes = 0
+
+        result = await db.execute(
+            select(OtaDeployment).where(
+                OtaDeployment.status.in_([OtaStatus.success, OtaStatus.failed, OtaStatus.rolled_back])
+            ).order_by(OtaDeployment.updated_at.asc())
+        )
+        deployments = result.scalars().all()
+
+        for dep in deployments:
+                if total_freed_bytes > 10 * 1024 * 1024:
+                    break
+                if dep.firmware_url:
+                    fpath = dep.firmware_url
+                    if not os.path.isabs(fpath):
+                        fpath = os.path.join(storage_path, fpath)
+                    try:
+                        if os.path.exists(fpath):
+                            size = os.path.getsize(fpath)
+                            os.remove(fpath)
+                            artifacts_deleted += 1
+                            total_freed_bytes += size
+                    except (OSError, PermissionError):
+                        pass
+
+        freed_mb = round(total_freed_bytes / (1024 * 1024), 2)
+        logger.info("Cleaned up %d firmware artifacts, freed %s MB", artifacts_deleted, freed_mb)
+
+        return RemediationResult(
+            success=True,
+            output_snapshot={
+                "action": "cleanup_firmware_artifacts",
+                "artifacts_deleted": artifacts_deleted,
+                "total_freed_bytes": total_freed_bytes,
+                "total_freed_mb": freed_mb,
+            },
+        )
+
+    async def rollback(self, signal: RemediationSignal, context: dict) -> bool:
+        return True
+
+    async def status(self) -> dict:
+        return {"action": self.name, "ready": True}
+
+
 ACTION_REGISTRY: dict[str, RemediationAction] = {
     "throttle_ota": ThrottleOtaAction(),
     "mqtt_qos_downgrade": MqttQosDowngradeAction(),
     "device_soft_restart": DeviceSoftRestartAction(),
     "scale_heartbeat": ScaleHeartbeatAction(),
+    "rollback_ota_batch": RollbackOtaBatchAction(),
+    "human_escalation": HumanEscalationAction(),
+    "migrate_device_pool": MigrateDevicePoolAction(),
+    "cleanup_firmware_artifacts": CleanupFirmwareArtifactsAction(),
 }
