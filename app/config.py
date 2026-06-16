@@ -14,12 +14,13 @@ class Settings(BaseSettings):
     mqtt_password: Optional[str] = None
     host: str = "0.0.0.0"
     port: int = 8000
+    external_port: int = 8181
     log_level: str = "INFO"
     ota_timeout_seconds: int = 120
     firmware_storage_path: str = "./firmware"
     max_retry_count: int = 3
     max_upload_size_mb: int = 100
-    ota_firmware_base_url: str = "http://localhost:8000"
+    ota_firmware_base_url: str = ""
     secure_cookies: bool = False
 
     # V2G / battery degradation settings
@@ -34,7 +35,7 @@ class Settings(BaseSettings):
     # Google OAuth
     google_client_id: str = ""
     google_client_secret: str = ""
-    google_redirect_uri: str = "http://localhost:8000/auth/callback"
+    google_redirect_uri: str = ""
     jwt_secret_key: str = "change-me-to-a-random-secret"
     jwt_algorithm: str = "HS256"
     jwt_expiration_minutes: int = 1440
@@ -43,7 +44,36 @@ class Settings(BaseSettings):
     admin_username: str = "admin"
     admin_password: str = "adminadmin"
 
+    # Alert channels
+    slack_webhook_url: str = ""
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_username: str = ""
+    smtp_password: str = ""
+    alert_email_from: str = "fleet@example.com"
+    alert_email_to: str = ""
+    alert_webhook_url: str = ""
+
+    # Aegis auto-remediation settings
+    aegis_scrape_interval: int = 15
+    aegis_action_timeout: int = 30
+    aegis_retry_max: int = 3
+    aegis_active_devices_threshold: float = 2.0
+    aegis_ota_in_progress_threshold: float = 3.0
+    aegis_latency_threshold: float = 0.5
+    aegis_offline_ratio_threshold: float = 0.3
+    aegis_backend_url: str = ""
+
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
+
+    def model_post_init(self, __context):
+        base = f"http://localhost:{self.external_port}"
+        if not self.ota_firmware_base_url:
+            object.__setattr__(self, "ota_firmware_base_url", base)
+        if not self.google_redirect_uri:
+            object.__setattr__(self, "google_redirect_uri", f"{base}/auth/callback")
+        if not self.aegis_backend_url:
+            object.__setattr__(self, "aegis_backend_url", f"http://localhost:{self.port}")
 
 
 settings = Settings()

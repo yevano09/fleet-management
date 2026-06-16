@@ -15,7 +15,9 @@ from app.config import settings, validate_settings
 from app.database import init_db, async_session_factory
 from app.mqtt_client import mqtt_client
 from app.routers import devices, ota, dashboard, auth, admin
+from app.routers.alerts import router as alerts_router
 from agents.routers import router as agents_router
+from app.aegis.router import router as aegis_router
 from app.ota_manager import OtaStateMachine
 from app.metrics import metrics_middleware, active_devices, total_devices, mqtt_messages_received, v2g_active_discharges, device_soc
 from app.models import Device, DeviceStatus
@@ -109,8 +111,19 @@ async def lifespan(app: FastAPI):
     mqtt_client.on_register(handle_mqtt_register)
     mqtt_client.connect()
 
+    from app.aegis.engine import AegisEngine
+    aegis_engine = AegisEngine(scrape_interval=settings.aegis_scrape_interval)
+    aegis_task = asyncio.create_task(aegis_engine.run_forever())
+    logger.info("Aegis auto-remediation engine started (interval=%ss)", settings.aegis_scrape_interval)
+
     logger.info("Fleet Commander backend started.")
     yield
+    aegis_engine.stop()
+    aegis_task.cancel()
+    try:
+        await aegis_task
+    except asyncio.CancelledError:
+        pass
     mqtt_client.disconnect()
     logger.info("Fleet Commander backend shut down.")
 
@@ -129,7 +142,9 @@ app.include_router(admin.router)
 app.include_router(devices.router)
 app.include_router(ota.router)
 app.include_router(dashboard.router)
+app.include_router(alerts_router)
 app.include_router(agents_router)
+app.include_router(aegis_router)
 
 
 @app.get("/firmware/{filename}")
