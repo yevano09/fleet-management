@@ -59,22 +59,31 @@ Fleet Commander is a production-grade **IoT device fleet management system**. It
 
 ## 2. System Architecture
 
-```
-┌──────────────┐    MQTT v5      ┌──────────────┐   HTTP/REST   ┌────────────────┐
-│  IoT Devices │◄──────────────►│  Mosquitto   │◄─────────────►│  FastAPI       │
-│  (ESP32, EV) │  iot/fleet/*    │  MQTT Broker │               │  Backend       │
-│  Simulators  │                 │  :1883       │               │  :8000         │
-└──────────────┘                 └──────┬───────┘               └───────┬────────┘
-                                        │                               │
-                                 ┌──────┴──────┐                 ┌──────┴──────┐
-                                 │  Prometheus │                 │  SQLite /   │
-                                 │  :9090      │                 │  PostgreSQL │
-                                 └──────┬──────┘                 └─────────────┘
-                                        │
-                                 ┌──────┴──────┐
-                                 │  Grafana    │
-                                 │  :3000      │
-                                 └─────────────┘
+```mermaid
+graph TB
+    subgraph Devices["IoT Devices"]
+        ESP[ESP32 Real Hardware]
+        EV[EV Battery Simulators]
+        SIM[Device Simulators]
+    end
+    subgraph MQTT["Message Layer"]
+        MOS[Mosquitto MQTT Broker<br/>:1883]
+    end
+    subgraph Backend["Backend"]
+        API[FastAPI Backend<br/>:8000]
+    end
+    subgraph Storage["Storage"]
+        DB[(SQLite /<br/>PostgreSQL)]
+    end
+    subgraph Monitoring["Monitoring"]
+        PRO[Prometheus<br/>:9090]
+        GRA[Grafana<br/>:3000]
+    end
+    ESP & EV & SIM <-->|MQTT v5 iot/fleet/*| MOS
+    MOS <-->|HTTP REST| API
+    API <--> DB
+    PRO -.->|scrape /metrics| API
+    PRO -.-> GRA
 ```
 
 ### 2.1 Data Flow
@@ -316,10 +325,18 @@ curl http://localhost:8000/devices?status=offline
 
 ### 6.1 OTA State Machine
 
-```
-pending → downloading → applying → verifying → success
-                                         → hash_mismatch → rollback → rolled_back
-                              → failed (timeout / max retries)
+```mermaid
+stateDiagram-v2
+    [*] --> pending
+    pending --> downloading
+    downloading --> applying
+    applying --> verifying
+    verifying --> success
+    verifying --> hash_mismatch
+    hash_mismatch --> rollback
+    rollback --> rolled_back
+    success --> [*]
+    rolled_back --> [*]
 ```
 
 ### 6.2 Uploading Firmware

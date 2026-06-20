@@ -73,9 +73,18 @@ Show the subscription setup in `mqtt_client.py:_on_connect()`.
 
 Open `app/ota_manager.py:OtaStateMachine` and trace the flow:
 
-```
-pending → downloading → applying → verifying → success
-                                         → hash_mismatch → rollback → rolled_back
+```mermaid
+stateDiagram-v2
+    [*] --> pending
+    pending --> downloading
+    downloading --> applying
+    applying --> verifying
+    verifying --> success
+    verifying --> hash_mismatch
+    hash_mismatch --> rollback
+    rollback --> rolled_back
+    success --> [*]
+    rolled_back --> [*]
 ```
 
 Demo on the dashboard:
@@ -407,29 +416,29 @@ The Aegis engine monitors Prometheus metrics from the backend, classifies resour
 
 #### How It Works
 
-```
-Prometheus /metrics
-       │ (scraped every 15s)
-       ▼
-Aegis Engine ──► Classifies signals (CPU/memory/disk/OTA/latency)
-       │
-       ▼
-Decision Engine ──► Rule registry (8 rules, priority-ordered)
-       │
-       ├── R001 throttle_ota          ──► Pause OTA deployments
-       ├── R002 mqtt_qos_downgrade    ──► Reduce non-critical QoS
-       ├── R003 device_soft_restart   ──► Restart affected devices
-       ├── R004 scale_heartbeat       ──► Increase monitoring frequency
-       ├── R005 rollback_ota_batch    ──► Roll back failing OTA batch
-       ├── R006 human_escalation      ──► Create critical alert + Slack
-       ├── R007 migrate_device_pool   ──► Route traffic away from stressed device
-       └── R008 cleanup_firmware      ──► Free disk space from old artifacts
-       │
-       ▼
-Action Executor ──► Timeout, retry (×3), rollback, DLQ
-       │
-       ▼
-Audit Trail ──► Remediation history + 7 Prometheus metrics
+```mermaid
+flowchart TD
+    PRO[Prometheus /metrics] -->|scrape 15s| AE[Aegis Engine]
+    AE -->|classify| CS{CPU / Memory / Disk<br/>OTA / Latency}
+    CS --> DE[Decision Engine]
+    DE --> R1[R001 throttle_ota]
+    DE --> R2[R002 mqtt_qos_downgrade]
+    DE --> R3[R003 device_soft_restart]
+    DE --> R4[R004 scale_heartbeat]
+    DE --> R5[R005 rollback_ota_batch]
+    DE --> R6[R006 human_escalation]
+    DE --> R7[R007 migrate_device_pool]
+    DE --> R8[R008 cleanup_firmware]
+    R1 --> ACT[Action Executor]
+    R2 --> ACT
+    R3 --> ACT
+    R4 --> ACT
+    R5 --> ACT
+    R6 --> ACT
+    R7 --> ACT
+    R8 --> ACT
+    ACT -->|timeout / retry×3 / DLQ| AT[Audit Trail]
+    AT -->|7 aegis_* metrics| PRO
 ```
 
 #### From the Dashboard
@@ -541,20 +550,29 @@ The Device Onboarding Agent guides you through introducing a new device to the f
 
 #### How It Works
 
-```
-Operator submits device name
-        │
-        ▼
-Device Onboarding Agent
-  1. Check name/MQTT ID conflicts  ──► Database lookup
-  2. Recommend latest firmware      ──► Firmware list
-  3. Generate initial config        ──► heartbeat interval, OTA poll
-  4. Register device (if approved)  ──► INSERT Device + metrics
-  5. Push MQTT config               ──► publish_remote_config
-  6. Verify first heartbeat         ──► Check last_seen
-        │
-        ▼
-Onboarding Report (JSON → CLI / Dashboard UI)
+```mermaid
+sequenceDiagram
+    participant O as Operator
+    participant OA as Onboarding Agent
+    participant DB as Database
+    participant MQ as MQTT
+    participant D as Device
+
+    O->>OA: Submit device name
+    OA->>DB: Check name / MQTT ID conflicts
+    DB-->>OA: Conflict check result
+    OA->>DB: Recommend latest firmware
+    DB-->>OA: Firmware list
+    OA->>OA: Generate initial config
+    alt Auto-register
+        OA->>DB: Register device
+        DB-->>OA: Device record
+        OA->>MQ: Push MQTT config
+        MQ->>D: Remote config command
+        D-->>MQ: Heartbeat
+        MQ-->>OA: Verify heartbeat
+    end
+    OA-->>O: Onboarding report (JSON)
 ```
 
 #### From the Dashboard
@@ -687,8 +705,24 @@ The dashboard includes an interactive Leaflet map showing device locations with 
 
 GPS data piggybacks on existing heartbeats — no new MQTT topics or endpoints:
 
-```
-Device heartbeat ──► MQTT ──► Backend (extracts lat/lng) ──► DB (persists) ──► API (GET /devices) ──► Map (Leaflet + OSM)
+```mermaid
+sequenceDiagram
+    participant D as Device
+    participant MQ as MQTT
+    participant BE as Backend
+    participant DB as Database
+    participant API as REST API
+    participant MAP as Leaflet Map
+
+    Note over D: GPS activates after GPS_INTERVAL
+    D->>MQ: Heartbeat + lat/lng
+    MQ->>BE: handle_mqtt_heartbeat()
+    BE->>DB: SET latitude, longitude
+    API->>DB: SELECT devices
+    DB-->>API: Devices with coords
+    API-->>MAP: JSON response
+    MAP->>MAP: updateMapMarkers()
+    Note over MAP: Circle markers by city<br/>Click popup with details
 ```
 
 The simulator assigns devices to cities round-robin from `SIMULATOR_CITIES` (default: `Bangalore,Mumbai,Delhi`). GPS activates after `SIMULATOR_GPS_INTERVAL` seconds (default: 30), at which point the device's firmware changes to `2.0.0-gps` and location updates with small jitter every interval.

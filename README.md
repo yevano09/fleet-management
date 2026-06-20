@@ -4,31 +4,32 @@ A production-grade IoT fleet management system built with FastAPI, MQTT, Prometh
 
 ## Architecture
 
-```
-┌─────────────┐    MQTT     ┌─────────────┐   HTTP    ┌──────────────────┐
-│  Device     │◄───────────►│  Mosquitto   │◄─────────►│  FastAPI Backend │
-│  Simulators │   iot/fleet/ │  (Broker)   │  REST API │  :8000           │
-│  (x5-N)     │  .../command │             │           │  ┌────────────┐  │
-└─────────────┘  .../status  └──────┬──────┘           │  │ Aegis     │  │
-                                    │                   │  │ Auto-     │  │
-                                    │                   │  │Remediation│  │
-                                    │                   │  │ Engine    │  │
-                                    │                   │  └────────────┘  │
-                                    │                   └─────────┬────────┘
-                                    │                             │
-                                    │                     ┌───────┴───────┐
-                                    │                     │  SQLite/      │
-                                    │                     │  Postgres     │
-                                    │                     └───────────────┘
-                            ┌───────┴───────┐
-                            │   Prometheus   │
-                            │   :9090        │
-                            └───────┬───────┘
-                                    │
-                            ┌───────┴───────┐
-                            │   Grafana     │
-                            │   :3000       │
-                            └───────────────┘
+```mermaid
+graph TB
+    subgraph Devices["Devices"]
+        SIM[Device Simulators<br/>(x5-N)]
+    end
+    subgraph MQTT["Message Layer"]
+        MOS[Mosquitto MQTT Broker<br/>:1883]
+    end
+    subgraph Backend["Backend"]
+        API[FastAPI Backend<br/>:8000]
+        AEG[Aegis Auto-Remediation<br/>Engine]
+    end
+    subgraph Storage["Storage"]
+        DB[(SQLite /<br/>PostgreSQL)]
+    end
+    subgraph Monitoring["Monitoring"]
+        PRO[Prometheus<br/>:9090]
+        GRA[Grafana<br/>:3000]
+    end
+    SIM <-->|MQTT iot/fleet/*| MOS
+    MOS <-->|HTTP REST| API
+    API --- AEG
+    API <--> DB
+    PRO -.->|scrape /metrics| API
+    PRO -.-> GRA
+    MOS -.-> PRO
 ```
 
 ### MQTT Topic Structure
@@ -43,10 +44,20 @@ A production-grade IoT fleet management system built with FastAPI, MQTT, Prometh
 
 ### OTA State Machine
 
-```
-pending → downloading → applying → verifying → success
-                                         → hash_mismatch → rollback → rolled_back
-                              → failed (timeout / max retries)
+```mermaid
+stateDiagram-v2
+    [*] --> pending
+    pending --> downloading
+    downloading --> applying
+    applying --> verifying
+    verifying --> success
+    verifying --> hash_mismatch
+    hash_mismatch --> rollback
+    rollback --> rolled_back
+    verifying --> failed : timeout /<br/>max retries
+    success --> [*]
+    failed --> [*]
+    rolled_back --> [*]
 ```
 
 On `hash_mismatch`: the backend logs the failure, the device simulator auto-reverts to the previous firmware, and the deployment is marked `rolled_back`.
