@@ -250,7 +250,7 @@ sequenceDiagram
     DB-->>API: Devices with coords
     API-->>MAP: JSON response
     MAP->>MAP: L.circleMarker (city-color)
-    Note over MAP: Animated position updates<br/>Popup on click
+    Note over MAP: Animated markers, popup on click
 ```
 
 ---

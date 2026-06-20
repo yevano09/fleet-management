@@ -419,7 +419,7 @@ The Aegis engine monitors Prometheus metrics from the backend, classifies resour
 ```mermaid
 flowchart TD
     PRO[Prometheus /metrics] -->|scrape 15s| AE[Aegis Engine]
-    AE -->|classify| CS{CPU / Memory / Disk<br/>OTA / Latency}
+    AE -->|classify| CS{"CPU / Memory / Disk | OTA / Latency"}
     CS --> DE[Decision Engine]
     DE --> R1[R001 throttle_ota]
     DE --> R2[R002 mqtt_qos_downgrade]
@@ -722,7 +722,7 @@ sequenceDiagram
     DB-->>API: Devices with coords
     API-->>MAP: JSON response
     MAP->>MAP: updateMapMarkers()
-    Note over MAP: Circle markers by city<br/>Click popup with details
+    Note over MAP: Circles by city, popup on click
 ```
 
 The simulator assigns devices to cities round-robin from `SIMULATOR_CITIES` (default: `Bangalore,Mumbai,Delhi`). GPS activates after `SIMULATOR_GPS_INTERVAL` seconds (default: 30), at which point the device's firmware changes to `2.0.0-gps` and location updates with small jitter every interval.

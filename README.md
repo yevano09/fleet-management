@@ -7,21 +7,21 @@ A production-grade IoT fleet management system built with FastAPI, MQTT, Prometh
 ```mermaid
 graph TB
     subgraph Devices["Devices"]
-        SIM[Device Simulators<br/>(x5-N)]
+        SIM["Device Simulators (x5-N)"]
     end
-    subgraph MQTT["Message Layer"]
-        MOS[Mosquitto MQTT Broker<br/>:1883]
+    subgraph MQTT["Message"]
+        MOS["Mosquitto MQTT Broker :1883"]
     end
     subgraph Backend["Backend"]
-        API[FastAPI Backend<br/>:8000]
-        AEG[Aegis Auto-Remediation<br/>Engine]
+        API["FastAPI Backend :8000"]
+        AEG["Aegis Auto-Remediation"]
     end
     subgraph Storage["Storage"]
-        DB[(SQLite /<br/>PostgreSQL)]
+        DB["(SQLite / PostgreSQL)"]
     end
     subgraph Monitoring["Monitoring"]
-        PRO[Prometheus<br/>:9090]
-        GRA[Grafana<br/>:3000]
+        PRO["Prometheus :9090"]
+        GRA["Grafana :3000"]
     end
     SIM <-->|MQTT iot/fleet/*| MOS
     MOS <-->|HTTP REST| API
@@ -54,7 +54,7 @@ stateDiagram-v2
     verifying --> hash_mismatch
     hash_mismatch --> rollback
     rollback --> rolled_back
-    verifying --> failed : timeout /<br/>max retries
+    verifying --> failed : timeout / max retries
     success --> [*]
     failed --> [*]
     rolled_back --> [*]
