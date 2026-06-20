@@ -61,6 +61,10 @@ th { text-align:left; padding:0.65rem 1rem; background:var(--bg-deep); color:var
 td { padding:0.65rem 1rem; border-bottom:1px solid var(--border); font-size:0.85rem; }
 tr:last-child td { border-bottom:none; }
 tr:hover td { background:rgba(45,212,191,0.02); }
+tr.device-row { cursor:pointer; }
+.btn-map { background:transparent; border:1px solid var(--border); border-radius:0.375rem; cursor:pointer; font-size:1rem; padding:0.15rem 0.4rem; transition:all 0.15s; line-height:1; }
+.btn-map:hover { background:var(--teal-glow); border-color:var(--teal); transform:scale(1.15); }
+.marker-highlight { color:var(--teal) !important; fillColor:var(--teal) !important; fillOpacity:0.9 !important; weight:4 !important; }
 .badge { display:inline-flex; align-items:center; gap:0.3rem; padding:0.2rem 0.55rem; border-radius:9999px; font-size:0.72rem; font-weight:500; font-family:var(--font-mono); }
 .badge-online { background:rgba(34,197,94,0.1); color:var(--green); border:1px solid rgba(34,197,94,0.15); }
 .badge-offline { background:rgba(239,68,68,0.1); color:var(--red); border:1px solid rgba(239,68,68,0.15); }
@@ -225,10 +229,11 @@ td code { font-family:var(--font-mono); font-size:0.78em; background:rgba(45,212
 <th>Uptime</th>
 <th>Last Seen</th>
 <th>OTA Status</th>
+<th style="width:4rem;">Map</th>
 </tr>
 </thead>
 <tbody id="device-tbody">
-<tr><td colspan="8" style="text-align:center;padding:2rem;color:#64748b;">Loading devices...</td></tr>
+<tr><td colspan="9" style="text-align:center;padding:2rem;color:#64748b;">Loading devices...</td></tr>
 </tbody>
 </table>
 
@@ -557,6 +562,36 @@ function centerMap() {
   map.fitBounds(group.getBounds().pad(0.15));
 }
 
+let highlightedMarkerId = null;
+
+function rowFocusMap(deviceId) {
+  focusDeviceOnMap(deviceId);
+}
+
+function focusDeviceOnMap(deviceId) {
+  const marker = mapMarkers[deviceId];
+  if (!marker || !map) {
+    showToast('Device has no GPS data on the map', 'info');
+    return;
+  }
+  const latlng = marker.getLatLng();
+  map.setView(latlng, 15, { animate: true });
+
+  marker.openPopup();
+
+  if (highlightedMarkerId) {
+    const prev = mapMarkers[highlightedMarkerId];
+    if (prev) {
+      const color = prev._originalColor || cityColor(prev._deviceCity);
+      prev.setStyle({ radius: 7, weight: 2, opacity: 1, fillOpacity: 0.65 });
+    }
+  }
+
+  marker._originalColor = marker.options.color;
+  marker.setStyle({ radius: 11, weight: 4, opacity: 1, fillOpacity: 0.9 });
+  highlightedMarkerId = deviceId;
+}
+
 function showToast(message, type = 'info') {
   const t = document.getElementById('toast');
   t.textContent = message;
@@ -575,7 +610,7 @@ async function loadDashboard() {
     const devices = devicesData.devices || [];
 
     if (devices.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:2rem;color:#64748b;">No devices registered. Wait for simulators to connect.</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:2rem;color:#64748b;">No devices registered. Wait for simulators to connect.</td></tr>';
     } else {
       tbody.innerHTML = devices.map(d => {
         const statusClass = d.status === 'online' ? 'badge-online' : 'badge-offline';
@@ -583,8 +618,9 @@ async function loadDashboard() {
         const signal = d.signal_strength != null ? d.signal_strength : 'N/A';
         const uptime = d.uptime_percentage != null ? d.uptime_percentage.toFixed(1) + '%' : 'N/A';
         const lastSeen = d.last_seen ? new Date(d.last_seen + 'Z').toLocaleString() : 'N/A';
-        return `<tr>
-          <td><input type="checkbox" class="device-check" value="${d.id}"></td>
+        const hasGps = d.latitude != null && d.longitude != null;
+        return `<tr class="device-row" data-id="${d.id}" data-hasgps="${hasGps}" onclick="rowFocusMap('${d.id}')">
+          <td><input type="checkbox" class="device-check" value="${d.id}" onclick="event.stopPropagation()"></td>
           <td><strong>${d.name}</strong></td>
           <td>${d.firmware_version}</td>
           <td><span class="badge ${statusClass}">${statusDot} ${d.status}</span></td>
@@ -592,6 +628,7 @@ async function loadDashboard() {
           <td>${uptime}</td>
           <td>${lastSeen}</td>
           <td id="ota-cell-${d.id}">-</td>
+          <td>${hasGps ? '<button class="btn-map" onclick="event.stopPropagation(); focusDeviceOnMap(\'' + d.id + '\')" title="View on map">📍</button>' : '<span style="color:var(--text-muted);font-size:0.7rem;">-</span>'}</td>
         </tr>`;
       }).join('');
     }

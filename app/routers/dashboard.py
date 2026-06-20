@@ -23,6 +23,7 @@ async def dashboard(request: Request):
     if admin:
         user = admin
     return templates.TemplateResponse(
+        request,
         "dashboard.html",
         {"request": request, "user": user},
     )
