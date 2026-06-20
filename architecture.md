@@ -8,7 +8,7 @@ Interactive HTML diagram at `architecture.html`. Open in any browser and click t
 
 | Node | Role | Tech | Port |
 |---|---|---|---|
-| **User (Browser)** | Dashboard UI | Jinja2 + HTMX · auto-refresh (5s/10s/30s) | localhost:8000 |
+| **User (Browser)** | Dashboard UI | Jinja2 + HTMX · auto-refresh (5s/10s/30s) | localhost:8181 |
 | **FastAPI Backend** | Orchestrator — REST + MQTT + Agents | Python · FastAPI · SQLAlchemy async | :8000 |
 | **Aegis Engine** | Auto-remediation — scrape → classify → decide → act | Python stdlib · co-located | scrapes /metrics every 15s |
 | **SQLite / PostgreSQL** | Primary datastore | Dev: aiosqlite · fleet.db / Prod: psycopg2 | file-based / :5432 |
@@ -16,6 +16,7 @@ Interactive HTML diagram at `architecture.html`. Open in any browser and click t
 | **Device Simulator** | Virtual IoT devices (5, 20% OTA fail rate) | Python · paho-mqtt · async | MQTT heartbeat 10s |
 | **Prometheus** | Metrics collection | v2.53.0 · 7d retention | :9090 |
 | **Grafana** | Visualization dashboards | 11.1.0 · pre-provisioned | :3000 |
+| **Live Fleet Map** | Interactive device location visualization | Leaflet 1.9.4 · OpenStreetMap tiles · city-color markers | dashboard embed |
 | **Alert Channels** | Multi-channel notifications | Slack Webhook · SMTP Email · Generic Webhook | SMTP :587 |
 
 ---
@@ -94,6 +95,18 @@ Closing the loop between metric signals and fleet healing — scrape, classify, 
 
 Built-in rules: R001 throttle_ota, R002 mqtt_qos_downgrade, R003 device_soft_restart, R004 scale_heartbeat, R005 rollback_ota_batch, R006 human_escalation, R007 migrate_device_pool, R008 cleanup_firmware_artifacts.
 
+### 7. GPS Fleet Tracking
+
+Live device location tracking piggybacked on existing heartbeat flow — no new MQTT topics or endpoints.
+
+1. **Simulator → MQTT** — After `GPS_INTERVAL` seconds, device activates GPS (firmware → `2.0.0-gps`) and includes `latitude` and `longitude` in every heartbeat to `iot/fleet/{id}/heartbeat`
+2. **MQTT → Backend** — `handle_mqtt_heartbeat()` at `app/main.py:98` extracts `latitude`/`longitude` from JSON payload and sets `device.latitude`/`device.longitude`
+3. **Backend → DB** — Coordinates persisted to `devices.latitude` and `devices.longitude` (nullable Float columns)
+4. **Backend → User** — `GET /devices` returns lat/lng per device; dashboard renders Leaflet map from `/api/devices` HTMX data
+5. **Dashboard → Leaflet** — `updateMapMarkers()` renders `L.circleMarker` per device, color-coded by city, with animated position updates and click popups; city filter buttons toggle visibility
+
+Backend auto-creates a `2.0.0-gps` firmware record on startup (`app/main.py:126`) as a demo firmware binary. Simulator devices self-activate GPS after a timer rather than via OTA command.
+
 ---
 
 ## Modes
@@ -115,7 +128,7 @@ Toggle with the Dev/Prod button or press `O`.
 |---|---|
 | `Space` | Play / Pause auto-advance |
 | `←` / `→` | Previous / Next step |
-| `1`–`6` | Select flow tab |
+| `1`–`7` | Select flow tab |
 | `O` | Toggle dev/prod mode |
 | `T` | Toggle dark/light theme |
 | `F` | Fullscreen canvas |
@@ -132,3 +145,4 @@ Toggle with the Dev/Prod button or press `O`.
 4. **"What can the AI agents tell me?"** — Flow 4: all 4 agents run concurrently with heuristic logic (no LLM API key needed)
 5. **"How do alerts get to Slack and trigger auto-remediation?"** — Flow 5: anomaly detection → Aegis rules → dedup → escalation → Slack/Email/Webhook
 6. **"How does Aegis auto-heal the fleet?"** — Flow 6: scrape → classify → decide → act → record → observe — 8 rules, dead-letter queue, full audit trail
+7. **"How do I see where my devices are?"** — Flow 7: GPS piggybacks on heartbeats → DB persist → Leaflet map with city-color-coded markers, popups, and city filters

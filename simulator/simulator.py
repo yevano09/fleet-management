@@ -8,6 +8,7 @@ Simulates IoT devices that:
   - Handle SHA256 hash mismatches with automatic rollback
   - Simulate EV battery behaviour for V2G (SOC, SOH, temp, plug status)
   - Respond to V2G discharge/charge commands
+  - Simulate GPS location tracking with city assignment
 """
 
 import asyncio
@@ -28,18 +29,31 @@ logger = logging.getLogger("simulator")
 MQTT_BROKER_HOST = os.environ.get("MQTT_BROKER_HOST", "localhost")
 MQTT_BROKER_PORT = int(os.environ.get("MQTT_BROKER_PORT", 1883))
 BACKEND_URL = os.environ.get("BACKEND_URL", "http://backend:8000")
-DEVICE_COUNT = int(os.environ.get("SIMULATOR_DEVICE_COUNT", 5))
+DEVICE_COUNT = int(os.environ.get("SIMULATOR_DEVICE_COUNT", 15))
 HEARTBEAT_INTERVAL = int(os.environ.get("SIMULATOR_HEARTBEAT_INTERVAL", 10))
 OTA_FAILURE_RATE = float(os.environ.get("SIMULATOR_OTA_FAILURE_RATE", "0.2"))
 INITIAL_FIRMWARE = "1.0.0"
-
+GPS_FIRMWARE_VERSION = "2.0.0-gps"
+GPS_INTERVAL = int(os.environ.get("SIMULATOR_GPS_INTERVAL", 30))
+SIMULATOR_CITIES = os.environ.get("SIMULATOR_CITIES", "Bangalore,Mumbai,Delhi")
 
 V2G_POWER_KW = 7.2
 BATTERY_CAPACITY_KWH = 60.0
 
+CITY_COORDS = {
+    "Bangalore": (12.9716, 77.5946),
+    "Mumbai": (19.0760, 72.8777),
+    "Delhi": (28.7041, 77.1025),
+    "Chennai": (13.0827, 80.2707),
+    "Hyderabad": (17.3850, 78.4867),
+    "Pune": (18.5204, 73.8567),
+    "Kolkata": (22.5726, 88.3639),
+    "Ahmedabad": (23.0225, 72.5714),
+}
+
 
 class SimulatedDevice:
-    def __init__(self, device_id: str, name: str, is_ev: bool = False):
+    def __init__(self, device_id: str, name: str, city: str = "Bangalore", is_ev: bool = False):
         self.id = device_id
         self.name = name
         self.firmware_version = INITIAL_FIRMWARE
@@ -48,6 +62,14 @@ class SimulatedDevice:
         self.signal_strength = random.randint(-90, -40)
         self.uptime = 100.0
         self.start_time = time.time()
+
+        # GPS / location tracking
+        self.city = city
+        base_lat, base_lng = CITY_COORDS.get(city, (12.9716, 77.5946))
+        self.latitude = base_lat + random.uniform(-0.015, 0.015)
+        self.longitude = base_lng + random.uniform(-0.015, 0.015)
+        self.gps_active = False
+        self.last_gps_time = 0.0
 
         # EV battery simulation
         self.is_ev = is_ev
@@ -185,6 +207,18 @@ class SimulatedDevice:
         # SOH slowly degrades over time
         self.soh = max(70.0, self.soh - 0.001)
 
+    def _update_gps(self):
+        now = time.time()
+        if not self.gps_active and (now - self.start_time) >= GPS_INTERVAL:
+            self.gps_active = True
+            self.firmware_version = GPS_FIRMWARE_VERSION
+            self.last_gps_time = now
+            logger.info(f"[{self.name}] GPS activated, firmware -> {GPS_FIRMWARE_VERSION}")
+        if self.gps_active and (now - self.last_gps_time) >= GPS_INTERVAL:
+            self.latitude += random.uniform(-0.0005, 0.0005)
+            self.longitude += random.uniform(-0.0005, 0.0005)
+            self.last_gps_time = now
+
     async def register(self):
         payload = json.dumps({
             "device_id": self.id,
@@ -194,22 +228,27 @@ class SimulatedDevice:
         })
         self._client.publish("iot/fleet/register", payload, qos=1)
         self.status = "online"
-        logger.info(f"[{self.name}] Registered")
+        logger.info(f"[{self.name}] Registered (fw={self.firmware_version})")
 
     async def send_heartbeat(self):
         self.uptime = min(100.0, 100.0 * (1.0 - (time.time() - self.start_time) / 86400) + 95.0)
         self.signal_strength = random.randint(max(-95, self.signal_strength - 2), min(-30, self.signal_strength + 2))
         self._update_battery()
+        self._update_gps()
 
         payload = {
             "uptime_percentage": round(self.uptime, 1),
             "signal_strength": self.signal_strength,
+            "firmware_version": self.firmware_version,
         }
         if self.is_ev:
             payload["soc"] = round(self.soc, 1)
             payload["soh"] = round(self.soh, 1)
             payload["battery_temp"] = round(self.battery_temp, 1)
             payload["plug_status"] = self.plug_status
+        if self.gps_active:
+            payload["latitude"] = round(self.latitude, 6)
+            payload["longitude"] = round(self.longitude, 6)
 
         topic = f"iot/fleet/{self.id}/heartbeat"
         self._client.publish(topic, json.dumps(payload), qos=1)
@@ -245,16 +284,21 @@ class SimulatedDevice:
 
 async def main():
     logger.info(f"Starting device simulator with {DEVICE_COUNT} devices")
+    city_list = [c.strip() for c in SIMULATOR_CITIES.split(",") if c.strip()]
+    if not city_list:
+        city_list = ["Bangalore"]
+    logger.info(f"City pool: {city_list}, GPS interval: {GPS_INTERVAL}s")
     devices = []
 
     for i in range(DEVICE_COUNT):
         device_id = str(uuid.uuid4())
         is_ev = i < 3  # first 3 devices are EVs with battery simulation
         name = f"Device-{i+1:03d}"
-        device = SimulatedDevice(device_id, name, is_ev=is_ev)
+        city = city_list[i % len(city_list)]
+        device = SimulatedDevice(device_id, name, city=city, is_ev=is_ev)
         devices.append(device)
         asyncio.create_task(device.run())
-        logger.info(f"Created simulated device: {name} ({device_id[:8]}...) is_ev={is_ev}")
+        logger.info(f"Created simulated device: {name} ({device_id[:8]}...) city={city} is_ev={is_ev}")
 
     def shutdown():
         logger.info("Shutting down simulator...")

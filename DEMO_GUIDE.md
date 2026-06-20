@@ -15,7 +15,7 @@ Three presentation styles for showcasing the Fleet Commander IoT device manageme
    docker compose --profile demo up -d
    ```
 
-2. **Open the Fleet Dashboard** at http://localhost:8000
+2. **Open the Fleet Dashboard** at http://localhost:8181
 
 3. **Point out** the device table showing 5 online devices (Device-001 through Device-005) with firmware version `1.0.0`, green status badges, and varying signal strength.
 
@@ -39,6 +39,7 @@ Three presentation styles for showcasing the Fleet Commander IoT device manageme
 - Automatic rollback on hash mismatch
 - Real-time dashboard visibility
 - Aegis auto-remediation engine — detects resource pressure and heals the fleet automatically
+- GPS fleet tracking — live Leaflet map with city-color-coded markers
 
 ---
 
@@ -63,7 +64,7 @@ Open `app/mqtt_client.py` and walk through:
 |---|---|
 | `iot/fleet/{id}/command/ota` | Backend publishes firmware URL + SHA256 |
 | `iot/fleet/{id}/status/ota` | Device reports download→apply→verify→success/fail |
-| `iot/fleet/{id}/heartbeat` | Periodic uptime + signal strength |
+| `iot/fleet/{id}/heartbeat` | Periodic uptime + signal strength + GPS lat/lng |
 | `iot/fleet/register` | Auto-registration on first connect |
 
 Show the subscription setup in `mqtt_client.py:_on_connect()`.
@@ -119,7 +120,7 @@ docker compose ps
 
 ```bash
 # Register a device manually via API
-curl -X POST http://localhost:8000/devices/register \
+curl -X POST http://localhost:8181/devices/register \
   -H "Content-Type: application/json" \
   -d '{"name": "Demo-Device-001", "firmware_version": "1.0.0", "ip_address": "10.0.0.42"}'
 ```
@@ -129,7 +130,7 @@ Verify on the dashboard — it appears in the device table with status `Online`.
 ### 2. Heartbeat Updates
 
 ```bash
-curl -X POST http://localhost:8000/devices/{DEVICE_ID}/heartbeat \
+curl -X POST http://localhost:8181/devices/{DEVICE_ID}/heartbeat \
   -H "Content-Type: application/json" \
   -d '{"uptime_percentage": 99.2, "signal_strength": -58}'
 ```
@@ -149,12 +150,12 @@ When the backend publishes to `iot/fleet/{id}/command/config`, the simulator log
 
 ```bash
 # Upload firmware
-curl -X POST http://localhost:8000/ota/upload \
+curl -X POST http://localhost:8181/ota/upload \
   -F "version=2.0.0" \
   -F "file=@/path/to/firmware.bin"
 
 # Get the firmware ID from response, then:
-curl -X POST http://localhost:8000/ota/trigger \
+curl -X POST http://localhost:8181/ota/trigger \
   -H "Content-Type: application/json" \
   -d '{"firmware_id": "<FW_ID>", "device_ids": ["<DEVICE_ID>"]}'
 ```
@@ -188,7 +189,7 @@ After 60 seconds, the device appears `Offline` on the dashboard. When the simula
 
 ```bash
 # Metrics exposed at /metrics (no trailing slash needed)
-curl -s http://localhost:8000/metrics | grep fleet_
+curl -s http://localhost:8181/metrics | grep fleet_
 ```
 
 Sample output:
@@ -218,7 +219,7 @@ The dashboard now includes three AI agent panels at the bottom, auto-refreshing 
 
 After uploading a firmware:
 ```bash
-curl -X POST http://localhost:8000/ota/upload \
+curl -X POST http://localhost:8181/ota/upload \
   -F "version=2.0.0" \
   -F "file=@/path/to/firmware.bin"
 ```
@@ -239,7 +240,7 @@ The Fleet Health panel shows:
 
 To see anomalies in action, stop a device or trigger a high-failure-rate OTA:
 ```bash
-curl -X POST http://localhost:8000/ota/trigger \
+curl -X POST http://localhost:8181/ota/trigger \
   -H "Content-Type: application/json" \
   -d '{"firmware_id": "<FW_ID>", "all_devices": true}'
 ```
@@ -258,26 +259,26 @@ Use these groups for targeted OTA rollouts or health comparisons.
 
 ```bash
 # Full recommendation report (JSON)
-curl http://localhost:8000/agents/recommendations?notify=false
+curl http://localhost:8181/agents/recommendations?notify=false
 
 # OTA campaign for a specific firmware
-curl 'http://localhost:8000/agents/ota-campaign?firmware_version=2.0.0'
+curl 'http://localhost:8181/agents/ota-campaign?firmware_version=2.0.0'
 
 # Anomaly check only
-curl 'http://localhost:8000/agents/anomaly-check?notify=false'
+curl 'http://localhost:8181/agents/anomaly-check?notify=false'
 
 # Fleet health (fires alerts)
-curl 'http://localhost:8000/agents/fleet-health'
+curl 'http://localhost:8181/agents/fleet-health'
 
 # Device groupings
-curl 'http://localhost:8000/agents/device-groups'
+curl 'http://localhost:8181/agents/device-groups'
 
 # Device onboarding
-curl 'http://localhost:8000/agents/onboarding?name=Sensor-042&auto_register=true'
+curl 'http://localhost:8181/agents/onboarding?name=Sensor-042&auto_register=true'
 
 # Aegis auto-remediation
-curl 'http://localhost:8000/agents/aegis/scan'
-curl 'http://localhost:8000/agents/aegis/history'
+curl 'http://localhost:8181/agents/aegis/scan'
+curl 'http://localhost:8181/agents/aegis/history'
 ```
 
 ### 10. V2G Arbitrage with Battery Degradation Pricing
@@ -308,13 +309,13 @@ The optimizer generates a 24-horizon schedule (configurable via `V2G_HORIZON_HOU
 
 ```bash
 # Get V2G dispatch schedule for all devices
-curl 'http://localhost:8000/agents/v2g-dispatch'
+curl 'http://localhost:8181/agents/v2g-dispatch'
 
 # Get V2G schedule for specific devices
-curl 'http://localhost:8000/agents/v2g-dispatch?device_ids=DEVICE_ID_1&device_ids=DEVICE_ID_2'
+curl 'http://localhost:8181/agents/v2g-dispatch?device_ids=DEVICE_ID_1&device_ids=DEVICE_ID_2'
 
 # With custom horizon
-curl 'http://localhost:8000/agents/v2g-dispatch?horizon_hours=12'
+curl 'http://localhost:8181/agents/v2g-dispatch?horizon_hours=12'
 ```
 
 Sample response (truncated):
@@ -375,7 +376,7 @@ Heartbeats now include EV battery fields:
 2. Wait for devices to register (first 3 are EVs with battery simulation)
 3. Call the V2G optimizer:
    ```bash
-   curl -s http://localhost:8000/agents/v2g-dispatch | python -m json.tool
+   curl -s http://localhost:8181/agents/v2g-dispatch | python -m json.tool
    ```
 4. Check Grafana at http://localhost:3000 — new V2G panels show:
    - **V2G Active Discharges** — count of discharging devices
@@ -385,7 +386,7 @@ Heartbeats now include EV battery fields:
    - **Fleet SOC over Time** — per-device state of charge
 5. Check Prometheus metrics:
    ```bash
-   curl -s http://localhost:8000/metrics | grep -E "v2g|battery_deg"
+   curl -s http://localhost:8181/metrics | grep -E "v2g|battery_deg"
    ```
 6. Simulator logs show V2G command execution:
    ```bash
@@ -461,31 +462,31 @@ python run_agents.py --remediation-rerun <REMEDIATION_ID>
 
 ```bash
 # Trigger an on-demand scan
-curl http://localhost:8000/aegis/scan
+curl http://localhost:8181/aegis/scan
 
 # View history (paginated, with filters)
-curl 'http://localhost:8000/aegis/history?status=failed&limit=10'
+curl 'http://localhost:8181/aegis/history?status=failed&limit=10'
 
 # View summary counts
-curl http://localhost:8000/aegis/summary
+curl http://localhost:8181/aegis/summary
 
 # Webhook endpoint (for external Alertmanager)
-curl -X POST http://localhost:8000/aegis/ingest \
+curl -X POST http://localhost:8181/aegis/ingest \
   -H "Content-Type: application/json" \
   -d '{"metric_name": "fleet_active_devices", "value": 1.0, "severity": "critical"}'
 
 # Re-run a remediation
-curl -X POST http://localhost:8000/aegis/rerun/{id}
+curl -X POST http://localhost:8181/aegis/rerun/{id}
 ```
 
 #### Demoing Aegis
 
 1. Start the system: `docker compose --profile demo up -d`
-2. Open the dashboard at http://localhost:8000 — the Aegis panel shows in the middle
+2. Open the dashboard at http://localhost:8181 — the Aegis panel shows in the middle
 3. Trigger an OTA update to create resource pressure:
    ```bash
-   curl -X POST http://localhost:8000/ota/upload -F "version=2.0.0" -F "file=@/path/to/firmware.bin"
-   curl -X POST http://localhost:8000/ota/trigger -H "Content-Type: application/json" -d '{"firmware_id": "<FW_ID>", "all_devices": true}'
+   curl -X POST http://localhost:8181/ota/upload -F "version=2.0.0" -F "file=@/path/to/firmware.bin"
+   curl -X POST http://localhost:8181/ota/trigger -H "Content-Type: application/json" -d '{"firmware_id": "<FW_ID>", "all_devices": true}'
    ```
 4. Within 15-30 seconds, the Aegis panel shows:
    - The signals column detects OTA + latency pressure
@@ -493,7 +494,7 @@ curl -X POST http://localhost:8000/aegis/rerun/{id}
    - The history column records the outcome
 5. Check Prometheus metrics:
    ```bash
-   curl -s http://localhost:8000/metrics | grep aegis_
+   curl -s http://localhost:8181/metrics | grep aegis_
    ```
 6. Run a dry-run scan to see what Aegis would do without side effects:
    ```bash
@@ -571,13 +572,13 @@ Onboarding Report (JSON → CLI / Dashboard UI)
 
 ```bash
 # Recommendation mode (read-only plan)
-curl 'http://localhost:8000/agents/onboarding?name=Sensor-042&firmware_version=2.0.0'
+curl 'http://localhost:8181/agents/onboarding?name=Sensor-042&firmware_version=2.0.0'
 
 # Auto-register mode (creates device + pushes config)
-curl 'http://localhost:8000/agents/onboarding?name=Sensor-042&auto_register=true'
+curl 'http://localhost:8181/agents/onboarding?name=Sensor-042&auto_register=true'
 
 # With all parameters
-curl 'http://localhost:8000/agents/onboarding?name=Sensor-042&firmware_version=2.0.0&ip_address=10.0.0.100&mqtt_client_id=esp32-s042&auto_register=true'
+curl 'http://localhost:8181/agents/onboarding?name=Sensor-042&firmware_version=2.0.0&ip_address=10.0.0.100&mqtt_client_id=esp32-s042&auto_register=true'
 ```
 
 Sample response:
@@ -677,6 +678,40 @@ The Aegis panel is in the middle of the dashboard — three columns:
 - **History**: past actions with green/amber/red outcome dots
 
 The panel auto-refreshes every 10 seconds alongside the main dashboard.
+
+### 13. GPS Fleet Tracking — Live Map
+
+The dashboard includes an interactive Leaflet map showing device locations with city-color-coded markers.
+
+#### How It Works
+
+GPS data piggybacks on existing heartbeats — no new MQTT topics or endpoints:
+
+```
+Device heartbeat ──► MQTT ──► Backend (extracts lat/lng) ──► DB (persists) ──► API (GET /devices) ──► Map (Leaflet + OSM)
+```
+
+The simulator assigns devices to cities round-robin from `SIMULATOR_CITIES` (default: `Bangalore,Mumbai,Delhi`). GPS activates after `SIMULATOR_GPS_INTERVAL` seconds (default: 30), at which point the device's firmware changes to `2.0.0-gps` and location updates with small jitter every interval.
+
+#### Demoing the Live Map
+
+1. Start the system: `docker compose --profile demo up -d`
+2. Open the dashboard at http://localhost:8181
+3. Scroll to the **Live Fleet Map** section (below the device table)
+4. Wait ~30 seconds for GPS to activate on simulator devices
+5. Observe:
+   - City-color-coded markers on the map (Bangalore=teal, Mumbai=purple, Delhi=amber)
+   - Click a marker to see a popup with device name, city, status, firmware, signal strength, and lat/lng
+   - City filter buttons below the map header — click to focus on one city
+   - **Recenter** button to fit the map to all visible markers
+
+#### Prometheus Metrics
+
+GPS data is available via standard `fleet_active_devices` and `fleet_total_devices` metrics (no GPS-specific metrics yet).
+
+#### Agent Integration
+
+All Phase 1 agents can access GPS data through `async_list_devices()`, which returns `latitude` and `longitude` per device. Future enhancements include geofence-based alerts and location-aware device grouping.
 
 ### Cleanup
 

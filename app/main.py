@@ -1,4 +1,5 @@
 import os
+import hashlib
 import asyncio
 import logging
 from datetime import datetime, timezone
@@ -20,7 +21,7 @@ from agents.routers import router as agents_router
 from app.aegis.router import router as aegis_router
 from app.ota_manager import OtaStateMachine
 from app.metrics import metrics_middleware, active_devices, total_devices, mqtt_messages_received, v2g_active_discharges, device_soc
-from app.models import Device, DeviceStatus
+from app.models import Device, DeviceStatus, Firmware
 from app.utils import utcnow
 
 logging.basicConfig(level=getattr(logging, settings.log_level.upper()))
@@ -94,6 +95,9 @@ async def handle_mqtt_heartbeat(device_id: str, payload: dict):
                     v2g_active_discharges.inc()
                 elif old_plug == "discharging" and payload["plug_status"] != "discharging":
                     v2g_active_discharges.dec()
+            if "latitude" in payload and "longitude" in payload:
+                device.latitude = float(payload["latitude"])
+                device.longitude = float(payload["longitude"])
             await db.commit()
     mqtt_messages_received.labels(topic="heartbeat").inc()
 
@@ -118,6 +122,29 @@ async def lifespan(app: FastAPI):
     scheduler = AegisScheduler(engine=aegis_engine, interval=settings.aegis_scrape_interval)
     aegis_task = asyncio.create_task(scheduler.run())
     logger.info("Aegis auto-remediation engine started (interval=%ss)", settings.aegis_scrape_interval)
+
+    # Auto-create GPS demo firmware record if it doesn't exist
+    try:
+        async with async_session_factory() as db:
+            existing = await db.execute(select(Firmware).where(Firmware.version == "2.0.0-gps"))
+            if not existing.scalar_one_or_none():
+                os.makedirs(settings.firmware_storage_path, exist_ok=True)
+                fw_path = os.path.join(settings.firmware_storage_path, "firmware_gps.bin")
+                content = b"GPS_ENABLED_FIRMWARE_DEMO_" + b"\x00" * 1000
+                with open(fw_path, "wb") as f:
+                    f.write(content)
+                fw = Firmware(
+                    version="2.0.0-gps",
+                    filename="firmware_gps.bin",
+                    sha256_hash=hashlib.sha256(content).hexdigest(),
+                    binary_path=fw_path,
+                    file_size=len(content),
+                )
+                db.add(fw)
+                await db.commit()
+                logger.info("Auto-created GPS demo firmware: 2.0.0-gps")
+    except Exception as e:
+        logger.warning("Could not auto-create GPS firmware: %s", e)
 
     logger.info("Fleet Commander backend started.")
     yield

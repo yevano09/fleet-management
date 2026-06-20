@@ -51,6 +51,8 @@ async def async_list_devices(db: AsyncSession, status: str | None = None) -> dic
                 "ip_address": d.ip_address or "",
                 "previous_firmware_version": d.previous_firmware_version or "",
                 "mqtt_client_id": d.mqtt_client_id or "",
+                "latitude": d.latitude,
+                "longitude": d.longitude,
                 "soc": d.soc,
                 "soh": d.soh,
                 "battery_temp": d.battery_temp,

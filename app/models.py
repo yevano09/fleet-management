@@ -46,6 +46,10 @@ class Device(Base):
     current_ota_id = Column(String, nullable=True)
     mqtt_client_id = Column(String, nullable=True)
 
+    # GPS / location fields
+    latitude = Column(Float, nullable=True)
+    longitude = Column(Float, nullable=True)
+
     # V2G / EV battery fields
     soc = Column(Float, default=80.0)       # state of charge percent
     soh = Column(Float, default=100.0)      # state of health percent

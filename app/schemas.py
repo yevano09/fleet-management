@@ -26,6 +26,8 @@ class HeartbeatRequest(BaseModel):
     soh: Optional[float] = None
     battery_temp: Optional[float] = None
     plug_status: Optional[str] = None
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
 
 
 class DeviceResponse(BaseModel):
@@ -41,6 +43,8 @@ class DeviceResponse(BaseModel):
     soh: Optional[float] = None
     battery_temp: Optional[float] = None
     plug_status: str = "disconnected"
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
 
     model_config = {"from_attributes": True}
 

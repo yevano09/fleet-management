@@ -7,7 +7,9 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Sora:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <script src="https://unpkg.com/htmx.org@2.0.3"></script>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <style>
 :root {
   --bg-deep: #0A0D1A;
@@ -111,6 +113,20 @@ td code { font-family:var(--font-mono); font-size:0.78em; background:rgba(45,212
 .aegis-severity-critical { color:var(--red); }
 .aegis-severity-warning { color:var(--amber); }
 .aegis-severity-info { color:var(--teal); }
+
+/* Fleet map */
+.map-section { margin-top:2rem; }
+#fleet-map { height:440px; border-radius:0.625rem; border:1px solid var(--border); z-index:1; }
+.city-filters { display:flex; gap:0.4rem; flex-wrap:wrap; margin-bottom:0.75rem; }
+.city-filter { padding:0.3rem 0.75rem; border-radius:9999px; font-size:0.75rem; font-weight:500; cursor:pointer; border:1px solid var(--border); background:transparent; color:var(--text-body); transition:all 0.15s; font-family:var(--font-body); }
+.city-filter:hover { border-color:var(--teal); color:var(--teal); }
+.city-filter.active { background:var(--teal-glow); border-color:var(--teal); color:var(--teal); }
+.leaflet-container { background:var(--bg-deep) !important; }
+.leaflet-popup-content-wrapper { background:var(--bg-surface) !important; color:var(--text-body) !important; border:1px solid var(--border) !important; border-radius:0.5rem !important; box-shadow:0 4px 16px rgba(0,0,0,0.3) !important; }
+.leaflet-popup-tip { background:var(--bg-surface) !important; border:1px solid var(--border) !important; }
+.leaflet-popup-content { margin:0.75rem 1rem !important; font-family:var(--font-body) !important; font-size:0.85rem !important; }
+.leaflet-popup-content strong { color:var(--text-title); }
+.leaflet-popup-close-button { color:var(--text-muted) !important; }
 </style>
 </head>
 <body>
@@ -157,6 +173,17 @@ td code { font-family:var(--font-mono); font-size:0.78em; background:rgba(45,212
 <div class="value" id="stat-ota-rate">0%</div>
 </div>
 </section>
+
+<div class="map-section">
+<div class="toolbar">
+<h2>Live Fleet Map</h2>
+<div class="actions">
+<button class="btn btn-outline" onclick="centerMap()" style="font-size:0.75rem;">Recenter</button>
+</div>
+</div>
+<div id="city-filters" class="city-filters"></div>
+<div id="fleet-map"></div>
+</div>
 
 <main>
 <div class="toolbar">
@@ -407,6 +434,129 @@ async function fetchJson(url) {
   return res.json();
 }
 
+// ═══ Fleet Map ═══════════════════════════════════════════════
+
+const CITY_COLORS = {
+  'Bangalore': '#2DD4BF', 'Mumbai': '#A78BFA', 'Delhi': '#F59E0B',
+  'Chennai': '#22C55E', 'Hyderabad': '#F97316', 'Pune': '#EC4899',
+  'Kolkata': '#EF4444', 'Ahmedabad': '#14B8A6',
+};
+const CITY_NAMES = Object.keys(CITY_COLORS);
+const MAP_CENTER = [12.9716, 77.5946];
+
+let map = null;
+let mapMarkers = {};
+let mapInitialized = false;
+let activeCityFilter = 'all';
+
+function initMap() {
+  if (mapInitialized) return;
+  map = L.map('fleet-map', { zoomControl: true, attributionControl: false }).setView(MAP_CENTER, 11);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 18,
+    className: 'map-tiles',
+  }).addTo(map);
+  mapInitialized = true;
+}
+
+function cityColor(city) {
+  return CITY_COLORS[city] || '#94a3b8';
+}
+
+function updateMapMarkers(devices) {
+  if (!mapInitialized) return;
+  const activeIds = new Set();
+
+  const citiesUsed = new Set();
+  devices.forEach(d => { if (d.latitude != null && d.longitude != null && d.city) citiesUsed.add(d.city); });
+
+  devices.forEach(d => {
+    if (d.latitude == null || d.longitude == null) return;
+    activeIds.add(d.id);
+    const color = cityColor(d.city);
+
+    if (mapMarkers[d.id]) {
+      const m = mapMarkers[d.id];
+      const latlng = m.getLatLng();
+      if (Math.abs(latlng.lat - d.latitude) > 0.0001 || Math.abs(latlng.lng - d.longitude) > 0.0001) {
+        m.setLatLng([d.latitude, d.longitude]);
+      }
+      const wasHidden = m._cityFilterVisible !== true && activeCityFilter !== 'all' && m._deviceCity !== activeCityFilter;
+      const nowHidden = activeCityFilter !== 'all' && d.city !== activeCityFilter;
+      if (wasHidden !== nowHidden) {
+        m.setStyle({ opacity: nowHidden ? 0.25 : 1 });
+        m._cityFilterVisible = !nowHidden;
+      }
+    } else {
+      const marker = L.circleMarker([d.latitude, d.longitude], {
+        radius: 7,
+        color: color,
+        fillColor: color,
+        fillOpacity: 0.65,
+        weight: 2,
+        opacity: activeCityFilter === 'all' || d.city === activeCityFilter ? 1 : 0.25,
+      }).addTo(map);
+      marker._deviceCity = d.city;
+      marker._cityFilterVisible = activeCityFilter === 'all' || d.city === activeCityFilter;
+      marker.bindPopup(`
+        <div style="min-width:180px;">
+          <strong style="font-size:1rem;">${escapeHtml(d.name)}</strong><br>
+          <span style="color:${color};">●</span> ${escapeHtml(d.city || 'Unknown')}
+          <hr style="border-color:#334155;margin:0.4rem 0;">
+          <div>Status: <span style="color:${d.status === 'online' ? '#22C55E' : '#EF4444'};">${d.status}</span></div>
+          <div>Firmware: ${escapeHtml(d.firmware_version)}</div>
+          <div>Signal: ${d.signal_strength != null ? d.signal_strength + ' dBm' : 'N/A'}</div>
+          <div>Lat: ${d.latitude.toFixed(4)}, Lng: ${d.longitude.toFixed(4)}</div>
+          <div style="color:#64748b;font-size:0.75rem;margin-top:0.25rem;">Last seen: ${d.last_seen ? new Date(d.last_seen + 'Z').toLocaleString() : 'N/A'}</div>
+        </div>
+      `);
+      mapMarkers[d.id] = marker;
+    }
+  });
+
+  Object.keys(mapMarkers).forEach(id => {
+    if (!activeIds.has(id)) {
+      map.removeLayer(mapMarkers[id]);
+      delete mapMarkers[id];
+    }
+  });
+
+  updateCityFilters(Array.from(citiesUsed));
+}
+
+function updateCityFilters(cities) {
+  const container = document.getElementById('city-filters');
+  const allCities = ['all', ...CITY_NAMES.filter(c => cities.includes(c))];
+  if (allCities.length <= 1) {
+    container.innerHTML = '<span style="color:var(--text-muted);font-size:0.75rem;">Waiting for GPS data...</span>';
+    return;
+  }
+  const cityLabels = { 'all': 'All Cities' };
+  CITY_NAMES.forEach(c => { cityLabels[c] = c; });
+  container.innerHTML = allCities.map(c =>
+    `<button class="city-filter ${activeCityFilter === c ? 'active' : ''}" onclick="filterCity('${c}')" style="${c !== 'all' ? 'border-color:' + cityColor(c) + ';color:' + cityColor(c) + ';' : ''}">${cityLabels[c] || c}</button>`
+  ).join('');
+}
+
+function filterCity(city) {
+  activeCityFilter = city;
+  Object.values(mapMarkers).forEach(m => {
+    const visible = city === 'all' || m._deviceCity === city;
+    m.setStyle({ opacity: visible ? 1 : 0.25 });
+    m._cityFilterVisible = visible;
+  });
+  updateCityFilters(Array.from(new Set(Object.values(mapMarkers).map(m => m._deviceCity))));
+  centerMap();
+}
+
+function centerMap() {
+  if (!mapInitialized || Object.keys(mapMarkers).length === 0) return;
+  const visibleMarkers = Object.values(mapMarkers).filter(m => m._cityFilterVisible !== false);
+  if (visibleMarkers.length === 0) return;
+  const group = L.featureGroup(visibleMarkers);
+  map.fitBounds(group.getBounds().pad(0.15));
+}
+
 function showToast(message, type = 'info') {
   const t = document.getElementById('toast');
   t.textContent = message;
@@ -485,7 +635,9 @@ async function loadDashboard() {
       });
     }
 
-  } catch (err) {
+    updateMapMarkers(devices);
+
+} catch (err) {
     console.error('Dashboard load error:', err);
     showToast('Failed to load dashboard data - is the backend running?', 'error');
   }
@@ -933,6 +1085,7 @@ document.getElementById('onboard-form').addEventListener('submit', async (e) => 
   }
 });
 
+initMap();
 loadDashboard();
 loadFirmwareList();
 checkMqttStatus();

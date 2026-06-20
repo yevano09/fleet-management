@@ -38,7 +38,7 @@ A production-grade IoT fleet management system built with FastAPI, MQTT, Prometh
 | `iot/fleet/{device_id}/command/ota` | Backend → Device | OTA firmware update command (URL + SHA256) |
 | `iot/fleet/{device_id}/command/config` | Backend → Device | Remote configuration push |
 | `iot/fleet/{device_id}/status/ota` | Device → Backend | OTA lifecycle status updates |
-| `iot/fleet/{device_id}/heartbeat` | Device → Backend | Periodic heartbeat with uptime & signal |
+| `iot/fleet/{device_id}/heartbeat` | Device → Backend | Periodic heartbeat with uptime, signal & GPS (lat/lng) |
 | `iot/fleet/register` | Device → Backend | Auto-registration on first connect |
 
 ### OTA State Machine
@@ -78,8 +78,8 @@ This spins up: backend (FastAPI :8000), Mosquitto (:1883), Prometheus (:9090), G
 
 | Service | URL | Credentials |
 |---|---|---|
-| Fleet Dashboard | http://localhost:8000 | — |
-| API Docs (Swagger) | http://localhost:8000/docs | — |
+| Fleet Dashboard | http://localhost:8181 | — |
+| API Docs (Swagger) | http://localhost:8181/docs | — |
 | Prometheus | http://localhost:9090 | — |
 | Grafana | http://localhost:3000 | admin / admin |
 
@@ -98,7 +98,7 @@ docker compose --profile testing run --build --rm tests
 |---|---|---|
 | `POST` | `/devices/register` | Register a device (auto-registers on first connect) |
 | `POST` | `/devices/{id}/heartbeat` | Update last_seen, uptime, signal strength |
-| `GET` | `/devices` | List all devices with firmware, status, signal |
+| `GET` | `/devices` | List all devices with firmware, status, signal, GPS location |
 
 ### OTA
 
@@ -128,6 +128,17 @@ docker compose --profile testing run --build --rm tests
 | `GET` | `/alerts` | List alerts with status filters |
 | `POST` | `/alerts/{id}/acknowledge` | Acknowledge an alert |
 | `POST` | `/alerts/{id}/resolve` | Resolve an alert |
+
+### GPS Fleet Tracking
+
+Real-time GPS location tracking via MQTT heartbeat piggybacking. Each heartbeat optionally includes `latitude` and `longitude`, which are persisted to the device record and rendered on a live Leaflet map in the dashboard.
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/devices` | List all devices (includes `latitude`, `longitude` per device) |
+| `POST` | `/devices/{id}/heartbeat` | Send heartbeat (optionally includes `latitude`, `longitude`) |
+
+The **Live Fleet Map** on the dashboard shows device locations with city-color-coded markers, popup details (device name, status, firmware, signal, lat/lng), and city filter buttons. GPS data is exposed to all Phase 1 agents via `async_list_devices()`.
 
 ### Aegis Auto-Remediation
 
@@ -180,6 +191,8 @@ All configuration is via environment variables (see `.env.example`):
 | `SIMULATOR_DEVICE_COUNT` | `5` | Virtual devices to simulate |
 | `SIMULATOR_HEARTBEAT_INTERVAL` | `10` | Seconds between heartbeats |
 | `SIMULATOR_OTA_FAILURE_RATE` | `0.2` | Probability of OTA hash mismatch |
+| `SIMULATOR_GPS_INTERVAL` | `30` | Seconds between GPS location updates |
+| `SIMULATOR_CITIES` | `Bangalore,Mumbai,Delhi` | Comma-separated city list for device distribution |
 | `AEGIS_SCRAPE_INTERVAL` | `15` | Aegis scrape loop interval (seconds) |
 | `AEGIS_ACTION_TIMEOUT` | `30` | Aegis action execution timeout (seconds) |
 | `AEGIS_RETRY_MAX` | `3` | Max retries per Aegis remediation action |
