@@ -19,3 +19,5 @@ AGENTS.md
 behindproxy.sh
 noproxy.sh
 skills-lock.json
+session-*.md
+behindproxy.ps1
