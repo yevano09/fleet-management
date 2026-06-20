@@ -9,7 +9,7 @@ WORKDIR /app
 
 RUN apt-get update && apt-get upgrade -y && apt-get autoremove -y && rm -rf /var/lib/apt/lists/*
 
-RUN pip install --no-cache-dir pytest requests httpx
+RUN pip install --no-cache-dir pytest==9.0.3 requests==2.33.0 httpx==0.27.0
 
 COPY tests/ ./tests/
 COPY requirements.txt .
