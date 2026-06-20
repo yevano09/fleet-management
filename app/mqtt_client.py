@@ -150,7 +150,7 @@ class MqttClient:
             "timestamp": datetime.now(timezone.utc).isoformat(),
         })
         result = self.client.publish(topic, payload, qos=1)
-        logger.info(f"Published V2G command to {topic}: action={action}, rc={result.rc}")
+        logger.info("Published V2G command to %s: rc=%s", topic, result.rc)
         return result.rc == 0
 
     def publish_remote_config(self, device_id: str, config: dict):

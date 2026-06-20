@@ -269,7 +269,7 @@ class AlertEngine:
 
             # Check cooldown
             if self._is_in_cooldown(dedup_key, alert_type):
-                logger.debug("Alert %s is in cooldown, skipping", dedup_key)
+                logger.debug("Alert type %s is in cooldown, skipping", alert_type)
                 continue
 
             # Find existing active alert

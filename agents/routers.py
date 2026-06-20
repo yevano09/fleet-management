@@ -137,24 +137,24 @@ async def get_all_recommendations(
 
     try:
         results.append(await _run_ota_agent(db, firmware_version))
-    except Exception as e:
+    except Exception:
         logger.exception("OTA agent failed")
         results.append({"agent": "OTA Campaign Strategist", "type": "ota_campaign",
-                        "error": str(e)})
+                        "error": "Internal error"})
 
     try:
         results.append(await _run_anomaly_agent(db, notify=notify))
-    except Exception as e:
+    except Exception:
         logger.exception("Anomaly agent failed")
         results.append({"agent": "Fleet Health Monitor", "type": "anomaly_check",
-                        "error": str(e)})
+                        "error": "Internal error"})
 
     try:
         results.append(await _run_group_agent(db, min_group_size=min_group_size))
-    except Exception as e:
+    except Exception:
         logger.exception("Group agent failed")
         results.append({"agent": "Device Group Manager", "type": "device_groups",
-                        "error": str(e)})
+                        "error": "Internal error"})
 
     return {"agents": results}
 

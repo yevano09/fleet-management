@@ -16,7 +16,12 @@ const MIME = {
 };
 
 http.createServer((req, res) => {
-  let filePath = path.join(ROOT, req.url === '/' ? 'index.html' : req.url);
+  let filePath = path.normalize(path.join(ROOT, req.url === '/' ? 'index.html' : req.url));
+  if (!filePath.startsWith(ROOT)) {
+    res.writeHead(403);
+    res.end('Forbidden');
+    return;
+  }
   const ext = path.extname(filePath);
   const contentType = MIME[ext] || 'text/plain';
 

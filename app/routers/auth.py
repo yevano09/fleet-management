@@ -1,5 +1,6 @@
 import secrets
 import logging
+import html
 
 from fastapi import APIRouter, Request, HTTPException, Form
 from fastapi.responses import RedirectResponse, HTMLResponse
@@ -43,7 +44,7 @@ async def google_login():
 async def callback(code: str = None, error: str = None, request: Request = None):
     if error:
         logger.error("Google OAuth error: %s", error)
-        return HTMLResponse(content=f"<h1>Authentication failed</h1><p>{error}</p>", status_code=400)
+        return HTMLResponse(content=f"<h1>Authentication failed</h1><p>{html.escape(error)}</p>", status_code=400)
 
     if not code:
         return HTMLResponse(content="<h1>Missing authorization code</h1>", status_code=400)
