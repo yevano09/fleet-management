@@ -13,14 +13,26 @@ CHANGED_REQ=$(git diff --cached --name-only --diff-filter=ACMR | grep 'requireme
 HAS_ERROR=0
 VENV="/tmp/fleet_precommit"
 
-# Detect OS for venv paths
-if [ "$(uname -s)" = "MINGW"* ] || [ "$(uname -s)" = "MSYS"* ]; then
-    PYTHON="python"
-    VENV_ACTIVATE="$VENV/Scripts/activate"
-else
-    PYTHON="python3"
-    VENV_ACTIVATE="$VENV/bin/activate"
+# Find a working Python (WindowsApps redirect bypass)
+PYTHON=""
+for candidate in "python3" "python" "py -3" "py"; do
+    if command -v $candidate &>/dev/null; then
+        PYTHON="$candidate"
+        break
+    fi
+done
+# Last resort: known path
+if [ -z "$PYTHON" ]; then
+    PYTHON="C:/Users/z000pcrz/AppData/Local/Programs/Python/Python313/python.exe"
 fi
+
+# Detect OS for venv activation path
+case "$(uname -s 2>/dev/null || echo "unknown")" in
+    MINGW*|MSYS*|CYGWIN*)
+        VENV_ACTIVATE="$VENV/Scripts/activate" ;;
+    *)
+        VENV_ACTIVATE="$VENV/bin/activate" ;;
+esac
 
 # ── pip-audit on requirements.txt changes ──
 if [ -n "$CHANGED_REQ" ]; then
