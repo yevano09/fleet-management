@@ -752,3 +752,52 @@ All Phase 1 agents can access GPS data through `async_list_devices()`, which ret
 ```bash
 docker compose down -v
 ```
+
+---
+
+## Automated Demo Pitch Script
+
+A scripted demo that runs all the key features automatically with narration. See `demo_pitch.sh` at the project root.
+
+### Quick Start
+
+```bash
+# Make the script executable (if needed)
+chmod +x demo_pitch.sh
+
+# Run the full demo pitch (requires the stack to be running)
+./demo_pitch.sh
+
+# Or start the stack and run the pitch in one go:
+docker compose --profile demo up --build -d && sleep 30 && ./demo_pitch.sh
+```
+
+### What the Script Does
+
+The script walks through 12 demo beats with color-coded narration:
+
+1. **Fleet Overview** — Lists all devices, shows online count and stats
+2. **Telemetry Trends** — Fetches telemetry for a device, shows trend data
+3. **OTA Firmware Upload + Signing** — Uploads firmware with Ed25519 signature
+4. **OTA Trigger + Rollback** — Triggers OTA, shows 20% failure/rollback
+5. **Scheduled OTA** — Creates a scheduled campaign with blackout window
+6. **Geofencing** — Creates a geofence, shows map overlays
+7. **Predictive Maintenance** — Runs a predictive scan, shows risk predictions
+8. **Device Shadow** — Updates desired state, shows desired vs reported
+9. **Offline Command Queue** — Queues a command for an offline device
+10. **Audit Log** — Shows recent audit trail
+11. **V2G Arbitrage** — Runs V2G dispatch with spot prices
+12. **Aegis Auto-Remediation** — Triggers an on-demand scan
+
+Each beat includes:
+- A narrated header (what we're about to do)
+- The actual API call (with output)
+- A key takeaway message
+
+### Customization
+
+Edit `demo_pitch.sh` to adjust:
+- Timing between beats (`sleep` calls)
+- Which features to demo (comment out sections)
+- Narration text
+- API parameters (firmware versions, geofence coords, etc.)

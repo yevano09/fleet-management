@@ -1,0 +1,1162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1.0" />
+<title>Fleet Commander — Architecture Diagram</title>
+<style>
+/* ═══════════════════════════════════════════════════════════════════════════
+   RESET + THEME — Fleet Commander dark palette
+   ═══════════════════════════════════════════════════════════════════════════ */
+*,*::before,*::after{ box-sizing:border-box; margin:0; padding:0; }
+
+:root{
+  --bg:     #0b131f;
+  --bg-2:   #131d2e;
+  --panel-2:#1a273b;
+  --text:   #e6edf5;
+  --muted:  #7a8ba6;
+  --dim:    #41516b;
+  --border: rgba(255,255,255,.08);
+  --brand-mint:  #2ed9b0;
+  --brand-sky:   #6aa9ff;
+  --c-user:    var(--brand-mint);
+  --c-orch:    var(--brand-sky);
+  --c-compute: #ff8c6a;
+  --c-embed:   #e6c35c;
+  --c-vector:  #b388ff;
+  --c-seed:    #f16b8f;
+  --c-mqtt:    #56d4e0;
+  --c-agent:   #ffb347;
+  --c-alert:   #ff6b6b;
+  --shadow-soft: 0 8px 32px rgba(0,0,0,.45);
+  --sans:   'Inter','SF Pro','Segoe UI',system-ui,-apple-system,sans-serif;
+  --mono:   'SF Mono','JetBrains Mono','Cascadia Code','Consolas',monospace;
+  font-family:var(--sans); color:var(--text); background:var(--bg);
+  -webkit-font-smoothing:antialiased;
+}
+
+/* ───────── layout ───────── */
+body{ display:flex; flex-direction:column; min-height:100dvh; }
+header{
+  display:flex; align-items:center; gap:18px; flex-wrap:wrap;
+  padding:18px 28px 14px;
+  border-bottom:1px solid var(--border);
+}
+header h1{
+  font-size:18px; font-weight:600; letter-spacing:-.01em;
+  background: linear-gradient(135deg,var(--brand-mint),var(--brand-sky));
+  -webkit-background-clip:text; -webkit-text-fill-color:transparent;
+  background-clip:text;
+}
+header .version{
+  font-family:var(--mono); font-size:10px; color:var(--dim);
+  padding:3px 8px; border:1px solid var(--border); border-radius:6px;
+}
+header .tagline{ font-size:12px; color:var(--muted); margin-left:auto; }
+
+/* ───────── controls bar (flow tabs + mode toggle) ───────── */
+.controls{
+  display:flex; align-items:center; gap:10px; flex-wrap:wrap;
+  padding:12px 28px; border-bottom:1px solid var(--border);
+  background: rgba(255,255,255,.012);
+}
+.flowtabs{ display:flex; gap:6px; flex-wrap:wrap; flex:1; }
+.flowtab{
+  font-family:var(--mono); font-size:11px; letter-spacing:.04em;
+  padding:6px 14px; border-radius:8px; border:1px solid transparent;
+  background:var(--panel-2); color:var(--muted); cursor:pointer;
+  transition: all .15s ease;
+}
+.flowtab:hover{ border-color:var(--border); color:var(--text); }
+.flowtab.active{ background:rgba(45,217,176,.1); border-color:var(--brand-mint); color:var(--brand-mint); font-weight:600; }
+
+.modepick{
+  display:flex; background:var(--panel-2); border-radius:8px;
+  border:1px solid var(--border); overflow:hidden;
+}
+.modepick button{
+  font-family:var(--mono); font-size:10.5px; letter-spacing:.06em;
+  padding:6px 14px; border:none; cursor:pointer; transition:all .15s ease;
+  background:transparent; color:var(--muted);
+}
+.modepick button:first-child{ border-right:1px solid var(--border); }
+.modepick button.active{ background:rgba(45,217,176,.12); color:var(--brand-mint); font-weight:600; }
+.modepick button[data-value="online"].active{ color:#d9a6ff; background:rgba(162,1,255,.12); }
+
+/* ───────── canvas + stage ───────── */
+.canvas{ flex:1; display:flex; gap:28px; padding:18px 28px 28px; }
+.stage-wrap{ flex:1; min-width:0; }
+.stage{
+  position:relative; height:520px; width:100%;
+  background:
+    radial-gradient(ellipse at 30% 40%, rgba(45,217,176,.04), transparent 60%),
+    radial-gradient(ellipse at 70% 60%, rgba(106,169,255,.04), transparent 60%);
+  border:1px solid var(--border);
+  border-radius:18px; overflow:hidden;
+  box-shadow: var(--shadow-soft);
+}
+.node{
+  position:absolute;
+  display:flex; flex-direction:column; align-items:center; gap:3px;
+  padding:10px 14px;
+  background:var(--bg-2);
+  border:1.5px solid var(--c, var(--border));
+  border-radius:12px;
+  box-shadow:0 2px 12px rgba(0,0,0,.3);
+  cursor:default;
+  transition: border-color .3s ease, box-shadow .3s ease, opacity .35s ease, transform .35s ease;
+  z-index:2;
+  min-width:80px;
+  text-align:center;
+}
+.node.hidden{ opacity:0; pointer-events:none; transform:scale(.92); }
+.node.active{
+  box-shadow:0 0 0 2px var(--c, var(--brand-mint)), 0 0 24px rgba(45,217,176,.15);
+  z-index:3;
+}
+.node .icon{
+  width:22px; height:22px; color:var(--c, var(--muted));
+  display:flex; align-items:center; justify-content:center;
+}
+.node .icon svg{ width:18px; height:18px; }
+.node .label{
+  font-size:12px; font-weight:600; letter-spacing:-.01em;
+  white-space:nowrap;
+}
+.node .tech{
+  font-family:var(--mono); font-size:9px; color:var(--muted);
+  letter-spacing:.04em;
+}
+.node .port{
+  font-family:var(--mono); font-size:8px; color:var(--dim);
+  padding:2px 6px; background:rgba(0,0,0,.25); border-radius:4px;
+  letter-spacing:.06em;
+}
+.node .step-badge{
+  position:absolute; top:-7px; right:-7px;
+  width:18px; height:18px; border-radius:50%;
+  background:var(--c, var(--brand-mint)); color:var(--bg);
+  font-family:var(--mono); font-size:10px; font-weight:700;
+  display:flex; align-items:center; justify-content:center;
+  opacity:0; transition:opacity .3s ease; box-shadow:0 0 0 2px var(--bg);
+}
+.node .step-badge.show{ opacity:1; }
+.node[data-role="user"]  { --c: var(--c-user); }
+.node[data-role="orch"]  { --c: var(--c-orch); }
+.node[data-role="compute"]{ --c: var(--c-compute); }
+.node[data-role="mqtt"]  { --c: var(--c-mqtt); }
+.node[data-role="agent"] { --c: var(--c-agent); }
+.node[data-role="alert"] { --c: var(--c-alert); }
+.node[data-role="vector"]{ --c: var(--c-vector); }
+.node[data-role="embed"] { --c: var(--c-embed); }
+.node[data-role="seed"]  { --c: var(--c-seed); }
+
+/* ───────── SVG wires ───────── */
+.stage svg.wires{
+  position:absolute; top:0; left:0; width:100%; height:100%;
+  pointer-events:none; z-index:1;
+}
+.wire{
+  fill:none;
+  stroke:var(--wire-color, var(--border));
+  stroke-width:1.5;
+  stroke-dasharray:4 4;
+  opacity:.35;
+  transition: opacity .4s ease, stroke-dasharray .4s ease;
+}
+.wire.muted{ opacity:.06; }
+.wire.active{ stroke-dasharray:6 0; opacity:.85; }
+.wire.preview{ stroke-dasharray:3 4; opacity:.5; }
+
+.packet{
+  r:5;
+  fill:var(--wire-color, var(--brand-mint));
+  filter:drop-shadow(0 0 8px var(--wire-color, var(--brand-mint)));
+  opacity:0;
+}
+.packet.run{ opacity:1; }
+
+.wire-label{
+  font-family:var(--mono); font-size:9px;
+  fill:var(--muted);
+  paint-order:stroke;
+  stroke:var(--bg-2); stroke-width:4;
+  transition: fill .3s ease;
+  pointer-events:none;
+}
+.wire-label.active{ fill:var(--wire-color, var(--brand-mint)); font-weight:600; }
+
+/* ───────── side panel ───────── */
+aside{
+  width:340px; flex-shrink:0;
+  position:sticky; top:18px; align-self:flex-start;
+  background:linear-gradient(180deg, rgba(255,255,255,.025), rgba(255,255,255,.005));
+  border:1px solid var(--border);
+  border-radius:18px;
+  padding:20px 20px 18px;
+  box-shadow:var(--shadow-soft);
+  display:flex; flex-direction:column;
+  max-height:calc(100dvh - 100px);
+}
+.panel-head{
+  display:flex; justify-content:space-between; align-items:flex-start;
+  gap:12px; padding-bottom:14px;
+  border-bottom:1px dashed var(--border);
+}
+.panel-step{
+  font-family:var(--mono); font-size:11px; letter-spacing:.16em;
+  color:var(--muted); text-transform:uppercase;
+}
+.panel-step strong{ color:var(--text); font-weight:600; }
+.panel-mode{
+  font-family:var(--mono); font-size:10px;
+  padding:4px 8px; border-radius:6px;
+  background:rgba(255,255,255,.04); color:var(--muted);
+  border:1px solid var(--border); white-space:nowrap;
+}
+.panel-mode[data-mode="offline"]{ color:var(--c-orch); border-color:rgba(106,169,255,.3); }
+.panel-mode[data-mode="online"]{ color:#d9a6ff; border-color:rgba(162,1,255,.35); }
+.panel-title{
+  font-size:16px; font-weight:600; margin:12px 0 4px;
+  letter-spacing:-.01em;
+}
+.panel-route{
+  font-family:var(--mono); font-size:11px;
+  color:var(--muted); margin-bottom:10px;
+  display:inline-flex; align-items:center; gap:6px; flex-wrap:wrap;
+}
+.panel-route .from,.panel-route .to{
+  color:var(--text);
+  padding:2px 6px; border-radius:5px;
+  background:rgba(255,255,255,.04);
+  border:1px solid var(--border);
+  font-size:10px;
+}
+.panel-route .arrow{ color:var(--brand-mint); }
+.panel-desc{
+  color:var(--muted); font-size:13px; line-height:1.5;
+  margin:0 0 12px;
+}
+.panel-desc em{ color:var(--text); font-style:normal; }
+.panel-payload{
+  font-family:var(--mono); font-size:11px;
+  background:#08111c;
+  border:1px solid var(--border);
+  border-radius:10px;
+  padding:10px 12px;
+  color:#c9d6e8;
+  overflow:auto; max-height:200px;
+  line-height:1.5;
+  margin:0 0 12px;
+  white-space:pre;
+  -webkit-overflow-scrolling:touch;
+}
+.panel-meta{
+  margin-top:auto; padding-top:10px;
+  border-top:1px dashed var(--border);
+  display:flex; gap:6px; flex-wrap:wrap;
+}
+.chip{
+  font-family:var(--mono); font-size:10px;
+  padding:4px 8px; border-radius:999px;
+  background:rgba(255,255,255,.035); border:1px solid var(--border);
+  color:var(--muted);
+}
+.step-nav{
+  display:flex; gap:8px; margin-top:12px;
+}
+.step-nav button{
+  flex:1; padding:8px 12px;
+  background:var(--panel-2); color:var(--text);
+  border:1px solid var(--border); border-radius:8px;
+  font-family:var(--sans); font-size:12px; cursor:pointer;
+  transition:all .15s ease;
+  display:inline-flex; align-items:center; justify-content:center; gap:6px;
+}
+.step-nav button:hover{ border-color:var(--brand-mint); color:var(--brand-mint); }
+.step-nav button:disabled{ opacity:.4; cursor:not-allowed; }
+
+/* ───────── responsive ───────── */
+@media(max-width:900px){
+  .canvas{ flex-direction:column; }
+  aside{ width:auto; position:static; max-height:none; }
+  .stage{ height:420px; }
+}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Fleet Commander</h1>
+  <span class="version">v1.2</span>
+  <span class="tagline">IoT Fleet Management — System Architecture</span>
+</header>
+
+<div class="controls">
+  <div class="flowtabs" id="flowTabs">
+    <button class="flowtab" data-flow="register">Device Registration</button>
+    <button class="flowtab active" data-flow="ota">OTA Update</button>
+    <button class="flowtab" data-flow="dashboard">Dashboard</button>
+    <button class="flowtab" data-flow="alert">Alert Pipeline</button>
+    <button class="flowtab" data-flow="onboarding">AI Onboarding</button>
+    <button class="flowtab" data-flow="anomaly">Anomaly Detection</button>
+  </div>
+  <div class="modepick">
+    <button data-value="offline" class="active">In-Backend</button>
+    <button data-value="online">HTTP/CLI</button>
+  </div>
+</div>
+
+<div class="canvas">
+  <div class="stage-wrap">
+    <div class="stage" id="stage">
+
+      <!-- User / Browser / Dashboard -->
+      <div class="node" data-role="user" data-id="user" style="left:1%;top:38%;">
+        <div class="icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+        </div>
+        <div class="label">Dashboard UI</div>
+        <div class="tech">Jinja2 / HTMX</div>
+        <div class="port">:8181</div>
+        <span class="step-badge">·</span>
+      </div>
+
+      <!-- FastAPI Backend -->
+      <div class="node" data-role="orch" data-id="backend" style="left:22%;top:30%;">
+        <div class="icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        </div>
+        <div class="label">FastAPI Backend</div>
+        <div class="tech">Python / Uvicorn</div>
+        <div class="port">:8000</div>
+        <span class="step-badge">·</span>
+      </div>
+
+      <!-- MQTT Broker -->
+      <div class="node" data-role="mqtt" data-id="mqtt" style="left:45%;top:18%;">
+        <div class="icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+        </div>
+        <div class="label">Mosquitto MQTT</div>
+        <div class="tech">Message Broker</div>
+        <div class="port">:1883</div>
+        <span class="step-badge">·</span>
+      </div>
+
+      <!-- SQLite Database -->
+      <div class="node" data-role="vector" data-id="database" style="left:45%;top:70%;">
+        <div class="icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0 0 18 0V5"/><path d="M3 12a9 3 0 0 0 18 0"/></svg>
+        </div>
+        <div class="label">SQLite DB</div>
+        <div class="tech">SQLAlchemy async</div>
+        <div class="port">/app/data</div>
+        <span class="step-badge">·</span>
+      </div>
+
+      <!-- Prometheus + Grafana -->
+      <div class="node" data-role="embed" data-id="monitoring" style="left:22%;top:68%;">
+        <div class="icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>
+        </div>
+        <div class="label">Prometheus / Grafana</div>
+        <div class="tech">Metrics + Dashboards</div>
+        <div class="port">:9090 / :3000</div>
+        <span class="step-badge">·</span>
+      </div>
+
+      <!-- IoT Device / Simulator -->
+      <div class="node" data-role="compute" data-id="device" style="left:70%;top:38%;">
+        <div class="icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="2" width="16" height="20" rx="2"/><line x1="12" y1="18" x2="12" y2="18"/></svg>
+        </div>
+        <div class="label">IoT Device</div>
+        <div class="tech">Simulator x5</div>
+        <div class="port">MQTT Client</div>
+        <span class="step-badge">·</span>
+      </div>
+
+      <!-- AI Agents -->
+      <div class="node" data-role="agent" data-id="agents" data-modes="offline" style="left:1%;top:6%;">
+        <div class="icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+        </div>
+        <div class="label">AI Agents</div>
+        <div class="tech">Crew AI / Heuristic</div>
+        <div class="port">Phase 1</div>
+        <span class="step-badge">·</span>
+      </div>
+
+      <!-- Alert Engine -->
+      <div class="node" data-role="alert" data-id="alert" style="left:70%;top:4%;">
+        <div class="icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22c1.1 0 2-.9 2-2h-4c0 1.1.9 2 2 2zm6-6v-5c0-3.07-1.64-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68C7.63 5.36 6 7.92 6 11v5l-2 2v1h16v-1l-2-2z"/></svg>
+        </div>
+        <div class="label">Alert Engine</div>
+        <div class="tech">Dedup / Notify</div>
+        <div class="port">Slack / Email</div>
+        <span class="step-badge">·</span>
+      </div>
+
+      <!-- SVG wires -->
+      <svg class="wires" id="wires" aria-hidden="true">
+        <defs>
+          <marker id="ah-mint"   markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto" markerUnits="strokeWidth">
+            <path d="M0,0 L6,3 L0,6 Z" fill="var(--brand-mint)"/>
+          </marker>
+          <marker id="ah-sky"    markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto" markerUnits="strokeWidth">
+            <path d="M0,0 L6,3 L0,6 Z" fill="var(--c-orch)"/>
+          </marker>
+          <marker id="ah-amber"  markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto" markerUnits="strokeWidth">
+            <path d="M0,0 L6,3 L0,6 Z" fill="var(--c-compute)"/>
+          </marker>
+          <marker id="ah-mqtt"   markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto" markerUnits="strokeWidth">
+            <path d="M0,0 L6,3 L0,6 Z" fill="var(--c-mqtt)"/>
+          </marker>
+          <marker id="ah-agent"  markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto" markerUnits="strokeWidth">
+            <path d="M0,0 L6,3 L0,6 Z" fill="var(--c-agent)"/>
+          </marker>
+          <marker id="ah-alert"  markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto" markerUnits="strokeWidth">
+            <path d="M0,0 L6,3 L0,6 Z" fill="var(--c-alert)"/>
+          </marker>
+          <marker id="ah-vector" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto" markerUnits="strokeWidth">
+            <path d="M0,0 L6,3 L0,6 Z" fill="var(--c-vector)"/>
+          </marker>
+        </defs>
+      </svg>
+    </div>
+  </div>
+
+  <aside id="panel">
+    <div class="panel-head">
+      <span class="panel-step">Step <strong id="panelStepNum">1</strong> / <span id="panelStepTotal">5</span></span>
+      <span class="panel-mode" id="panelMode">In-Backend</span>
+    </div>
+    <div class="panel-title" id="panelTitle">Publish OTA Command</div>
+    <div class="panel-route" id="panelRoute">
+      <span class="from">backend</span>
+      <span class="arrow">→</span>
+      <span class="to">mqtt</span>
+    </div>
+    <div class="panel-desc" id="panelDesc">Backend publishes an OTA update command to the MQTT topic for the target device.</div>
+    <div class="panel-payload" id="panelPayload"></div>
+    <div class="panel-meta" id="panelChips"></div>
+    <div class="step-nav">
+      <button id="prevStep">← Prev</button>
+      <button id="nextStep">Next →</button>
+    </div>
+  </aside>
+</div>
+
+<script>
+/* ═══════════════════════════════════════════════════════════════════════════
+   FLEET COMMANDER — Architecture Diagram Engine
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+const state = {
+  flow: 'ota',
+  mode: 'offline',
+  step: 0,
+  playing: false,
+  timer: null
+};
+
+/* ───── NODE REGISTRY ───── */
+const nodes = {};
+document.querySelectorAll('.node[data-id]').forEach(el => {
+  nodes[el.dataset.id] = el;
+});
+
+/* ───── FLOWS ───── */
+const flows = {
+  /* ─── Device Registration ─── */
+  register: {
+    name: 'Device Registration',
+    note: 'New device announces itself via MQTT',
+    steps: [
+      {
+        from: 'device', to: 'mqtt', color: '--c-mqtt',
+        title: 'Publish Registration',
+        route: 'iot/fleet/{id}/register',
+        desc: 'Device sends a <em>register</em> heartbeat with its id, firmware version, and MQTT client ID.',
+        payloadOffline:
+`// MQTT topic: iot/fleet/{id}/register
+{
+  "device_id": "sim-001",
+  "firmware": "2.1.0",
+  "mqtt_client_id": "sim-001-abc"
+}`,
+        payloadOnline:
+`POST /devices/register
+{
+  "name": "Sim-001",
+  "firmware_version": "2.1.0",
+  "mqtt_client_id": "sim-001-abc",
+  "ip_address": "10.0.0.55"
+}`,
+        chips: ['MQTT QoS 1', '~50ms']
+      },
+      {
+        from: 'mqtt', to: 'backend', color: '--c-mqtt',
+        title: 'Route to Backend',
+        route: 'MQTT → HTTP',
+        desc: 'MQTT broker delivers the message. Backend subscribes to <code>iot/fleet/+/register</code> and handles registration.',
+        payloadOffline:
+`# async_mqtt_handler() processes:
+- Extract device_id, firmware, mqtt_client_id
+- Check for MQTT client ID conflict
+- Insert into devices table`,
+        chips: ['FastAPI route', 'SQLAlchemy']
+      },
+      {
+        from: 'backend', to: 'database', color: '--c-vector',
+        title: 'Persist Device',
+        route: 'INSERT INTO devices',
+        desc: 'Device record is created with status <em>online</em>, including IP, firmware version, and MQTT client ID.',
+        payloadOffline:
+`INSERT INTO devices
+  (name, firmware_version, ip_address,
+   mqtt_client_id, status, last_heartbeat)
+VALUES
+  ('Sim-001', '2.1.0', '10.0.0.55',
+   'sim-001-abc', 'online', NOW())`,
+        chips: ['auto-commit', '1 row']
+      }
+    ]
+  },
+
+  /* ─── OTA Update ─── */
+  ota: {
+    name: 'OTA Firmware Update',
+    note: 'State-machine driven firmware deployment with rollback',
+    onlyMode: 'offline',
+    steps: [
+      {
+        from: 'backend', to: 'mqtt', color: '--c-orch',
+        title: 'Publish OTA Command',
+        route: 'iot/fleet/{id}/command/ota',
+        desc: 'Backend publishes an OTA update command to the device\'s command topic with firmware URL and checksum.',
+        payloadOffline:
+`// MQTT: iot/fleet/sim-001/command/ota
+{
+  "action": "update",
+  "firmware_url": "https://.../fw-v2.2.0.bin",
+  "checksum": "sha256:a1b2c3...",
+  "version": "2.2.0"
+}`,
+        chips: ['~5ms backend→MQTT']
+      },
+      {
+        from: 'mqtt', to: 'device', color: '--c-mqtt',
+        title: 'Deliver to Device',
+        route: 'MQTT subscribe',
+        desc: 'Device receives the command, transitions to <em>downloading</em> state, and fetches the firmware binary.',
+        payloadOffline:
+`State: pending → downloading
+Device fetches firmware binary
+from firmware_url via HTTP`,
+        chips: ['binary download', '~2-15s']
+      },
+      {
+        from: 'device', to: 'mqtt', color: '--c-compute',
+        title: 'Report Status',
+        route: 'iot/fleet/status/ota',
+        desc: 'Device reports back through the status topic. Status can be: <em>success</em>, <em>hash_mismatch</em>, or <em>apply_failed</em>.',
+        payloadOffline:
+`// MQTT: iot/fleet/status/ota
+{
+  "device_id": "sim-001",
+  "status": "success",
+  "version": "2.2.0",
+  "timestamp": "..."
+}`,
+        chips: ['20% simulated failure']
+      },
+      {
+        from: 'mqtt', to: 'backend', color: '--c-orch',
+        title: 'Process Result',
+        route: 'status/ota handler',
+        desc: 'Backend updates the OTA deployment record. On failure, triggers automatic rollback via the <em>rollback</em> state machine.',
+        payloadOffline:
+`IF status == 'hash_mismatch':
+  → State: rolling_back
+  → Publish rollback command
+  → Device reverts to previous firmware
+  → State: rolled_back
+
+IF status == 'success':
+  → State: completed`,
+        chips: ['auto-rollback', '5 max attempts']
+      }
+    ]
+  },
+
+  /* ─── Dashboard View ─── */
+  dashboard: {
+    name: 'Dashboard View',
+    note: 'Real-time fleet monitoring via HTMX',
+    steps: [
+      {
+        from: 'user', to: 'backend', color: '--c-user',
+        title: 'Request Dashboard',
+        route: 'GET /',
+        desc: 'Browser loads the Fleet UI dashboard. HTMX components auto-refresh every <em>5s</em> (status) and <em>30s</em> (OTA list).',
+        payloadOffline:
+`GET /
+Accept: text/html
+
+← dashboard.html (Jinja2 template)
+  - Devices table (HTMX: /devices)
+  - OTA deployments (HTMX: /ota)
+  - Alerts panel (HTMX: /alerts)`,
+        chips: ['first paint ~120ms']
+      },
+      {
+        from: 'backend', to: 'database', color: '--c-vector',
+        title: 'Query Devices',
+        route: 'SELECT FROM devices',
+        desc: 'Backend queries all devices with their latest status, firmware version, and heartbeat timestamp.',
+        payloadOffline:
+`SELECT id, name, firmware_version, status,
+       ip_address, last_heartbeat
+FROM devices
+ORDER BY last_heartbeat DESC`,
+        chips: ['N+1 safe', 'SQLAlchemy']
+      },
+      {
+        from: 'backend', to: 'user', color: '--c-user',
+        title: 'Render with Metrics',
+        route: '200 OK (HTML)',
+        desc: 'Backend renders the Jinja2 template with device data, Prometheus metrics are embedded via <code>/metrics/</code> endpoint.',
+        payloadOffline:
+`Response:
+  - Device table rows
+  - Fleet size counter
+  - OTA deployment list
+  - Alert badge count
+  - Map with device markers`,
+        chips: ['Prometheus counters', 'auto-refresh']
+      }
+    ]
+  },
+
+  /* ─── Alert Pipeline ─── */
+  alert: {
+    name: 'Alert Pipeline',
+    note: 'Dedup, cooldown, multi-channel notify',
+    onlyMode: 'offline',
+    steps: [
+      {
+        from: 'backend', to: 'alert', color: '--c-alert',
+        title: 'Fire Alert',
+        route: 'alert_engine.trigger()',
+        desc: 'Backend or agent detects an anomaly (device offline, V2G revenue drop). Calls the alert engine with type and metadata.',
+        payloadOffline:
+`alert_engine.trigger({
+  type: "device_offline",
+  severity: "warning",
+  device_id: "sim-003",
+  message: "Device sim-003 offline > 5min"
+})`,
+        chips: ['Per-device dedup key']
+      },
+      {
+        from: 'alert', to: 'alert', color: '--c-alert',
+        title: 'Dedup + Cooldown',
+        route: 'internal logic',
+        desc: 'Engine checks dedup key, cooldown window, and escalation policy. If new, persists to DB; if already active, increments count.',
+        payloadOffline:
+`IF dedup_key NOT IN active_alerts:
+  → INSERT INTO alerts (status='active')
+  → schedule notification
+ELSE IF cooldown_remaining > 0:
+  → skip (increment counter)
+ELSE:
+  → escalate severity`,
+        chips: ['cooldown: 5min', 'max 10 increments']
+      },
+      {
+        from: 'alert', to: 'alert', color: '--c-alert',
+        title: 'Notify Channels',
+        route: 'Slack / Email / Webhook',
+        desc: 'Alert is dispatched through configured channels: Slack webhook, SMTP email, or generic webhook endpoint.',
+        payloadOffline:
+`// Slack notification
+{
+  "channel": "#fleet-alerts",
+  "text": "⚠️ Device offline: sim-003",
+  "attachments": [...]
+}
+
+// Email via SMTP
+→ alert@fleet-commander.io`,
+        chips: ['async dispatch', 'retry 3x']
+      },
+      {
+        from: 'backend', to: 'user', color: '--c-agent',
+        title: 'Show in Dashboard',
+        route: 'HTMX refresh',
+        desc: 'Alert badge count updates on every dashboard refresh. Active alerts appear in the alert panel with severity badges.',
+        payloadOffline:
+`Dashboard alert panel:
+🔴 critical: 1
+🟡 warning:  3
+🔵 info:     0
+
+→ Acknowledge / Resolve buttons`,
+        chips: ['10s alert poll']
+      }
+    ]
+  },
+
+  /* ─── AI Device Onboarding ─── */
+  onboarding: {
+    name: 'AI Device Onboarding',
+    note: 'Agent-guided device introduction',
+    onlyMode: 'offline',
+    steps: [
+      {
+        from: 'user', to: 'backend', color: '--c-user',
+        title: 'Request Onboarding',
+        route: 'GET /agents/onboarding',
+        desc: 'User opens the onboarding page or clicks "Onboard Device" in the dashboard. Agent UI appears with form fields.',
+        payloadOffline:
+`GET /agents/onboarding?name=Sim-006&firmware_version=2.1.0&mqtt_client_id=sim-006-abc&ip_address=10.0.0.60&auto_register=true`,
+        chips: ['auto_register flag']
+      },
+      {
+        from: 'backend', to: 'agents', color: '--c-agent',
+        title: 'Agent Checks Conflicts',
+        route: 'async_onboard_device()',
+        desc: 'The onboarding agent checks for MQTT client ID conflicts and firmware version compatibility before proceeding.',
+        payloadOffline:
+`Agent analysis:
+✓ MQTT client ID "sim-006-abc" — no conflict
+✓ Firmware 2.1.0 — compatible
+✓ IP 10.0.0.60 — reachable
+→ Auto-register: YES`,
+        chips: ['Crew AI tool', 'async SQLAlchemy']
+      },
+      {
+        from: 'agents', to: 'database', color: '--c-vector',
+        title: 'Persist Device',
+        route: 'INSERT INTO devices',
+        desc: 'Agent automatically registers the device in the database if <code>auto_register</code> is true.',
+        payloadOffline:
+`INSERT INTO devices
+  (name, firmware_version, ip_address,
+   mqtt_client_id, status)
+VALUES
+  ('Sim-006', '2.1.0', '10.0.0.60',
+   'sim-006-abc', 'online')`,
+        chips: ['auto-registered', 'agent: onb-001']
+      },
+      {
+        from: 'agents', to: 'mqtt', color: '--c-agent',
+        title: 'Push Config to Device',
+        route: 'POST /devices/{id}/config',
+        desc: 'Agent pushes initial MQTT configuration to the device, enabling it to join the fleet and start sending heartbeats.',
+        payloadOffline:
+`// MQTT config push
+{
+  "interval": 30,
+  "topics": [
+    "iot/fleet/{id}/command/ota",
+    "iot/fleet/status/ota"
+  ],
+  "ota_enabled": true
+}`,
+        chips: ['MQTT publish', 'fleet join']
+      }
+    ]
+  },
+
+  /* ─── Anomaly Detection ─── */
+  anomaly: {
+    name: 'Anomaly Detection',
+    note: 'Agent-driven fleet health scan',
+    onlyMode: 'offline',
+    steps: [
+      {
+        from: 'backend', to: 'agents', color: '--c-agent',
+        title: 'Trigger Fleet Health',
+        route: 'GET /agents/fleet-health',
+        desc: 'User or cron triggers the fleet health scan. Agents analyze all device statuses and revenue metrics.',
+        payloadOffline:
+`GET /agents/fleet-health
+→ Agent scans:
+  - Device heartbeats (last 5min)
+  - V2G session revenue
+  - OTA failure rates`,
+        chips: ['~200ms scan time']
+      },
+      {
+        from: 'agents', to: 'backend', color: '--c-agent',
+        title: 'Anomaly Detected',
+        route: 'heuristic analysis',
+        desc: 'Agent identifies anomalies: <em>device_offline</em> (no heartbeat >5min) or <em>v2g_revenue_drop</em> (negative revenue). Returns findings.',
+        payloadOffline:
+`Anomalies found: 2
+[
+  {
+    "type": "device_offline",
+    "device_id": "sim-003",
+    "severity": "warning",
+    "detail": "no heartbeat > 5min"
+  },
+  {
+    "type": "v2g_revenue_drop",
+    "device_id": "sim-001",
+    "severity": "critical",
+    "detail": "revenue: -$12.50"
+  }
+]`,
+        chips: ['heuristic only', 'no LLM needed']
+      },
+      {
+        from: 'backend', to: 'alert', color: '--c-alert',
+        title: 'Escalate to Alert Engine',
+        route: 'alert_engine.trigger()',
+        desc: 'Anomaly findings are fed into the alert pipeline. Critical anomalies trigger immediate notification.',
+        payloadOffline:
+`for each anomaly:
+  alert_engine.trigger({
+    type: anomaly.type,
+    severity: anomaly.severity,
+    device_id: anomaly.device_id,
+    message: anomaly.detail
+  })`,
+        chips: ['dedup per type+device']
+      },
+      {
+        from: 'backend', to: 'monitoring', color: '--c-embed',
+        title: 'Update Metrics',
+        route: 'Prometheus push',
+        desc: 'Fleet health results update Prometheus metrics: <code>fleet_alerts_total</code>, <code>fleet_alerts_active</code>, visible in Grafana.',
+        payloadOffline:
+`# metrics endpoint
+fleet_alerts_total{type="device_offline"} 3
+fleet_alerts_active{severity="warning"} 1
+fleet_alerts_active{severity="critical"} 1
+fleet_alert_notifications_total 4`,
+        chips: ['Grafana dashboard', 'auto-refresh']
+      }
+    ]
+  }
+};
+
+/* ───── HELPERS ───── */
+
+function center(el) {
+  const s = document.getElementById('stage');
+  const sRect = s.getBoundingClientRect();
+  const r = el.getBoundingClientRect();
+  return {
+    x: r.left + r.width/2 - sRect.left,
+    y: r.top + r.height/2 - sRect.top
+  };
+}
+
+function drawWire(from, to, colorVar) {
+  const a = center(from);
+  const b = center(to);
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const cp1x = a.x + dx * 0.25;
+  const cp2x = a.x + dx * 0.75;
+  const d = `M ${a.x} ${a.y} C ${cp1x} ${a.y}, ${cp2x} ${b.y}, ${b.x} ${b.y}`;
+  const color = getComputedStyle(document.documentElement).getPropertyValue(colorVar).trim();
+  const midX = (a.x + b.x) / 2;
+  const midY = (a.y + b.y) / 2;
+
+  return { d, color, midX, midY };
+}
+
+function drawStepLabel(midX, midY, text, colorVar) {
+  const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+  g.classList.add('wire-label', 'active');
+  const color = getComputedStyle(document.documentElement).getPropertyValue(colorVar).trim();
+  g.style.setProperty('--wire-color', color);
+  const txt = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+  txt.setAttribute('x', midX);
+  txt.setAttribute('y', midY - 14);
+  txt.setAttribute('text-anchor', 'middle');
+  txt.setAttribute('font-size', '9');
+  txt.textContent = text;
+  g.appendChild(txt);
+  return g;
+}
+
+/* ───── RENDER ───── */
+const svg = document.getElementById('wires');
+
+function renderFlow(flowKey) {
+  const flow = flows[flowKey];
+  if (!flow) return;
+
+  // Clear wires
+  svg.querySelectorAll('.wire, .packet, .wire-label, .wire-label-group').forEach(el => el.remove());
+
+  // Hide all nodes first
+  Object.values(nodes).forEach(n => n.classList.add('hidden'));
+  Object.values(nodes).forEach(n => {
+    const badge = n.querySelector('.step-badge');
+    if (badge) badge.classList.remove('show');
+  });
+
+  // Determine which nodes are involved
+  const involved = new Set();
+  flow.steps.forEach(s => { involved.add(s.from); involved.add(s.to); });
+  involved.forEach(id => {
+    if (nodes[id]) nodes[id].classList.remove('hidden');
+  });
+
+  // Draw ALL wires between involved nodes (muted)
+  const allPairs = [];
+  const usedNodes = [...involved];
+  for (let i = 0; i < usedNodes.length; i++) {
+    for (let j = i+1; j < usedNodes.length; j++) {
+      allPairs.push([usedNodes[i], usedNodes[j]]);
+    }
+  }
+
+  // Draw background wires for all pairs
+  allPairs.forEach(([f, t]) => {
+    const a = nodes[f]; const b = nodes[t];
+    if (!a || !b) return;
+    const w = drawWire(a, b, '--border');
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute('d', w.d);
+    path.classList.add('wire', 'muted');
+    svg.appendChild(path);
+
+    // Also draw from t to f for bidirectional
+    const w2 = drawWire(b, a, '--border');
+    const path2 = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path2.setAttribute('d', w2.d);
+    path2.classList.add('wire', 'muted');
+    svg.appendChild(path2);
+  });
+
+  renderStep(flowKey, state.step);
+  updatePanel(flowKey, state.step);
+  updateTabs(flowKey);
+
+  // Step badge on active nodes
+  flow.steps.forEach((s, idx) => {
+    if (idx <= state.step) {
+      const fn = nodes[s.from];
+      const tn = nodes[s.to];
+      [fn, tn].forEach(n => {
+        const badge = n?.querySelector('.step-badge');
+        if (badge) {
+          badge.textContent = (idx + 1);
+          badge.classList.add('show');
+        }
+      });
+    }
+  });
+}
+
+function renderStep(flowKey, stepIdx) {
+  const flow = flows[flowKey];
+  if (!flow || stepIdx >= flow.steps.length) return;
+
+  // Remove old active wires
+  svg.querySelectorAll('.wire.active, .wire.preview, .packet').forEach(el => {
+    if (el.classList.contains('muted')) return;
+    el.remove();
+  });
+
+  // Show active step's wire
+  const step = flow.steps[stepIdx];
+  const fromEl = nodes[step.from];
+  const toEl = nodes[step.to];
+  if (!fromEl || !toEl) return;
+
+  const w = drawWire(fromEl, toEl, step.color);
+  const color = getComputedStyle(document.documentElement).getPropertyValue(step.color).trim();
+
+  // Active wire
+  const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  path.setAttribute('d', w.d);
+  path.classList.add('wire', 'active');
+  path.style.setProperty('--wire-color', color);
+  svg.appendChild(path);
+
+  // Packet dot
+  const packet = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+  packet.classList.add('packet');
+  packet.style.setProperty('--wire-color', color);
+  packet.setAttribute('cx', w.midX);
+  packet.setAttribute('cy', w.midY);
+  svg.appendChild(packet);
+  requestAnimationFrame(() => packet.classList.add('run'));
+
+  // Label
+  const labelG = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+  labelG.classList.add('wire-label', 'active');
+  labelG.style.setProperty('--wire-color', color);
+  const labelText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+  labelText.setAttribute('x', w.midX);
+  labelText.setAttribute('y', w.midY - 12);
+  labelText.setAttribute('text-anchor', 'middle');
+  labelText.setAttribute('font-size', '9');
+  labelText.textContent = step.route;
+  labelG.appendChild(labelText);
+  svg.appendChild(labelG);
+
+  // Highlight nodes
+  Object.values(nodes).forEach(n => n.classList.remove('active'));
+  fromEl.classList.add('active');
+  toEl.classList.add('active');
+}
+
+function updatePanel(flowKey, stepIdx) {
+  const flow = flows[flowKey];
+  if (!flow || stepIdx >= flow.steps.length) return;
+
+  const step = flow.steps[stepIdx];
+
+  document.getElementById('panelStepNum').textContent = stepIdx + 1;
+  document.getElementById('panelStepTotal').textContent = flow.steps.length;
+  document.getElementById('panelTitle').textContent = step.title;
+  document.getElementById('panelMode').textContent = state.mode === 'offline' ? 'In-Backend' : 'HTTP/CLI';
+  document.getElementById('panelMode').dataset.mode = state.mode;
+
+  // Route
+  document.querySelector('#panelRoute .from').textContent = step.from;
+  document.querySelector('#panelRoute .to').textContent = step.to;
+
+  document.getElementById('panelDesc').innerHTML = step.desc;
+
+  // Payload
+  const payload = step[`payload${state.mode === 'online' ? 'Online' : 'Offline'}`] || step.payload || '';
+  document.getElementById('panelPayload').textContent = payload;
+
+  // Chips
+  const chips = step[`chips${state.mode === 'online' ? 'Online' : 'Offline'}`] || step.chips || [];
+  const chipsEl = document.getElementById('panelChips');
+  chipsEl.innerHTML = chips.map(c => `<span class="chip">${c}</span>`).join('');
+
+  // Prev/Next buttons
+  document.getElementById('prevStep').disabled = stepIdx === 0;
+  document.getElementById('nextStep').disabled = stepIdx >= flow.steps.length - 1;
+  document.getElementById('nextStep').textContent = stepIdx >= flow.steps.length - 1 ? 'Done' : 'Next →';
+}
+
+function updateTabs(flowKey) {
+  document.querySelectorAll('.flowtab').forEach(tab => {
+    tab.classList.toggle('active', tab.dataset.flow === flowKey);
+  });
+}
+
+/* ───── MODE SWITCH ───── */
+function setMode(m) {
+  state.mode = m;
+  document.querySelectorAll('.modepick button').forEach(b => {
+    b.classList.toggle('active', b.dataset.value === m);
+  });
+
+  // Show/hide mode-gated nodes
+  Object.entries(nodes).forEach(([id, el]) => {
+    const modes = el.dataset.modes;
+    if (modes) {
+      const allowed = modes.split(/\s+/);
+      el.classList.toggle('hidden', !allowed.includes(m));
+    }
+  });
+
+  // If current flow has onlyMode and doesn't match, switch to first compatible
+  const flow = flows[state.flow];
+  let targetFlow = state.flow;
+  if (flow && flow.onlyMode && flow.onlyMode !== m) {
+    // Find first flow compatible with this mode
+    const compat = Object.keys(flows).find(k => {
+      const f = flows[k];
+      return !f.onlyMode || f.onlyMode === m;
+    });
+    if (compat) targetFlow = compat;
+  }
+
+  if (targetFlow !== state.flow) {
+    state.flow = targetFlow;
+    state.step = 0;
+  }
+
+  renderFlow(state.flow);
+}
+
+/* ───── NAVIGATION ───── */
+function prevStep() {
+  if (state.step > 0) { state.step--; renderFlow(state.flow); }
+}
+
+function nextStep() {
+  const flow = flows[state.flow];
+  if (state.step < flow.steps.length - 1) { state.step++; renderFlow(state.flow); }
+}
+
+function goToFlow(key) {
+  if (!flows[key]) return;
+  state.flow = key;
+  state.step = 0;
+
+  const flow = flows[key];
+  if (flow.onlyMode && flow.onlyMode !== state.mode) {
+    setMode(flow.onlyMode);
+  } else {
+    renderFlow(key);
+  }
+}
+
+/* ───── WIREFRAME DRAW (initial) ───── */
+function drawInitialWires() {
+  // Connect all visible nodes as muted background
+  const ids = Object.keys(nodes);
+  for (let i = 0; i < ids.length; i++) {
+    for (let j = i+1; j < ids.length; j++) {
+      const a = nodes[ids[i]]; const b = nodes[ids[j]];
+      if (!a || !b) continue;
+      if (a.classList.contains('hidden') || b.classList.contains('hidden')) continue;
+      const w = drawWire(a, b, '--border');
+      const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      path.setAttribute('d', w.d);
+      path.classList.add('wire', 'muted');
+      svg.appendChild(path);
+    }
+  }
+}
+
+/* ───── RESIZE ───── */
+let resizeTimer;
+window.addEventListener('resize', () => {
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(() => renderFlow(state.flow), 150);
+});
+
+/* ───── KEYBOARD ───── */
+document.addEventListener('keydown', e => {
+  if (e.key === 'ArrowLeft') prevStep();
+  if (e.key === 'ArrowRight') nextStep();
+});
+
+/* ───── INIT ───── */
+document.querySelectorAll('.flowtab').forEach(tab => {
+  tab.addEventListener('click', () => goToFlow(tab.dataset.flow));
+});
+
+document.querySelectorAll('.modepick button').forEach(btn => {
+  btn.addEventListener('click', () => setMode(btn.dataset.value));
+});
+
+document.getElementById('prevStep').addEventListener('click', prevStep);
+document.getElementById('nextStep').addEventListener('click', nextStep);
+
+// Initial render
+setMode('offline');
+</script>
+</body>
+</html>

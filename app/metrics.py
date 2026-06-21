@@ -44,6 +44,65 @@ mqtt_messages_received = Counter(
     "fleet_mqtt_messages_received_total", "MQTT messages received", ["topic"]
 )
 
+# ── Feature 1: Telemetry metrics ──────────────────────────────────────────────
+telemetry_points_total = Counter(
+    "fleet_telemetry_points_total", "Total telemetry data points recorded", ["device"]
+)
+
+# ── Feature 2: Geofence metrics ───────────────────────────────────────────────
+geofence_events_total = Counter(
+    "fleet_geofence_events_total", "Total geofence enter/exit events", ["event_type"]
+)
+geofence_active = Gauge("fleet_geofences_active", "Number of active geofences")
+
+# ── Feature 4: Scheduled OTA metrics ──────────────────────────────────────────
+ota_scheduled_total = Counter(
+    "fleet_ota_scheduled_total", "Total scheduled OTA campaigns", ["status"]
+)
+
+# ── Feature 5: Offline command queue metrics ──────────────────────────────────
+command_queue_depth = Gauge("fleet_command_queue_depth", "Number of queued commands awaiting delivery")
+command_queue_delivered_total = Counter(
+    "fleet_command_queue_delivered_total", "Total commands delivered from queue", ["command_type"]
+)
+command_queue_expired_total = Counter(
+    "fleet_command_queue_expired_total", "Total commands expired in queue", ["command_type"]
+)
+
+# ── Feature 6: Audit log metrics ──────────────────────────────────────────────
+audit_events_total = Counter(
+    "fleet_audit_events_total", "Total audit log entries", ["action"]
+)
+
+# ── Feature 3: Predictive maintenance metrics ─────────────────────────────────
+predicted_failures_total = Counter(
+    "fleet_predicted_failures_total", "Total predicted failures", ["risk_type"]
+)
+predicted_failures_active = Gauge("fleet_predicted_failures_active", "Active unresolved failure predictions")
+
+# ── Feature 7: Device shadow metrics ──────────────────────────────────────────
+shadow_updates_total = Counter(
+    "fleet_shadow_updates_total", "Total device shadow updates", ["state"]
+)
+
+# ── Feature 8: Firmware signing metrics ───────────────────────────────────────
+firmware_signed_total = Counter(
+    "fleet_firmware_signed_total", "Total firmware uploads cryptographically signed"
+)
+
+# ── Feature 9: Device lifecycle metrics ───────────────────────────────────────
+device_lifecycle_transitions = Counter(
+    "fleet_device_lifecycle_transitions_total", "Device lifecycle transitions", ["from_status", "to_status"]
+)
+
+# ── Feature 11: Webhook / event stream metrics ────────────────────────────────
+events_emitted_total = Counter(
+    "fleet_events_emitted_total", "Total outbound events emitted", ["event_type"]
+)
+webhook_deliveries_total = Counter(
+    "fleet_webhook_deliveries_total", "Total webhook deliveries", ["result"]
+)
+
 
 def track_latency(endpoint: str):
     def decorator(func):

@@ -10,6 +10,7 @@
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <script src="https://unpkg.com/htmx.org@2.0.3"></script>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <style>
 :root {
   --bg-deep: #0A0D1A;
@@ -131,6 +132,44 @@ td code { font-family:var(--font-mono); font-size:0.78em; background:rgba(45,212
 .leaflet-popup-content { margin:0.75rem 1rem !important; font-family:var(--font-body) !important; font-size:0.85rem !important; }
 .leaflet-popup-content strong { color:var(--text-title); }
 .leaflet-popup-close-button { color:var(--text-muted) !important; }
+
+/* Feature: lifecycle badges */
+.badge-active { background:rgba(34,197,94,0.1); color:var(--green); border:1px solid rgba(34,197,94,0.15); }
+.badge-maintenance { background:rgba(245,158,11,0.1); color:var(--amber); border:1px solid rgba(245,158,11,0.15); }
+.badge-decommissioned { background:rgba(239,68,68,0.1); color:var(--red); border:1px solid rgba(239,68,68,0.15); }
+.badge-signed { background:rgba(45,212,191,0.1); color:var(--teal); border:1px solid rgba(45,212,191,0.15); }
+
+/* Feature: device detail modal */
+.modal-large { max-width:800px; }
+.chart-container { position:relative; height:200px; margin:0.5rem 0 1rem; }
+.detail-tabs { display:flex; gap:0.25rem; margin-bottom:1rem; border-bottom:1px solid var(--border); }
+.detail-tab { padding:0.5rem 1rem; cursor:pointer; font-size:0.85rem; color:var(--text-muted); border-bottom:2px solid transparent; transition:all 0.15s; }
+.detail-tab.active { color:var(--teal); border-bottom-color:var(--teal); }
+.detail-tab:hover { color:var(--text-body); }
+.detail-tab-content { display:none; }
+.detail-tab-content.active { display:block; }
+
+/* Feature: predictive maintenance risk meter */
+.risk-meter { height:6px; border-radius:3px; background:var(--bg-deep); overflow:hidden; margin-top:0.25rem; }
+.risk-meter-fill { height:100%; border-radius:3px; transition:width 0.3s; }
+.risk-low { background:var(--green); }
+.risk-medium { background:var(--amber); }
+.risk-high { background:var(--red); }
+
+/* Feature: collapsible sections */
+.collapsible-header { cursor:pointer; display:flex; justify-content:space-between; align-items:center; }
+.collapsible-header .chevron { transition:transform 0.2s; }
+.collapsible-header.open .chevron { transform:rotate(90deg); }
+.collapsible-body { display:none; }
+.collapsible-body.open { display:block; }
+
+/* Feature: scheduled OTA timeline */
+.schedule-item { padding:0.75rem; border:1px solid var(--border); border-radius:0.5rem; margin-bottom:0.5rem; display:flex; justify-content:space-between; align-items:center; }
+.schedule-status { font-size:0.7rem; padding:0.15rem 0.5rem; border-radius:9999px; font-weight:500; }
+
+/* Feature: geofence list */
+.geofence-item { padding:0.6rem 0.75rem; border:1px solid var(--border); border-radius:0.5rem; margin-bottom:0.5rem; display:flex; justify-content:space-between; align-items:center; }
+.geofence-color-dot { display:inline-block; width:10px; height:10px; border-radius:50%; margin-right:0.4rem; }
 </style>
 </head>
 <body>
@@ -176,6 +215,18 @@ td code { font-family:var(--font-mono); font-size:0.78em; background:rgba(45,212
 <div class="label">OTA Success Rate</div>
 <div class="value" id="stat-ota-rate">0%</div>
 </div>
+<div class="stat-card">
+<div class="label">Active Geofences</div>
+<div class="value" id="stat-geofences" style="color:var(--purple);">0</div>
+</div>
+<div class="stat-card">
+<div class="label">Failure Predictions</div>
+<div class="value" id="stat-predictions" style="color:var(--amber);">0</div>
+</div>
+<div class="stat-card">
+<div class="label">Queued Commands</div>
+<div class="value" id="stat-queue" style="color:var(--teal);">0</div>
+</div>
 </section>
 
 <div class="map-section">
@@ -207,6 +258,45 @@ td code { font-family:var(--font-mono); font-size:0.78em; background:rgba(45,212
   <div class="stat-card" style="padding:1rem;grid-column:1/-1;">
     <div class="label" style="color:#64748b;">Loading Aegis status...</div>
   </div>
+</div>
+</div>
+
+<div class="ota-section">
+<div class="toolbar">
+<h2>Predictive Maintenance <span id="pred-badge" style="font-size:0.75rem;padding:0.125rem 0.5rem;border-radius:9999px;background:rgba(245,158,11,0.15);color:var(--amber);vertical-align:middle;display:none;">0 risks</span></h2>
+<div class="actions">
+<button class="btn btn-outline" onclick="runPredictiveScan()" style="font-size:0.75rem;">Run Scan</button>
+<button class="btn btn-outline" onclick="loadPredictions()" style="font-size:0.75rem;">Refresh</button>
+</div>
+</div>
+<div id="predictive-panel" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:0.75rem;margin-bottom:1.5rem;">
+<div class="stat-card" style="padding:1rem;"><div class="label" style="color:#64748b;">No predictions yet. Run a scan to analyze telemetry trends.</div></div>
+</div>
+</div>
+
+<div class="ota-section">
+<div class="toolbar">
+<h2>Scheduled OTA Campaigns</h2>
+<div class="actions">
+<button class="btn btn-outline" onclick="openScheduleModal()" style="font-size:0.75rem;">Schedule OTA</button>
+<button class="btn btn-outline" onclick="loadSchedules()" style="font-size:0.75rem;">Refresh</button>
+</div>
+</div>
+<div id="schedules-panel" style="margin-bottom:1.5rem;">
+<div class="stat-card" style="padding:1rem;"><div class="label" style="color:#64748b;">No scheduled campaigns.</div></div>
+</div>
+</div>
+
+<div class="ota-section">
+<div class="toolbar">
+<h2>Geofences</h2>
+<div class="actions">
+<button class="btn btn-outline" onclick="openGeofenceModal()" style="font-size:0.75rem;">Create Geofence</button>
+<button class="btn btn-outline" onclick="loadGeofences()" style="font-size:0.75rem;">Refresh</button>
+</div>
+</div>
+<div id="geofences-panel" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:0.75rem;margin-bottom:1.5rem;">
+<div class="stat-card" style="padding:1rem;"><div class="label" style="color:#64748b;">No geofences defined.</div></div>
 </div>
 </div>
 
@@ -339,6 +429,69 @@ Auto-register (skip review)
 </div>
 </form>
 <div id="onboard-result" style="display:none;margin-top:1rem;padding:0.75rem;border-radius:0.375rem;font-size:0.875rem;"></div>
+</div>
+</div>
+
+<div class="modal-overlay" id="device-detail-modal">
+<div class="modal modal-large">
+<h3 id="detail-title">Device Details</h3>
+<div class="detail-tabs">
+<div class="detail-tab active" onclick="switchDetailTab('telemetry')">Telemetry</div>
+<div class="detail-tab" onclick="switchDetailTab('shadow')">Shadow</div>
+<div class="detail-tab" onclick="switchDetailTab('lifecycle')">Lifecycle</div>
+<div class="detail-tab" onclick="switchDetailTab('commands')">Commands</div>
+</div>
+<div class="detail-tab-content active" id="detail-tab-telemetry">
+<div class="chart-container"><canvas id="chart-signal"></canvas></div>
+<div class="chart-container"><canvas id="chart-soc"></canvas></div>
+<div class="chart-container"><canvas id="chart-temp"></canvas></div>
+<div id="detail-stats" style="font-size:0.8rem;color:var(--text-muted);margin-top:0.5rem;"></div>
+</div>
+<div class="detail-tab-content" id="detail-tab-shadow">
+<div id="shadow-display" style="font-size:0.85rem;"></div>
+</div>
+<div class="detail-tab-content" id="detail-tab-lifecycle">
+<div id="lifecycle-display" style="font-size:0.85rem;"></div>
+</div>
+<div class="detail-tab-content" id="detail-tab-commands">
+<div id="commands-display" style="font-size:0.85rem;"></div>
+</div>
+<div class="modal-actions" style="margin-top:1rem;">
+<button type="button" class="btn btn-outline" onclick="closeDetailModal()">Close</button>
+</div>
+</div>
+</div>
+
+<div class="modal-overlay" id="geofence-modal">
+<div class="modal">
+<h3>Create Geofence</h3>
+<form id="geofence-form">
+<div><label>Name *</label><input type="text" id="gf-name" placeholder="e.g. Bangalore Depot" required></div>
+<div><label>Shape</label><select id="gf-shape" onchange="toggleGeofenceShape()"><option value="circle">Circle</option><option value="polygon">Polygon</option></select></div>
+<div id="gf-circle-fields"><label>Center Latitude</label><input type="number" id="gf-lat" step="0.0001" placeholder="12.9716"><label>Center Longitude</label><input type="number" id="gf-lng" step="0.0001" placeholder="77.5946"><label>Radius (meters)</label><input type="number" id="gf-radius" step="100" placeholder="5000"></div>
+<div id="gf-polygon-fields" style="display:none;"><label>Polygon Coords (JSON: [[lat,lng],...])</label><input type="text" id="gf-polygon" placeholder="[[12.97,77.59],[12.98,77.60],[12.96,77.58]]"></div>
+<div><label>Device IDs (comma-sep, empty=all)</label><input type="text" id="gf-devices" placeholder="Leave empty for fleet-wide"></div>
+<div><label>Color</label><input type="text" id="gf-color" value="#2DD4BF"></div>
+<label style="display:flex;align-items:center;gap:0.5rem;"><input type="checkbox" id="gf-enter" checked> Alert on enter</label>
+<label style="display:flex;align-items:center;gap:0.5rem;"><input type="checkbox" id="gf-exit" checked> Alert on exit</label>
+<div class="modal-actions"><button type="button" class="btn btn-outline" onclick="closeGeofenceModal()">Cancel</button><button type="submit" class="btn btn-primary">Create</button></div>
+</form>
+</div>
+</div>
+
+<div class="modal-overlay" id="schedule-modal">
+<div class="modal">
+<h3>Schedule OTA Campaign</h3>
+<form id="schedule-form">
+<div><label>Campaign Name *</label><input type="text" id="sched-name" placeholder="e.g. Nightly v2.1 update" required></div>
+<div><label>Firmware</label><select id="sched-firmware" required></select></div>
+<div><label>Schedule For (datetime) *</label><input type="datetime-local" id="sched-time" required></div>
+<div><label>Canary Percent</label><input type="number" id="sched-canary" value="10" min="0" max="100" step="5"></div>
+<div><label>Blackout Start Hour (0-23)</label><input type="number" id="sched-blackout-start" min="0" max="23" placeholder="e.g. 9"></div>
+<div><label>Blackout End Hour (0-23)</label><input type="number" id="sched-blackout-end" min="0" max="23" placeholder="e.g. 17"></div>
+<label style="display:flex;align-items:center;gap:0.5rem;"><input type="checkbox" id="sched-all-devices" checked> All online devices</label>
+<div class="modal-actions"><button type="button" class="btn btn-outline" onclick="closeScheduleModal()">Cancel</button><button type="submit" class="btn btn-primary">Schedule</button></div>
+</form>
 </div>
 </div>
 
@@ -619,9 +772,12 @@ async function loadDashboard() {
         const uptime = d.uptime_percentage != null ? d.uptime_percentage.toFixed(1) + '%' : 'N/A';
         const lastSeen = d.last_seen ? new Date(d.last_seen + 'Z').toLocaleString() : 'N/A';
         const hasGps = d.latitude != null && d.longitude != null;
-        return `<tr class="device-row" data-id="${d.id}" data-hasgps="${hasGps}" onclick="rowFocusMap('${d.id}')">
+        const lifecycle = d.lifecycle_status || 'active';
+        const lifecycleBadge = lifecycle !== 'active' ? ` <span class="badge badge-${lifecycle}" style="font-size:0.6rem;">${lifecycle}</span>` : '';
+        const cityStr = d.city ? ` <span style="color:var(--text-muted);font-size:0.7rem;">${escapeHtml(d.city)}</span>` : '';
+        return `<tr class="device-row" data-id="${d.id}" data-hasgps="${hasGps}" onclick="openDeviceDetail('${d.id}')">
           <td><input type="checkbox" class="device-check" value="${d.id}" onclick="event.stopPropagation()"></td>
-          <td><strong>${d.name}</strong></td>
+          <td><strong>${d.name}</strong>${lifecycleBadge}${cityStr}</td>
           <td>${d.firmware_version}</td>
           <td><span class="badge ${statusClass}">${statusDot} ${d.status}</span></td>
           <td>${signal} dBm</td>
@@ -892,6 +1048,29 @@ async function loadAgentRecommendations() {
           </div>
         </div>`;
       }
+      if (a.type === 'predictive_maintenance') {
+        const d = a.details || {};
+        const preds = d.predictions || [];
+        const highColor = d.high_risk_count > 0 ? '#f87171' : d.medium_risk_count > 0 ? '#f59f00' : '#4ade80';
+        return `<div class="stat-card" style="padding:1.25rem;border-left:3px solid ${highColor};">
+          <div class="label" style="margin-bottom:0.25rem;">${a.agent}</div>
+          <div style="font-size:0.875rem;margin-bottom:0.5rem;">${a.summary}</div>
+          <div style="font-size:0.75rem;color:#94a3b8;">
+            <div>High risk: ${d.high_risk_count || 0} | Medium: ${d.medium_risk_count || 0}</div>
+            ${preds.slice(0,3).map(p => `<div style="margin-top:0.15rem;color:${p.risk_score >= 0.7 ? '#f87171' : '#f59f00'};">• ${p.risk_type}: ${(p.risk_score*100).toFixed(0)}% risk</div>`).join('')}
+          </div>
+        </div>`;
+      }
+      if (a.type === 'v2g_dispatch') {
+        return `<div class="stat-card" style="padding:1.25rem;border-left:3px solid #A78BFA;">
+          <div class="label" style="margin-bottom:0.25rem;">${a.agent || 'V2G Arbitrage Optimizer'}</div>
+          <div style="font-size:0.875rem;margin-bottom:0.5rem;">${a.summary || ''}</div>
+          <div style="font-size:0.75rem;color:#94a3b8;">
+            <div>Devices: ${a.devices_used || 0} | Revenue: $${(a.total_projected_revenue_dollars || 0).toFixed(2)}</div>
+            <div>Degradation cost: $${(a.total_deg_cost_dollars || 0).toFixed(2)}</div>
+          </div>
+        </div>`;
+      }
       return `<div class="stat-card" style="padding:1.25rem;border-left:3px solid #94a3b8;">
         <div class="label" style="margin-bottom:0.25rem;">${a.agent}</div>
         <div style="font-size:0.875rem;">${a.summary || 'No data'}</div>
@@ -936,7 +1115,7 @@ async function loadFirmwareList() {
     container.innerHTML = data.map(f => `
       <div style="display:flex;justify-content:space-between;align-items:center;padding:0.5rem 0;border-bottom:1px solid #334155;font-size:0.875rem;">
         <div>
-          <div style="font-weight:600;">${f.version}</div>
+          <div style="font-weight:600;">${f.version} ${f.signature ? '<span class="badge badge-signed" style="font-size:0.6rem;">signed</span>' : ''}</div>
           <div style="color:#94a3b8;font-size:0.75rem;">${f.filename} (${(f.file_size / 1024).toFixed(1)} KB)</div>
           <div style="color:#64748b;font-size:0.7rem;">${new Date(f.created_at + 'Z').toLocaleString()}</div>
         </div>
@@ -1003,6 +1182,360 @@ function openOnboardModal() {
 
 function closeOnboardModal() {
   document.getElementById('onboard-modal').classList.remove('active');
+}
+
+// ═══ Feature 1: Device detail with telemetry charts ═══════════════════════
+
+let detailDeviceId = null;
+let detailCharts = {};
+
+async function openDeviceDetail(deviceId) {
+  detailDeviceId = deviceId;
+  document.getElementById('device-detail-modal').classList.add('active');
+  document.getElementById('detail-title').textContent = 'Loading...';
+  switchDetailTab('telemetry');
+  try {
+    const [devRes, telRes] = await Promise.all([
+      fetchJson('/devices'),
+      fetchJson(`/telemetry/${deviceId}?hours=24&limit=200`),
+    ]);
+    const device = (devRes.devices || []).find(d => d.id === deviceId);
+    if (device) {
+      document.getElementById('detail-title').textContent = `${device.name} — ${device.firmware_version}`;
+    }
+    renderTelemetryCharts(telRes.points || [], device);
+    loadShadowForDevice(deviceId);
+    loadLifecycleForDevice(device);
+    loadCommandsForDevice(deviceId);
+  } catch (err) {
+    console.error('Device detail error:', err);
+    showToast('Failed to load device details', 'error');
+  }
+}
+
+function closeDetailModal() {
+  document.getElementById('device-detail-modal').classList.remove('active');
+  Object.values(detailCharts).forEach(c => { if (c) c.destroy(); });
+  detailCharts = {};
+}
+
+function switchDetailTab(tab) {
+  document.querySelectorAll('.detail-tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.detail-tab-content').forEach(c => c.classList.remove('active'));
+  document.querySelector(`.detail-tab[onclick="switchDetailTab('${tab}')"]`).classList.add('active');
+  document.getElementById(`detail-tab-${tab}`).classList.add('active');
+}
+
+function renderTelemetryCharts(points, device) {
+  const labels = points.map(p => new Date(p.timestamp + 'Z').toLocaleTimeString());
+  const chartOpts = (label, color) => ({
+    type: 'line',
+    data: { labels, datasets: [{ label, data: [], borderColor: color, backgroundColor: color+'20', fill: true, tension: 0.3, pointRadius: 0 }] },
+    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { display: false }, y: { ticks: { color: '#64748b', font: { size: 9 } }, grid: { color: '#1E2740' } } } }
+  });
+
+  // Signal chart
+  if (detailCharts.signal) detailCharts.signal.destroy();
+  detailCharts.signal = new Chart(document.getElementById('chart-signal'), {
+    ...chartOpts('Signal (dBm)', '#2DD4BF'),
+    data: { labels, datasets: [{ label: 'Signal', data: points.map(p => p.signal_strength), borderColor: '#2DD4BF', backgroundColor: '#2DD4BF20', fill: true, tension: 0.3, pointRadius: 0 }] },
+  });
+
+  // SOC chart
+  if (detailCharts.soc) detailCharts.soc.destroy();
+  const socData = points.map(p => p.soc).filter(v => v != null);
+  detailCharts.soc = new Chart(document.getElementById('chart-soc'), {
+    ...chartOpts('SOC (%)', '#A78BFA'),
+    data: { labels, datasets: [{ label: 'SOC', data: points.map(p => p.soc), borderColor: '#A78BFA', backgroundColor: '#A78BFA20', fill: true, tension: 0.3, pointRadius: 0 }] },
+  });
+
+  // Temperature chart
+  if (detailCharts.temp) detailCharts.temp.destroy();
+  detailCharts.temp = new Chart(document.getElementById('chart-temp'), {
+    ...chartOpts('Temperature (C)', '#F59E0B'),
+    data: { labels, datasets: [{ label: 'Temp', data: points.map(p => p.temperature || p.battery_temp), borderColor: '#F59E0B', backgroundColor: '#F59E0B20', fill: true, tension: 0.3, pointRadius: 0 }] },
+  });
+
+  document.getElementById('detail-stats').innerHTML = `Samples: ${points.length} | City: ${device?.city || 'N/A'} | Lifecycle: ${device?.lifecycle_status || 'active'}`;
+}
+
+async function loadShadowForDevice(deviceId) {
+  try {
+    const data = await fetchJson(`/shadow/${deviceId}`);
+    const display = document.getElementById('shadow-display');
+    const desired = data.desired ? JSON.stringify(data.desired.payload, null, 2) : 'None';
+    const reported = data.reported ? JSON.stringify(data.reported.payload, null, 2) : 'None';
+    const syncClass = data.in_sync ? 'var(--green)' : 'var(--amber)';
+    display.innerHTML = `
+      <div style="margin-bottom:0.75rem;"><strong>Desired State:</strong><pre style="background:var(--bg-deep);padding:0.5rem;border-radius:0.375rem;font-size:0.75rem;overflow-x:auto;">${escapeHtml(desired)}</pre></div>
+      <div style="margin-bottom:0.75rem;"><strong>Reported State:</strong><pre style="background:var(--bg-deep);padding:0.5rem;border-radius:0.375rem;font-size:0.75rem;overflow-x:auto;">${escapeHtml(reported)}</pre></div>
+      <div>In sync: <span style="color:${syncClass};font-weight:600;">${data.in_sync ? 'Yes' : 'No'}</span></div>`;
+  } catch { document.getElementById('shadow-display').innerHTML = '<div style="color:var(--text-muted);">No shadow data</div>'; }
+}
+
+function loadLifecycleForDevice(device) {
+  const display = document.getElementById('lifecycle-display');
+  const ls = device?.lifecycle_status || 'active';
+  const badge = `<span class="badge badge-${ls}">${ls}</span>`;
+  let actions = '';
+  if (ls === 'active') {
+    actions = `<button class="btn btn-outline" style="margin-top:0.5rem;font-size:0.75rem;" onclick="setLifecycle('${device.id}','maintenance')">Enter Maintenance</button>
+               <button class="btn btn-danger" style="margin-top:0.5rem;font-size:0.75rem;margin-left:0.5rem;" onclick="decommissionDevice('${device.id}')">Decommission</button>`;
+  } else if (ls === 'maintenance') {
+    actions = `<button class="btn btn-success" style="margin-top:0.5rem;font-size:0.75rem;" onclick="setLifecycle('${device.id}','activate')">Activate</button>`;
+  }
+  display.innerHTML = `
+    <div style="margin-bottom:0.5rem;">Status: ${badge}</div>
+    ${device?.decommissioned_at ? `<div style="font-size:0.75rem;color:var(--text-muted);">Decommissioned: ${new Date(device.decommissioned_at + 'Z').toLocaleString()} by ${device.decommissioned_by || '?'}</div>` : ''}
+    ${device?.decommissioned_reason ? `<div style="font-size:0.75rem;color:var(--text-muted);">Reason: ${device.decommissioned_reason}</div>` : ''}
+    ${actions}`;
+}
+
+async function loadCommandsForDevice(deviceId) {
+  try {
+    const data = await fetchJson(`/commands/pending/${deviceId}`);
+    const display = document.getElementById('commands-display');
+    const cmds = data.commands || [];
+    if (cmds.length === 0) {
+      display.innerHTML = '<div style="color:var(--text-muted);">No queued commands</div>';
+    } else {
+      display.innerHTML = cmds.map(c => `<div style="padding:0.5rem;border:1px solid var(--border);border-radius:0.375rem;margin-bottom:0.25rem;font-size:0.8rem;">
+        <strong>${c.command_type}</strong> — ${c.status} <button class="btn btn-outline" style="font-size:0.65rem;padding:0.15rem 0.4rem;margin-left:0.5rem;" onclick="retryCommand('${c.id}')">Retry</button></div>`).join('');
+    }
+  } catch { document.getElementById('commands-display').innerHTML = '<div style="color:var(--text-muted);">No command data</div>'; }
+}
+
+async function setLifecycle(deviceId, action) {
+  const url = action === 'activate' ? `/lifecycle/${deviceId}/activate` : `/lifecycle/${deviceId}/maintenance`;
+  try {
+    await fetch(url, { method: 'POST' });
+    showToast(`Device ${action}d`, 'success');
+    loadDashboard();
+  } catch { showToast('Action failed', 'error'); }
+}
+
+async function decommissionDevice(deviceId) {
+  if (!confirm('Decommission this device? This will mark it as retired.')) return;
+  try {
+    await fetch(`/lifecycle/${deviceId}/decommission`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reason: 'retired', actor: 'dashboard' }) });
+    showToast('Device decommissioned', 'success');
+    closeDetailModal();
+    loadDashboard();
+  } catch { showToast('Decommission failed', 'error'); }
+}
+
+async function retryCommand(cmdId) {
+  try {
+    await fetch(`/commands/${cmdId}/retry`, { method: 'POST' });
+    showToast('Command retried', 'success');
+    if (detailDeviceId) loadCommandsForDevice(detailDeviceId);
+  } catch { showToast('Retry failed', 'error'); }
+}
+
+// ═══ Feature 2: Geofences ════════════════════════════════════════════════
+
+async function loadGeofences() {
+  try {
+    const data = await fetchJson('/geofences');
+    const panel = document.getElementById('geofences-panel');
+    const gfs = data.geofences || [];
+    document.getElementById('stat-geofences').textContent = gfs.filter(g => g.enabled).length;
+    if (gfs.length === 0) {
+      panel.innerHTML = '<div class="stat-card" style="padding:1rem;"><div class="label" style="color:#64748b;">No geofences defined.</div></div>';
+    } else {
+      panel.innerHTML = gfs.map(g => `
+        <div class="geofence-item">
+          <div>
+            <span class="geofence-color-dot" style="background:${g.color};"></span>
+            <strong>${escapeHtml(g.name)}</strong>
+            <span style="font-size:0.7rem;color:var(--text-muted);margin-left:0.5rem;">${g.shape} ${g.radius_meters ? '(' + Math.round(g.radius_meters) + 'm)' : ''}</span>
+          </div>
+          <div style="display:flex;gap:0.5rem;align-items:center;">
+            <span class="badge ${g.enabled ? 'badge-active' : 'badge-offline'}">${g.enabled ? 'active' : 'disabled'}</span>
+            <button class="btn btn-danger" style="font-size:0.65rem;padding:0.2rem 0.5rem;" onclick="deleteGeofence('${g.id}','${g.name}')">Delete</button>
+          </div>
+        </div>`).join('');
+    }
+    drawGeofencesOnMap(gfs);
+  } catch (err) { console.error('Geofences error:', err); }
+}
+
+let geofenceLayers = [];
+function drawGeofencesOnMap(gfs) {
+  if (!mapInitialized) return;
+  geofenceLayers.forEach(l => map.removeLayer(l));
+  geofenceLayers = [];
+  gfs.filter(g => g.enabled).forEach(g => {
+    if (g.shape === 'circle' && g.center_lat != null) {
+      const circle = L.circle([g.center_lat, g.center_lng], {
+        radius: g.radius_meters, color: g.color, fillColor: g.color, fillOpacity: 0.1, weight: 2,
+      }).addTo(map);
+      circle.bindPopup(`<strong>${escapeHtml(g.name)}</strong><br>Geofence (${Math.round(g.radius_meters)}m)`);
+      geofenceLayers.push(circle);
+    }
+  });
+}
+
+function openGeofenceModal() { document.getElementById('geofence-modal').classList.add('active'); }
+function closeGeofenceModal() { document.getElementById('geofence-modal').classList.remove('active'); }
+function toggleGeofenceShape() {
+  const shape = document.getElementById('gf-shape').value;
+  document.getElementById('gf-circle-fields').style.display = shape === 'circle' ? 'block' : 'none';
+  document.getElementById('gf-polygon-fields').style.display = shape === 'polygon' ? 'block' : 'none';
+}
+
+document.getElementById('geofence-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const shape = document.getElementById('gf-shape').value;
+  const body = {
+    name: document.getElementById('gf-name').value,
+    shape,
+    device_ids: document.getElementById('gf-devices').value,
+    color: document.getElementById('gf-color').value,
+    alert_on_enter: document.getElementById('gf-enter').checked,
+    alert_on_exit: document.getElementById('gf-exit').checked,
+  };
+  if (shape === 'circle') {
+    body.center_lat = parseFloat(document.getElementById('gf-lat').value);
+    body.center_lng = parseFloat(document.getElementById('gf-lng').value);
+    body.radius_meters = parseFloat(document.getElementById('gf-radius').value);
+  } else {
+    body.polygon_coords = document.getElementById('gf-polygon').value;
+  }
+  try {
+    const res = await fetch('/geofences', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    if (res.ok) { showToast('Geofence created', 'success'); closeGeofenceModal(); loadGeofences(); }
+    else { const err = await res.json(); showToast(err.detail || 'Create failed', 'error'); }
+  } catch { showToast('Network error', 'error'); }
+});
+
+async function deleteGeofence(id, name) {
+  if (!confirm(`Delete geofence '${name}'?`)) return;
+  try {
+    await fetch(`/geofences/${id}`, { method: 'DELETE' });
+    showToast('Geofence deleted', 'success');
+    loadGeofences();
+  } catch { showToast('Delete failed', 'error'); }
+}
+
+// ═══ Feature 3: Predictive Maintenance ═════════════════════════════════════
+
+async function loadPredictions() {
+  try {
+    const data = await fetchJson('/predictive/predictions?min_risk=0.3&limit=20');
+    const panel = document.getElementById('predictive-panel');
+    const preds = data.predictions || [];
+    document.getElementById('stat-predictions').textContent = preds.length;
+    const badge = document.getElementById('pred-badge');
+    if (preds.length > 0) { badge.style.display = 'inline'; badge.textContent = `${preds.length} risks`; }
+    else { badge.style.display = 'none'; }
+    if (preds.length === 0) {
+      panel.innerHTML = '<div class="stat-card" style="padding:1rem;"><div class="label" style="color:#64748b;">No active predictions. Run a scan to analyze telemetry trends.</div></div>';
+    } else {
+      panel.innerHTML = preds.map(p => {
+        const riskClass = p.risk_score >= 0.7 ? 'risk-high' : p.risk_score >= 0.4 ? 'risk-medium' : 'risk-low';
+        const riskColor = p.risk_score >= 0.7 ? 'var(--red)' : p.risk_score >= 0.4 ? 'var(--amber)' : 'var(--green)';
+        return `<div class="stat-card" style="padding:1rem;border-left:3px solid ${riskColor};">
+          <div style="display:flex;justify-content:space-between;align-items:center;">
+            <strong style="color:${riskColor};">${p.risk_type.replace(/_/g,' ').titleCase()}</strong>
+            <span style="font-size:0.7rem;color:var(--text-muted);">${(p.device_id||'').substring(0,8)}...</span>
+          </div>
+          <div style="font-size:0.85rem;margin-top:0.25rem;">${p.recommendation || ''}</div>
+          <div style="font-size:0.75rem;color:var(--text-muted);margin-top:0.25rem;">Risk: ${(p.risk_score*100).toFixed(0)}% | Confidence: ${(p.confidence*100).toFixed(0)}%${p.predicted_hours_to_failure ? ` | ETA: ${p.predicted_hours_to_failure.toFixed(0)}h` : ''}</div>
+          <div class="risk-meter"><div class="risk-meter-fill ${riskClass}" style="width:${p.risk_score*100}%;"></div></div>
+        </div>`;
+      }).join('');
+    }
+  } catch (err) { console.error('Predictions error:', err); }
+}
+
+String.prototype.titleCase = function() { return this.replace(/\w\S*/g, t => t.charAt(0).toUpperCase() + t.slice(1)); };
+
+async function runPredictiveScan() {
+  try {
+    showToast('Running predictive scan...', 'info');
+    const res = await fetch('/predictive/scan', { method: 'POST' });
+    const data = await res.json();
+    showToast(`Scan complete: ${data.predictions_count} predictions`, 'success');
+    loadPredictions();
+  } catch { showToast('Scan failed', 'error'); }
+}
+
+// ═══ Feature 4: Scheduled OTA ═════════════════════════════════════════════
+
+async function loadSchedules() {
+  try {
+    const data = await fetchJson('/ota/schedules?limit=20');
+    const panel = document.getElementById('schedules-panel');
+    const schedules = data.schedules || [];
+    if (schedules.length === 0) {
+      panel.innerHTML = '<div class="stat-card" style="padding:1rem;"><div class="label" style="color:#64748b;">No scheduled campaigns.</div></div>';
+    } else {
+      const statusColors = { scheduled: '#38bdf8', running: '#2DD4BF', completed: '#22C55E', cancelled: '#64748b', failed: '#EF4444', paused: '#F59E0B' };
+      panel.innerHTML = schedules.map(s => `
+        <div class="schedule-item">
+          <div>
+            <strong>${escapeHtml(s.name)}</strong>
+            <div style="font-size:0.75rem;color:var(--text-muted);margin-top:0.25rem;">
+              For: ${new Date(s.scheduled_for + 'Z').toLocaleString()}
+              ${s.blackout_start_hour != null ? ` | Blackout: ${s.blackout_start_hour}:00-${s.blackout_end_hour}:00` : ''}
+              | Canary: ${s.canary_percent}%
+            </div>
+          </div>
+          <div style="display:flex;gap:0.5rem;align-items:center;">
+            <span class="schedule-status" style="background:${statusColors[s.status]||'#64748b'}20;color:${statusColors[s.status]||'#64748b'};">${s.status}</span>
+            ${s.status === 'scheduled' ? `<button class="btn btn-danger" style="font-size:0.65rem;padding:0.2rem 0.5rem;" onclick="cancelSchedule('${s.id}')">Cancel</button>` : ''}
+          </div>
+        </div>`).join('');
+    }
+  } catch (err) { console.error('Schedules error:', err); }
+}
+
+function openScheduleModal() {
+  document.getElementById('schedule-modal').classList.add('active');
+  loadFirmware().then(() => {
+    const select = document.getElementById('sched-firmware');
+    const fwSelect = document.getElementById('firmware-select');
+    select.innerHTML = fwSelect.innerHTML;
+  });
+}
+function closeScheduleModal() { document.getElementById('schedule-modal').classList.remove('active'); }
+
+document.getElementById('schedule-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const body = {
+    name: document.getElementById('sched-name').value,
+    firmware_id: document.getElementById('sched-firmware').value,
+    scheduled_for: new Date(document.getElementById('sched-time').value).toISOString(),
+    canary_percent: parseFloat(document.getElementById('sched-canary').value) || 10,
+    all_devices: document.getElementById('sched-all-devices').checked,
+  };
+  const bs = document.getElementById('sched-blackout-start').value;
+  const be = document.getElementById('sched-blackout-end').value;
+  if (bs) body.blackout_start_hour = parseInt(bs);
+  if (be) body.blackout_end_hour = parseInt(be);
+  try {
+    const res = await fetch('/ota/schedules', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    if (res.ok) { showToast('OTA campaign scheduled', 'success'); closeScheduleModal(); loadSchedules(); }
+    else { const err = await res.json(); showToast(err.detail || 'Schedule failed', 'error'); }
+  } catch { showToast('Network error', 'error'); }
+});
+
+async function cancelSchedule(id) {
+  try {
+    await fetch(`/ota/schedules/${id}/cancel`, { method: 'POST' });
+    showToast('Schedule cancelled', 'success');
+    loadSchedules();
+  } catch { showToast('Cancel failed', 'error'); }
+}
+
+// ═══ Command queue stat ═══════════════════════════════════════════════════
+
+async function loadQueueStat() {
+  try {
+    const data = await fetchJson('/commands?status=queued&limit=1');
+    document.getElementById('stat-queue').textContent = data.total || 0;
+  } catch { document.getElementById('stat-queue').textContent = '0'; }
 }
 
 function refreshAll() {
@@ -1128,12 +1661,20 @@ loadFirmwareList();
 checkMqttStatus();
 loadAgentRecommendations();
 loadAlerts();
+loadPredictions();
+loadGeofences();
+loadSchedules();
+loadQueueStat();
 setInterval(loadDashboard, 5000);
 setInterval(loadFirmwareList, 30000);
 setInterval(checkMqttStatus, 10000);
 setInterval(loadAgentRecommendations, 30000);
 setInterval(loadAlerts, 10000);
 setInterval(loadAegisPanel, 10000);
+setInterval(loadPredictions, 30000);
+setInterval(loadGeofences, 60000);
+setInterval(loadSchedules, 30000);
+setInterval(loadQueueStat, 15000);
 loadAegisPanel();
 </script>
 </body>

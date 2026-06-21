@@ -29,6 +29,7 @@ class Settings(BaseSettings):
     soh_min_discharge: float = 0.7
     soh_deg_threshold: float = 0.8
     spot_price_url: str = ""
+    spot_price_api_key: str = ""
     v2g_horizon_hours: int = 24
     v2g_time_step_minutes: int = 60
 
@@ -65,6 +66,35 @@ class Settings(BaseSettings):
     aegis_backend_url: str = ""
     aegis_dry_run: bool = False
 
+    # Feature 1: Telemetry retention
+    telemetry_retention_days: int = 30
+    telemetry_sample_interval_seconds: int = 10
+
+    # Feature 2: Geofencing
+    geofence_check_interval_seconds: int = 30
+
+    # Feature 4: Scheduled OTA
+    ota_scheduler_interval_seconds: int = 30
+    ota_scheduler_timezone: str = "UTC"
+
+    # Feature 5: Offline command queue
+    command_queue_ttl_seconds: int = 86400
+    command_queue_flush_interval_seconds: int = 15
+
+    # Feature 6: Audit log retention
+    audit_log_retention_days: int = 90
+
+    # Feature 8: Firmware signing (Ed25519 private key PEM, optional)
+    firmware_signing_private_key: str = ""
+    firmware_signing_public_key: str = ""
+    firmware_require_signature: bool = False
+
+    # Feature 10: Real spot prices (provider: "mock", "iex", "entsoe")
+    spot_price_provider: str = "mock"
+
+    # Feature 12: RBAC default role for new OAuth users
+    default_user_role: str = "viewer"
+
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
 
     def model_post_init(self, __context):
@@ -90,4 +120,3 @@ def validate_settings():
         warnings.append("SECURE_COOKIES is False — set to True when using HTTPS")
     for w in warnings:
         logger.warning("Settings: %s", w)
-

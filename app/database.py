@@ -21,6 +21,10 @@ async def get_db() -> AsyncSession:
 
 async def init_db():
     async with engine.begin() as conn:
-        from app.models import Device, Firmware, OtaDeployment
+        from app.models import (
+            Device, Firmware, OtaDeployment, V2gSchedule, Alert, UserSession,
+            Telemetry, Geofence, GeofenceEvent, CommandQueue, AuditLog,
+            DeviceShadow, OtaSchedule, PredictedFailure, WebhookSubscription, EventLog,
+        )
         from app.aegis.models import Remediation, RuleConfig
         await conn.run_sync(Base.metadata.create_all)

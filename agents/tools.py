@@ -506,17 +506,22 @@ def plan_ota_campaign(firmware_version: str) -> dict:
     # Phased rollout plan
     phases = []
     remaining = list(remainder)
+    phase_num = 0
     for pct, label in [(30, "Phase 1"), (60, "Phase 2"), (100, "Phase 3")]:
+        phase_num += 1
         batch_size = max(0, int(len(devices) * pct / 100) - canary_size)
         batch = remaining[:batch_size]
         remaining = remaining[batch_size:]
+        is_final = (pct == 100) or not remaining
         phases.append({
             "phase": label,
             "device_count": len(batch),
             "device_ids": [d["id"] for d in batch],
-            "gate": f"Wait {3 * phases.__len__() + 5} min, verify "
-                    f"failure rate < 20% before proceeding"
-                    if phases else "No gate (final phase)",
+            "gate": (
+                "No gate (final phase)"
+                if is_final
+                else f"Wait {3 * phase_num + 5} min, verify failure rate < 20% before proceeding"
+            ),
         })
         if not remaining:
             break
@@ -600,3 +605,34 @@ def rerun_remediation(remediation_id: str) -> dict:
         return resp.json()
     except requests.RequestException as e:
         return {"success": False, "error": str(e)}
+
+
+# ---------------------------------------------------------------------------
+# Predictive maintenance tools (Feature 3)
+# ---------------------------------------------------------------------------
+
+def run_predictive_scan() -> dict:
+    """Trigger a predictive maintenance scan via the API.
+
+    Returns: {predictions_count, predictions: [...]}
+    """
+    try:
+        resp = requests.get(f"{BASE_URL}/agents/predictive-scan", timeout=30)
+        resp.raise_for_status()
+        return resp.json()
+    except requests.RequestException as e:
+        return {"error": str(e), "predictions_count": 0, "predictions": []}
+
+
+def get_predictions(min_risk: float = 0.0, limit: int = 20) -> dict:
+    """Fetch active failure predictions via the API."""
+    try:
+        resp = requests.get(
+            f"{BASE_URL}/agents/predictive-history",
+            params={"min_risk": min_risk, "limit": limit},
+            timeout=10,
+        )
+        resp.raise_for_status()
+        return resp.json()
+    except requests.RequestException as e:
+        return {"error": str(e), "predictions": [], "total": 0}

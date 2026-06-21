@@ -135,9 +135,21 @@ if USE_CREWAI:
 def run_anomaly_agent(notify: bool = True) -> dict:
     """Run heuristic anomaly detection across the fleet.
 
-    If notify=True, sends Slack alerts for critical anomalies.
+    If notify=True, routes through the backend's /agents/fleet-health endpoint
+    which uses the AlertEngine for dedup, persistence, and multi-channel
+    notification (Bug 7 fix — previously sent raw Slack messages only).
     Returns all anomalies found.
     """
+    # When notifying, use the backend endpoint which runs the full alert pipeline
+    if notify:
+        try:
+            import urllib.request, json
+            base = os.environ.get("FLEET_BACKEND_URL", "http://localhost:8181")
+            with urllib.request.urlopen(f"{base}/agents/fleet-health", timeout=30) as resp:
+                return json.loads(resp.read().decode())
+        except Exception as e:
+            logger.warning("Fleet-health endpoint failed, falling back to local analysis: %s", e)
+
     anomalies = tools.detect_anomalies()
 
     if not anomalies:
@@ -152,14 +164,6 @@ def run_anomaly_agent(notify: bool = True) -> dict:
     critical = [a for a in anomalies if a["severity"] == "critical"]
     warnings = [a for a in anomalies if a["severity"] == "warning"]
 
-    if notify and critical:
-        for ca in critical:
-            tools.send_slack_alert(ca["message"], severity="critical")
-            logger.info(f"Slack alert sent for critical anomaly: {ca['type']}")
-    if notify and warnings:
-        for wa in warnings:
-            tools.send_slack_alert(wa["message"], severity="warning")
-
     return {
         "agent": "Fleet Health Monitor",
         "type": "anomaly_check",
@@ -169,7 +173,7 @@ def run_anomaly_agent(notify: bool = True) -> dict:
             f"warning anomalies."
         ),
         "anomalies": anomalies,
-        "notifications_sent": notify,
+        "notifications_sent": False,
     }
 
 
@@ -401,12 +405,35 @@ def run_onboarding_agent(
 
 def run_all_agents(notify: bool = True,
                    firmware_version: Optional[str] = None,
-                   min_group_size: int = 3) -> list[dict]:
+                   min_group_size: int = 3,
+                   use_llm: bool = False) -> list[dict]:
     """Run all Phase 1 agents and return their recommendations.
 
     Returns a list of agent result dicts suitable for dashboard display.
+    When use_llm=True and CrewAI is enabled, uses the LLM variants (Bug 8 fix).
     """
     results = []
+
+    if use_llm and USE_CREWAI:
+        try:
+            results.append(run_ota_agent_llm(firmware_version))
+        except Exception as e:
+            logger.exception("OTA LLM agent failed")
+            results.append({"agent": "OTA Campaign Strategist (LLM)", "type": "ota_campaign", "error": str(e)})
+
+        try:
+            results.append(run_anomaly_agent_llm(notify=notify))
+        except Exception as e:
+            logger.exception("Anomaly LLM agent failed")
+            results.append({"agent": "Fleet Health Monitor (LLM)", "type": "anomaly_check", "error": str(e)})
+
+        try:
+            results.append(run_group_agent_llm(min_group_size=min_group_size))
+        except Exception as e:
+            logger.exception("Group LLM agent failed")
+            results.append({"agent": "Device Group Manager (LLM)", "type": "device_groups", "error": str(e)})
+
+        return results
 
     try:
         results.append(run_ota_agent(firmware_version))
@@ -466,4 +493,48 @@ def run_remediation_agent() -> dict:
     except Exception as e:
         logger.exception("Remediation agent failed")
         return {"agent": "Aegis Remediation Agent", "type": "remediation",
+                "error": str(e)}
+
+
+# ---------------------------------------------------------------------------
+# 6. Predictive Maintenance Agent (Feature 3)
+# ---------------------------------------------------------------------------
+
+def run_predictive_agent() -> dict:
+    """Run the Predictive Maintenance Agent: analyze telemetry trends and predict failures.
+
+    Returns agent dict with prediction summary and details.
+    """
+    try:
+        result = tools.run_predictive_scan()
+        if "error" in result:
+            return {
+                "agent": "Predictive Maintenance Agent",
+                "type": "predictive_maintenance",
+                "error": result["error"],
+            }
+        details = result.get("details", {})
+        predictions = details.get("predictions", [])
+        high_risk = [p for p in predictions if p.get("risk_score", 0) >= 0.7]
+        medium_risk = [p for p in predictions if 0.4 <= p.get("risk_score", 0) < 0.7]
+
+        return {
+            "agent": "Predictive Maintenance Agent",
+            "type": "predictive_maintenance",
+            "summary": (
+                f"Found {len(high_risk)} high-risk and {len(medium_risk)} "
+                f"medium-risk failure predictions."
+                if predictions
+                else "No failure risks detected. Fleet telemetry trends are healthy."
+            ),
+            "details": {
+                "predictions_count": len(predictions),
+                "high_risk_count": len(high_risk),
+                "medium_risk_count": len(medium_risk),
+                "predictions": predictions,
+            },
+        }
+    except Exception as e:
+        logger.exception("Predictive agent failed")
+        return {"agent": "Predictive Maintenance Agent", "type": "predictive_maintenance",
                 "error": str(e)}

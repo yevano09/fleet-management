@@ -231,7 +231,9 @@ async def get_v2g_dispatch(
             devices_used=0,
         )
 
-    spot_prices = mock_spot_prices(hours=horizon_hours)
+    # Feature 10: use real spot prices when configured, mock otherwise
+    from app.spot_prices import fetch_spot_prices
+    spot_prices = fetch_spot_prices(hours=horizon_hours)
 
     full_schedule: list[V2gDispatchSlot] = []
     total_revenue = 0.0
@@ -268,13 +270,13 @@ async def get_v2g_dispatch(
                     net_revenue_dollars=slot.net_revenue_dollars,
                 ))
 
-    # Publish V2G commands for non-idle slots (first device only for demo)
+    # Publish V2G commands for non-idle slots across all target devices
     if full_schedule and target_devices:
-        first_device = target_devices[0]
-        for slot in full_schedule[:6]:  # first 6 slots
-            if slot.action in ("charge", "discharge"):
+        for device in target_devices:
+            device_schedule = [s for s in full_schedule if s.action in ("charge", "discharge")][:6]
+            for slot in device_schedule:
                 mqtt_client.publish_v2g_command(
-                    device_id=first_device["id"],
+                    device_id=device["id"],
                     action=slot.action,
                     power_kw=slot.power_kw,
                     duration_minutes=60,
@@ -496,3 +498,46 @@ async def rerun_remediation(
         return {"success": True, "message": f"Remediation {remediation_id[:8]} re-run", "status": "completed"}
     else:
         return {"success": False, "message": f"Rule '{remediation.rule_name}' not found", "status": "failed"}
+
+
+# ---------------------------------------------------------------------------
+# Predictive Maintenance Agent (Feature 3)
+# ---------------------------------------------------------------------------
+
+@router.get("/predictive-scan")
+async def get_predictive_scan(db: AsyncSession = Depends(get_db)):
+    """Run the Predictive Maintenance Agent: analyze telemetry trends and predict failures."""
+    from agents.async_tools import async_run_predictive_scan, async_get_predictions
+    scan = await async_run_predictive_scan(db)
+    predictions = scan.get("predictions", [])
+    high_risk = [p for p in predictions if p["risk_score"] >= 0.7]
+    medium_risk = [p for p in predictions if 0.4 <= p["risk_score"] < 0.7]
+
+    return {
+        "agent": "Predictive Maintenance Agent",
+        "type": "predictive_maintenance",
+        "summary": (
+            f"Analyzed fleet telemetry. Found {len(high_risk)} high-risk and "
+            f"{len(medium_risk)} medium-risk failure predictions."
+            if predictions
+            else "No failure risks detected. Fleet telemetry trends are healthy."
+        ),
+        "details": {
+            "predictions_count": len(predictions),
+            "high_risk_count": len(high_risk),
+            "medium_risk_count": len(medium_risk),
+            "predictions": predictions,
+        },
+    }
+
+
+@router.get("/predictive-history")
+async def get_predictive_history(
+    min_risk: float = Query(0.0, ge=0.0, le=1.0),
+    limit: int = Query(20, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+):
+    """Fetch active failure predictions."""
+    from agents.async_tools import async_get_predictions
+    result = await async_get_predictions(db, min_risk=min_risk, resolved=False, limit=limit)
+    return result

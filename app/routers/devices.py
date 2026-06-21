@@ -32,6 +32,8 @@ async def register_device(req: DeviceRegisterRequest, db: AsyncSession = Depends
         existing.ip_address = req.ip_address or existing.ip_address
         if req.mqtt_client_id:
             existing.mqtt_client_id = req.mqtt_client_id
+        if req.city:
+            existing.city = req.city
         if was_offline:
             active_devices.inc()
         await db.commit()
@@ -43,6 +45,7 @@ async def register_device(req: DeviceRegisterRequest, db: AsyncSession = Depends
             firmware_version=existing.firmware_version,
             status=existing.status.value,
             mqtt_client_id=existing.mqtt_client_id,
+            city=existing.city,
         )
 
     device = Device(
@@ -52,6 +55,7 @@ async def register_device(req: DeviceRegisterRequest, db: AsyncSession = Depends
         last_seen=utcnow(),
         ip_address=req.ip_address,
         mqtt_client_id=req.mqtt_client_id,
+        city=req.city,
     )
     db.add(device)
     await db.commit()
@@ -67,6 +71,7 @@ async def register_device(req: DeviceRegisterRequest, db: AsyncSession = Depends
         firmware_version=device.firmware_version,
         status=device.status.value,
         mqtt_client_id=device.mqtt_client_id,
+        city=device.city,
     )
 
 
@@ -84,6 +89,19 @@ async def device_heartbeat(
     device.uptime_percentage = req.uptime_percentage
     device.signal_strength = req.signal_strength
     device.status = DeviceStatus.online
+    if req.city:
+        device.city = req.city
+    if req.soc is not None:
+        device.soc = req.soc
+    if req.soh is not None:
+        device.soh = req.soh
+    if req.battery_temp is not None:
+        device.battery_temp = req.battery_temp
+    if req.plug_status:
+        device.plug_status = req.plug_status
+    if req.latitude is not None and req.longitude is not None:
+        device.latitude = req.latitude
+        device.longitude = req.longitude
     await db.commit()
 
     return {"status": "ok", "last_seen": device.last_seen.isoformat()}
@@ -107,11 +125,19 @@ async def push_remote_config(device_id: str, req: RemoteConfigRequest):
 @router.get("", response_model=DeviceListResponse)
 async def list_devices(
     status: str = Query(None),
+    lifecycle: str = Query(None, description="Filter by lifecycle: active, maintenance, decommissioned"),
+    include_decommissioned: bool = Query(False, description="Include decommissioned devices"),
     db: AsyncSession = Depends(get_db),
 ):
     query = select(Device)
     if status:
         query = query.where(Device.status == DeviceStatus(status))
+    if lifecycle:
+        from app.models import DeviceLifecycle
+        query = query.where(Device.lifecycle_status == DeviceLifecycle(lifecycle))
+    elif not include_decommissioned:
+        from app.models import DeviceLifecycle
+        query = query.where(Device.lifecycle_status != DeviceLifecycle.decommissioned)
 
     result = await db.execute(query.order_by(Device.last_seen.desc()))
     devices = result.scalars().all()

@@ -1,6 +1,6 @@
 # Fleet Commander — Architecture Diagram
 
-Interactive HTML diagram at `architecture.html`. Open in any browser and click through 6 flows with animated data packets, a side panel showing real payloads, and a dev/prod mode toggle.
+Interactive HTML diagram at `architecture.html`. Open in any browser and click through 10 flows with animated data packets, a side panel showing real payloads, and a dev/prod mode toggle.
 
 ---
 
@@ -8,16 +8,44 @@ Interactive HTML diagram at `architecture.html`. Open in any browser and click t
 
 | Node | Role | Tech | Port |
 |---|---|---|---|
-| **User (Browser)** | Dashboard UI | Jinja2 + HTMX · auto-refresh (5s/10s/30s) | localhost:8181 |
-| **FastAPI Backend** | Orchestrator — REST + MQTT + Agents | Python · FastAPI · SQLAlchemy async | :8000 |
-| **Aegis Engine** | Auto-remediation — scrape → classify → decide → act | Python stdlib · co-located | scrapes /metrics every 15s |
-| **SQLite / PostgreSQL** | Primary datastore | Dev: aiosqlite · fleet.db / Prod: psycopg2 | file-based / :5432 |
-| **Mosquitto MQTT** | Message broker | eclipse-mosquitto:2 · pub/sub | :1883 |
-| **Device Simulator** | Virtual IoT devices (5, 20% OTA fail rate) | Python · paho-mqtt · async | MQTT heartbeat 10s |
-| **Prometheus** | Metrics collection | v2.53.0 · 7d retention | :9090 |
+| **User (Browser)** | Dashboard UI | Jinja2 + Chart.js + Leaflet · auto-refresh (5s/10s/15s/30s) | localhost:8181 |
+| **FastAPI Backend** | Orchestrator — REST + MQTT + Agents + Schedulers | Python · FastAPI · SQLAlchemy async · 99 routes | :8000 |
+| **Aegis Engine** | Auto-remediation — scrape → classify → decide → act | 8 rules · DLQ · dry-run · co-located | scrapes /metrics every 15s |
+| **OTA Scheduler** | Scheduled OTA campaigns with blackout windows | Background loop · 30s interval | co-located |
+| **Command Queue Flusher** | Delivers queued commands on device reconnect | Background loop · 15s interval | co-located |
+| **SQLite / PostgreSQL** | Primary datastore — 16 tables | Dev: aiosqlite · fleet.db / Prod: psycopg2 | file-based / :5432 |
+| **Mosquitto MQTT** | Message broker — 11 topic patterns | eclipse-mosquitto:2 · pub/sub | :1883 |
+| **Device Simulator** | Virtual IoT devices (5, 20% OTA fail rate, 3 EVs) | Python · paho-mqtt · telemetry + GPS + battery | MQTT heartbeat 10s |
+| **Prometheus** | Metrics collection — 30+ metrics | v2.53.0 · 7d retention | :9090 |
 | **Grafana** | Visualization dashboards | 11.1.0 · pre-provisioned | :3000 |
-| **Live Fleet Map** | Interactive device location visualization | Leaflet 1.9.4 · OpenStreetMap tiles · city-color markers | dashboard embed |
+| **Live Fleet Map** | Interactive device location + geofence overlays | Leaflet 1.9.4 · OpenStreetMap · city-color markers | dashboard embed |
 | **Alert Channels** | Multi-channel notifications | Slack Webhook · SMTP Email · Generic Webhook | SMTP :587 |
+| **Event Emitter** | Outbound webhook fan-out with HMAC signing | Python · requests · async delivery | co-located |
+
+---
+
+## Database Schema (16 Tables)
+
+| Table | Purpose |
+|---|---|
+| `devices` | Device records (GPS, battery, lifecycle, city, claim_token) |
+| `firmware` | Firmware binaries (SHA256 + Ed25519 signature) |
+| `ota_deployments` | OTA deployment tracking (state machine) |
+| `ota_schedules` | Scheduled OTA campaigns (Feature 4) |
+| `v2g_schedules` | V2G charge/discharge schedules |
+| `alerts` | Alert records (dedup, escalation, lifecycle) |
+| `user_sessions` | OAuth + admin session tracking (RBAC roles) |
+| `telemetry` | Time-series telemetry per heartbeat (Feature 1) |
+| `geofences` | Geofence definitions (circle/polygon) (Feature 2) |
+| `geofence_events` | Geofence enter/exit events (Feature 2) |
+| `command_queue` | Offline command buffer (Feature 5) |
+| `audit_logs` | Audit trail for all mutating actions (Feature 6) |
+| `device_shadows` | Desired/reported shadow states (Feature 7) |
+| `predicted_failures` | Predictive maintenance predictions (Feature 3) |
+| `webhook_subscriptions` | Outbound webhook configs (Feature 11) |
+| `event_log` | Emitted event delivery tracking (Feature 11) |
+| `remediations` | Aegis remediation records |
+| `rule_configs` | Aegis rule override configs |
 
 ---
 
@@ -27,12 +55,12 @@ Interactive HTML diagram at `architecture.html`. Open in any browser and click t
 
 A device connects to the fleet for the first time or reconnects after being offline.
 
-1. **Simulator → MQTT** — Publishes `iot/fleet/register` with device_id, name, firmware_version, ip_address
-2. **MQTT → Backend** — `handle_mqtt_register()` upserts the device (match by mqtt_client_id, id, or name)
-3. **Backend → DB** — INSERT (new device) or UPDATE (re-registration); Prometheus counters increment
-4. **Simulator → MQTT** — Publishes heartbeat every 10s to `iot/fleet/{id}/heartbeat` with uptime, signal, EV battery telemetry
-5. **MQTT → Backend** — `handle_mqtt_heartbeat()` updates last_seen, tracks V2G metrics via Prometheus
-6. **Backend → DB** — Device state freshened; 60+ seconds without heartbeat shows device as offline (transient)
+1. **Simulator → MQTT** — Publishes `iot/fleet/register` with device_id, name, firmware_version, ip_address, city
+2. **MQTT → Backend** — `handle_mqtt_register()` upserts the device; if reconnect, flushes queued commands + syncs shadow
+3. **Backend → DB** — INSERT (new device) or UPDATE (re-registration); audit log + event emitted
+4. **Simulator → MQTT** — Publishes heartbeat every 10s with uptime, signal, EV battery, GPS, CPU/memory/temp telemetry
+5. **MQTT → Backend** — `handle_mqtt_heartbeat()` updates device; records telemetry point; checks geofences
+6. **Backend → DB** — Device state freshened; 60+ seconds without heartbeat shows device as offline
 
 ```mermaid
 sequenceDiagram
@@ -41,217 +69,103 @@ sequenceDiagram
     participant BE as FastAPI Backend
     participant DB as Database
 
-    Sim->>MQ: Publish iot/fleet/register
+    Sim->>MQ: Publish iot/fleet/register (with city)
     MQ->>BE: handle_mqtt_register()
-    BE->>DB: INSERT / UPDATE device
+    BE->>DB: INSERT / UPDATE device + audit log
     DB-->>BE: Device record
+    BE->>BE: Flush queued commands (if reconnect)
+    BE->>BE: Sync desired shadow (if reconnect)
     loop every 10s
-        Sim->>MQ: Heartbeat (uptime, signal, battery, GPS)
+        Sim->>MQ: Heartbeat (telemetry + GPS + battery)
         MQ->>BE: handle_mqtt_heartbeat()
-        BE->>DB: Update last_seen
+        BE->>DB: Update device + record Telemetry point
+        BE->>BE: Check geofences (if GPS)
     end
     Note over DB: 60s no heartbeat → offline
 ```
 
-### 2. OTA Firmware Update
+### 2. OTA Firmware Update with Signing & Rollback
 
-Full lifecycle from firmware upload through device deployment with automatic rollback on hash mismatch.
+Full lifecycle from firmware upload (with optional Ed25519 signing) through deployment with automatic rollback.
 
-1. **User → Backend** — POST `/ota/upload` with firmware binary; SHA256 hash computed, file stored
-2. **Backend → DB** — Firmware record persisted; duplicate version numbers rejected (HTTP 409)
-3. **User → Backend** — POST `/ota/trigger` targeting all devices or specific IDs; OtaDeployment records created
-4. **Backend → MQTT** — Publishes OTA command to `iot/fleet/{id}/command/ota` with firmware_url, sha256_hash, deployment_id
-5. **MQTT → Simulator** — Device subscribes and simulates downloading → applying → verifying
-6. **Simulator → MQTT** — Publishes status to `iot/fleet/{id}/status/ota`: success or hash_mismatch → rollback → rolled_back
-7. **MQTT → Backend** — `OtaStateMachine.handle_ota_status()` validates state transitions
-8. **Backend → DB** — Updates OtaDeployment.status and Device.firmware_version (or restores previous on rollback)
+1. **User → Backend** — POST `/ota/upload` with firmware binary; SHA256 + optional Ed25519 signature computed
+2. **Backend → DB** — Firmware record persisted with signature fields; audit log written
+3. **User → Backend** — POST `/ota/trigger`; OtaDeployment records created; timeout watcher started
+4. **Backend → MQTT** — Publishes OTA command with firmware_url, sha256_hash, deployment_id
+5. **Simulator → MQTT** — Reports status: downloading → applying → verifying → success or hash_mismatch → rollback
+6. **Backend → DB** — Updates deployment + device firmware version (or restores previous on rollback)
+7. **Event emitted** — `ota.triggered` event fires to webhook subscribers
 
-```mermaid
-sequenceDiagram
-    participant U as User
-    participant BE as FastAPI Backend
-    participant DB as Database
-    participant MQ as Mosquitto MQTT
-    participant Sim as Device Simulator
+### 3. Scheduled OTA with Maintenance Windows
 
-    U->>BE: POST /ota/upload (firmware.bin)
-    BE->>DB: Store firmware + SHA256
-    U->>BE: POST /ota/trigger
-    BE->>DB: Create OtaDeployment records
-    BE->>MQ: Publish command/ota (url, sha256)
-    MQ->>Sim: OTA command
-    Sim->>Sim: download → apply → verify
-    alt success
-        Sim->>MQ: status/ota → success
-    else hash_mismatch
-        Sim->>MQ: status/ota → hash_mismatch
-        Sim->>Sim: Rollback to previous firmware
-        Sim->>MQ: status/ota → rolled_back
-    end
-    MQ->>BE: handle_ota_status()
-    BE->>DB: Update deployment + device firmware
-```
+1. **User → Backend** — POST `/ota/schedules` with firmware, target time, blackout hours, canary %
+2. **Backend → DB** — Schedule record created with status `scheduled`
+3. **Scheduler loop (30s)** — Checks for due schedules; skips if within blackout window
+4. **Backend → MQTT** — Publishes OTA commands (canary first, then rest)
+5. **Backend → DB** — Schedule marked `completed` with deployment IDs; event emitted
 
-### 3. Fleet Dashboard
+### 4. Telemetry Time-Series & Predictive Maintenance
 
-The live monitoring UI with auto-refreshing device table, agent panels, alert badge, and Aegis panel.
+1. **Device → MQTT** — Heartbeat includes cpu_usage, memory_usage, temperature, soc, soh, battery_temp
+2. **Backend → DB** — Telemetry point recorded for every heartbeat
+3. **User → Backend** — POST `/predictive/scan` triggers analysis
+4. **Backend → DB** — Linear-regression slope analysis on signal, temp, SOH, uptime trends
+5. **Backend → DB** — PredictedFailure records created for devices with risk > 0.4
+6. **Dashboard** — Device detail modal shows Chart.js trend charts; predictive panel shows risk meters
 
-1. **User → Backend** — GET `/` with auth check (Google OAuth or admin basic auth)
-2. **Backend → DB** — Queries all devices with status, firmware, signal, battery data
-3. **Backend → User** — Returns rendered Jinja2 HTML with HTMX auto-refresh directives
-4. **Backend → Prometheus** — `/metrics` endpoint scraped every 15s (fleet size, OTA, latency, MQTT, alerts, V2G, Aegis)
-5. **Prometheus → Grafana** — Pre-provisioned dashboards query PromQL for visualizations including Aegis panels
+### 5. Geofencing & Geo-alerts
 
-```mermaid
-sequenceDiagram
-    participant U as User (Browser)
-    participant BE as FastAPI Backend
-    participant DB as Database
-    participant PRO as Prometheus
-    participant GRA as Grafana
+1. **User → Backend** — POST `/geofences` creates a circle or polygon geofence
+2. **Device → MQTT** — Heartbeat with GPS coordinates
+3. **Backend → DB** — `check_device_position()` compares position against all enabled geofences
+4. **Backend → DB** — GeofenceEvent created on enter/exit transition
+5. **AlertEngine** — Geofence events converted to anomalies → alerts (dedup, notify)
+6. **Dashboard** — Geofence circles drawn on Leaflet map; events list in geofence panel
 
-    U->>BE: GET /
-    BE->>DB: Query all devices
-    DB-->>BE: Devices with status, firmware, signal
-    BE-->>U: Rendered Jinja2 HTML + HTMX auto-refresh
-    loop every 15s
-        PRO->>BE: Scrape /metrics/
-    end
-    PRO->>GRA: PromQL queries
-    GRA-->>GRA: Render dashboards
-```
+### 6. Offline Command Queue & Device Shadow
 
-### 4. Agent Recommendations
+1. **User → Backend** — POST `/commands/queue` for an offline device → status `queued`
+2. **Device reconnects** — `handle_mqtt_register()` triggers `_flush_command_queue()`
+3. **Backend → MQTT** — Queued commands published; status → `delivered`
+4. **Shadow sync** — `_sync_shadow_to_device()` pushes latest desired state on reconnect
+5. **Device → MQTT** — V2G status reports create `reported` shadow entries
 
-Four Phase 1 AI agents analyze fleet state and return structured recommendations.
+### 7. Fleet Dashboard
 
-1. **User → Backend** — GET `/agents/recommendations` triggers all 4 agents concurrently (OTA, Anomaly, Groups, Device Onboarding)
-2. **Backend → DB** — OTA agent queries firmware + devices; anomaly agent checks signals/heartbeats/OTAs; group agent clusters by firmware and signal; onboarding agent checks for ID conflicts
-3. **DB → Backend** — Raw fleet data returned for heuristic processing
-4. **Backend → User** — Structured JSON with OTA campaign plan, anomaly report, device groups, and onboarding recommendation
+The live monitoring UI with auto-refreshing panels, Chart.js charts, Leaflet map, and modals.
 
-```mermaid
-sequenceDiagram
-    participant U as User
-    participant BE as FastAPI Backend
-    participant DB as Database
+1. **User → Backend** — GET `/` with auth check (Google OAuth or admin)
+2. **Backend → User** — Rendered Jinja2 HTML with Chart.js, Leaflet, auto-refresh JS
+3. **Dashboard polls** — Devices (5s), MQTT status (10s), alerts (10s), Aegis (10s), agents (30s), predictions (30s), geofences (60s), schedules (30s), queue (15s)
+4. **Device detail modal** — Tabs: Telemetry (Chart.js charts), Shadow, Lifecycle, Commands
+5. **Prometheus → Grafana** — 30+ metrics scraped every 10s; pre-provisioned dashboards
 
-    U->>BE: GET /agents/recommendations
-    par OTA Agent
-        BE->>DB: Query firmware + devices
-        DB-->>BE: Fleet data
-    and Anomaly Agent
-        BE->>DB: Check heartbeats / OTAs
-        DB-->>BE: Signal data
-    and Group Agent
-        BE->>DB: Cluster by firmware, signal
-        DB-->>BE: Device groups
-    end
-    BE-->>U: Structured JSON (all agents)
-```
+### 8. Alert Pipeline + Aegis Integration
 
-### 5. Alert Pipeline + Aegis Integration
+1. **User → Backend** — GET `/agents/fleet-health` triggers anomaly detection
+2. **Backend → DB** — Checks for 8 anomaly types (weak_signal, stuck_ota, ota_failure_spike, mass_offline, device_offline, v2g_revenue_drop, geofence_enter, geofence_exit)
+3. **AlertEngine** — Dedup (type + device_id), cooldown (120-3600s), escalation (3× → critical)
+4. **Channels** — Fans out to Slack, Email, Webhook
+5. **Aegis** — Critical anomalies may trigger auto-remediation (8 rules, DLQ, retry)
+6. **Dashboard** — Alert panel with acknowledge/resolve buttons; badge count in header
 
-Anomaly detection → AlertEngine dedup/cooldown → Aegis auto-remediation → multi-channel notifications.
+### 9. Aegis Auto-Remediation
 
-1. **User → Backend** — GET `/agents/fleet-health` triggers anomaly detection with mandatory alerting
-2. **Backend → DB** — Heuristic checks for device_offline, weak_signal, stuck_ota, v2g_revenue_drop, aegis_escalation
-3. **Backend → Aegis** — Critical anomalies forwarded to Aegis engine for auto-remediation (8 rule chain)
-4. **Backend → AlertEngine** — Processes anomalies through dedup (type + device_id), cooldown (300-3600s), and escalation (3× count → critical)
-5. **AlertEngine → Channels** — Fans out to Slack (rich attachment), Email (SMTP), Webhook (JSON POST)
-6. **Backend → DB** — Alert records persisted with active/acknowledged/resolved lifecycle; Aegis results also recorded
-7. **Backend → User** — Returns processed alert status + Aegis remediation result; dashboard panel refreshes every 10s
+1. **Aegis → Backend** — Scrape loop (15s) polls `/metrics`, parses fleet_* signals
+2. **Aegis → Aegis** — Classifies signals; matches against 8 priority-ordered rules (with cooldown)
+3. **Aegis → MQTT** — Executes remediation actions (throttle_ota, device_restart, qos_downgrade, etc.)
+4. **Aegis → DB** — Records Remediation with input/output snapshots, duration, status
+5. **Aegis → Prometheus** — 7 aegis_* metrics updated
+6. **Dashboard** — 3-column panel: signals / active / history (auto-refresh 10s)
 
-```mermaid
-sequenceDiagram
-    participant U as User
-    participant BE as FastAPI Backend
-    participant AE as AlertEngine
-    participant CH as Channels (Slack / Email / Webhook)
-    participant DB as Database
-    participant AEG as Aegis Engine
+### 10. Device Lifecycle & Provisioning
 
-    U->>BE: GET /agents/fleet-health
-    BE->>DB: Heuristic anomaly detection
-    DB-->>BE: Results
-    alt critical anomaly
-        BE->>AEG: Forward for auto-remediation
-    end
-    BE->>AE: process_anomalies()
-    AE->>AE: Dedup + cooldown + escalation
-    AE->>CH: Fan-out notification
-    AE->>DB: Persist alert record
-    BE-->>U: Alert + remediation status
-```
-
-### 6. Aegis Auto-Remediation
-
-Closing the loop between metric signals and fleet healing — scrape, classify, decide, act, record, observe.
-
-1. **Aegis → Backend** — Scrape loop (every 15s) polls `/metrics/`, parses fleet_* signals into RemediationSignal objects
-2. **Aegis → Backend** — Classifies signals by severity (INFO/WARNING/CRITICAL), matches against 8 priority-ordered rules
-3. **Aegis → Aegis** — Decision engine evaluates rules in priority order; first match wins; cooldown enforcement per rule
-4. **Aegis → Aegis** — Action execution with 30s timeout, exponential backoff retry (×3), rollback, dead-letter queue
-5. **Aegis → MQTT** — Publishes remediation commands (throttle_ota, device_restart, qos_downgrade, etc.)
-6. **Aegis → Backend** — Records immutable Remediation record (full input/output snapshots, duration, error trace)
-7. **Aegis → Prometheus** — Increments 7 aegis_* Prometheus metrics (signals, decisions, remediations, duration, DLQ)
-8. **Aegis → User** — Dashboard panel (3-column: signals/active/history, auto-refresh 10s, expandable entries)
-
-```mermaid
-sequenceDiagram
-    participant AEG as Aegis Scraper
-    participant BE as FastAPI Backend
-    participant DE as Decision Engine
-    participant MQ as Mosquitto MQTT
-    participant DB as Database
-    participant PRO as Prometheus
-
-    loop every 15s
-        AEG->>BE: Scrape /metrics/
-        BE-->>AEG: fleet_* signals
-        AEG->>DE: Classify + match rules
-        DE->>DE: Priority evaluation
-        alt Rule matches
-            DE->>MQ: Publish remediation command
-            DE->>DB: Record Remediation
-            DE->>PRO: Update aegis_* metrics
-        end
-    end
-```
-
-Built-in rules: R001 throttle_ota, R002 mqtt_qos_downgrade, R003 device_soft_restart, R004 scale_heartbeat, R005 rollback_ota_batch, R006 human_escalation, R007 migrate_device_pool, R008 cleanup_firmware_artifacts.
-
-### 7. GPS Fleet Tracking
-
-Live device location tracking piggybacked on existing heartbeat flow — no new MQTT topics or endpoints.
-
-1. **Simulator → MQTT** — After `GPS_INTERVAL` seconds, device activates GPS (firmware → `2.0.0-gps`) and includes `latitude` and `longitude` in every heartbeat to `iot/fleet/{id}/heartbeat`
-2. **MQTT → Backend** — `handle_mqtt_heartbeat()` at `app/main.py:98` extracts `latitude`/`longitude` from JSON payload and sets `device.latitude`/`device.longitude`
-3. **Backend → DB** — Coordinates persisted to `devices.latitude` and `devices.longitude` (nullable Float columns)
-4. **Backend → User** — `GET /devices` returns lat/lng per device; dashboard renders Leaflet map from `/api/devices` HTMX data
-5. **Dashboard → Leaflet** — `updateMapMarkers()` renders `L.circleMarker` per device, color-coded by city, with animated position updates and click popups; city filter buttons toggle visibility
-
-Backend auto-creates a `2.0.0-gps` firmware record on startup (`app/main.py:126`) as a demo firmware binary. Simulator devices self-activate GPS after a timer rather than via OTA command.
-
-```mermaid
-sequenceDiagram
-    participant D as Device
-    participant MQ as Mosquitto MQTT
-    participant BE as FastAPI Backend
-    participant DB as Database
-    participant API as REST API
-    participant MAP as Leaflet Map
-
-    Note over D: GPS activates after GPS_INTERVAL
-    D->>MQ: Heartbeat + latitude, longitude
-    MQ->>BE: handle_mqtt_heartbeat()
-    BE->>DB: SET latitude, longitude
-    API->>DB: SELECT devices
-    DB-->>API: Devices with coords
-    API-->>MAP: JSON response
-    MAP->>MAP: L.circleMarker (city-color)
-    Note over MAP: Animated markers, popup on click
-```
+1. **Pre-register** — POST `/provisioning/pre-register` creates offline device with claim_token
+2. **Bulk import** — POST `/provisioning/bulk-import` (CSV) creates multiple devices with tokens
+3. **Claim** — Device claims itself via POST `/lifecycle/claim` with token
+4. **Maintenance** — POST `/lifecycle/{id}/maintenance` → MQTT maintenance command
+5. **Decommission** — POST `/lifecycle/{id}/decommission` → lifecycle_status = decommissioned
+6. **Audit** — Every lifecycle transition logged + Prometheus metric incremented
 
 ---
 
@@ -264,31 +178,17 @@ sequenceDiagram
 | Setup | Default — no extra config | Requires `--profile production` |
 | Alert Channels | Slack only | Slack + Email + Webhook |
 
-Toggle with the Dev/Prod button or press `O`.
-
----
-
-## Keyboard Shortcuts
-
-| Key | Action |
-|---|---|
-| `Space` | Play / Pause auto-advance |
-| `←` / `→` | Previous / Next step |
-| `1`–`7` | Select flow tab |
-| `O` | Toggle dev/prod mode |
-| `T` | Toggle dark/light theme |
-| `F` | Fullscreen canvas |
-| `R` | Reset node positions |
-| Drag | Reposition any node |
-
 ---
 
 ## Workshop Scenarios
 
-1. **"Show me how a device joins the fleet"** — Click flow 1 and watch the MQTT registration → DB persist → heartbeat loop
-2. **"What happens when an OTA fails?"** — Flow 2 step 6: 20% failure rate triggers hash_mismatch → automatic rollback
-3. **"How does the dashboard stay live?"** — Flow 3: HTMX auto-refresh + Prometheus scraping + Grafana dashboards (+Aegis panel)
-4. **"What can the AI agents tell me?"** — Flow 4: all 4 agents run concurrently with heuristic logic (no LLM API key needed)
-5. **"How do alerts get to Slack and trigger auto-remediation?"** — Flow 5: anomaly detection → Aegis rules → dedup → escalation → Slack/Email/Webhook
-6. **"How does Aegis auto-heal the fleet?"** — Flow 6: scrape → classify → decide → act → record → observe — 8 rules, dead-letter queue, full audit trail
-7. **"How do I see where my devices are?"** — Flow 7: GPS piggybacks on heartbeats → DB persist → Leaflet map with city-color-coded markers, popups, and city filters
+1. **"Show me how a device joins the fleet"** — Flow 1: MQTT registration → DB persist → heartbeat → telemetry → geofence check
+2. **"What happens when an OTA fails?"** — Flow 2: 20% failure rate → hash_mismatch → automatic rollback
+3. **"Can I schedule OTA for off-peak hours?"** — Flow 3: Scheduled OTA with blackout windows + canary
+4. **"Can the system predict failures?"** — Flow 4: Telemetry trends → predictive maintenance → risk scores
+5. **"How do geofences work?"** — Flow 5: GPS heartbeat → geofence check → enter/exit alerts → map overlay
+6. **"What happens when a device is offline?"** — Flow 6: Command queue → reconnect flush → shadow sync
+7. **"How does the dashboard stay live?"** — Flow 7: 9 auto-refresh intervals + Chart.js + Leaflet + modals
+8. **"How do alerts get to Slack?"** — Flow 8: Anomaly detection → dedup → escalation → multi-channel
+9. **"How does Aegis auto-heal the fleet?"** — Flow 9: scrape → classify → decide → act → record → 8 rules
+10. **"How do I provision devices at scale?"** — Flow 10: Bulk CSV import → QR-claim → lifecycle management

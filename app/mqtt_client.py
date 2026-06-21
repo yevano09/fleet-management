@@ -165,6 +165,47 @@ class MqttClient:
         result = self.client.publish(topic, payload, qos=1)
         return result.rc == 0
 
+    def publish_restart_command(self, device_id: str, reason: str = "soft_restart") -> bool:
+        if not self._connected:
+            return False
+        topic = f"iot/fleet/{device_id}/command/restart"
+        payload = json.dumps({"command": "restart", "reason": reason, "timestamp": datetime.now(timezone.utc).isoformat()})
+        result = self.client.publish(topic, payload, qos=1)
+        return result.rc == 0
+
+    def publish_rollback_command(self, device_id: str, previous_firmware: str) -> bool:
+        if not self._connected:
+            return False
+        topic = f"iot/fleet/{device_id}/command/rollback"
+        payload = json.dumps({"command": "rollback", "previous_firmware": previous_firmware, "timestamp": datetime.now(timezone.utc).isoformat()})
+        result = self.client.publish(topic, payload, qos=1)
+        return result.rc == 0
+
+    def publish_maintenance_command(self, device_id: str, enter: bool = True, reason: str = "") -> bool:
+        if not self._connected:
+            return False
+        topic = f"iot/fleet/{device_id}/command/maintenance"
+        cmd = "enter_maintenance" if enter else "exit_maintenance"
+        payload = json.dumps({"command": cmd, "reason": reason, "timestamp": datetime.now(timezone.utc).isoformat()})
+        result = self.client.publish(topic, payload, qos=1)
+        return result.rc == 0
+
+    def publish_shadow_desired(self, device_id: str, state: dict) -> bool:
+        """Push desired shadow state to a device (Feature 7)."""
+        if not self._connected:
+            return False
+        topic = f"iot/fleet/{device_id}/command/shadow"
+        payload = json.dumps({"state": state, "timestamp": datetime.now(timezone.utc).isoformat()})
+        result = self.client.publish(topic, payload, qos=1)
+        return result.rc == 0
+
+    def publish_raw(self, topic: str, payload: str, qos: int = 1) -> bool:
+        """Publish to an arbitrary topic (used by offline command queue delivery)."""
+        if not self._connected:
+            return False
+        result = self.client.publish(topic, payload, qos=qos)
+        return result.rc == 0
+
     @property
     def is_connected(self) -> bool:
         return self._connected

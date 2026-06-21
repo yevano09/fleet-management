@@ -35,6 +35,7 @@ from agents.phase1_crew import (
     run_anomaly_agent,
     run_group_agent,
     run_onboarding_agent,
+    run_predictive_agent,
 )
 
 BACKEND_URL = os.environ.get("BACKEND_URL", f"http://localhost:{port}")
@@ -90,6 +91,12 @@ def main():
     parser.add_argument("--remediation-history", action="store_true", help="Show remediation history")
     parser.add_argument("--remediation-rerun", type=str, metavar="ID", default="", help="Re-run a remediation by ID")
     parser.add_argument("--no-notify", action="store_true", help="Disable Slack notifications")
+    parser.add_argument("--llm", action="store_true", help="Use CrewAI LLM agents (requires CREWAI_ENABLED=1)")
+    parser.add_argument("--predictive", action="store_true", help="Run predictive maintenance scan")
+    parser.add_argument("--predictive-history", action="store_true", help="Show failure predictions")
+    parser.add_argument("--telemetry", type=str, metavar="DEVICE_ID", default="", help="Fetch telemetry for a device")
+    parser.add_argument("--geofences", action="store_true", help="List geofences")
+    parser.add_argument("--audit", action="store_true", help="Show recent audit log entries")
     parser.add_argument("--json", action="store_true", help="Output as JSON")
     args = parser.parse_args()
 
@@ -185,11 +192,86 @@ def main():
         except Exception as e:
             print(f"Error re-running remediation: {e}")
             return
+    elif args.predictive:
+        results = [run_predictive_agent()]
+    elif args.predictive_history:
+        try:
+            data = _fetch_json("/agents/predictive-history?min_risk=0.4&limit=20")
+            if args.json:
+                print(json.dumps(data, indent=2))
+            else:
+                preds = data.get("predictions", [])
+                print(f"\n{'='*60}")
+                print(f"Failure Predictions: {data.get('total', 0)} total")
+                print(f"{'='*60}")
+                for p in preds[:10]:
+                    risk = p.get("risk_score", 0)
+                    icon = "[HIGH]" if risk >= 0.7 else "[MED]" if risk >= 0.4 else "[LOW]"
+                    print(f"  {icon} {p.get('risk_type', '?')} risk={risk:.2f} device={p.get('device_id', '')[:8]}")
+                    if p.get("recommendation"):
+                        print(f"       -> {p['recommendation']}")
+            return
+        except Exception as e:
+            print(f"Error fetching predictions: {e}")
+            return
+    elif args.telemetry:
+        try:
+            data = _fetch_json(f"/telemetry/{args.telemetry}?hours=24&limit=100")
+            if args.json:
+                print(json.dumps(data, indent=2))
+            else:
+                points = data.get("points", [])
+                print(f"\n{'='*60}")
+                print(f"Telemetry for device {args.telemetry[:8]}... ({len(points)} points)")
+                print(f"{'='*60}")
+                for p in points[-10:]:
+                    ts = p.get("timestamp", "")
+                    sig = p.get("signal_strength", "?")
+                    soc = p.get("soc", "?")
+                    print(f"  {ts}  sig={sig} soc={soc}")
+            return
+        except Exception as e:
+            print(f"Error fetching telemetry: {e}")
+            return
+    elif args.geofences:
+        try:
+            data = _fetch_json("/geofences")
+            if args.json:
+                print(json.dumps(data, indent=2))
+            else:
+                gfs = data.get("geofences", [])
+                print(f"\n{'='*60}")
+                print(f"Geofences: {data.get('total', 0)} total")
+                print(f"{'='*60}")
+                for g in gfs:
+                    status = "enabled" if g.get("enabled") else "disabled"
+                    print(f"  [{status}] {g.get('name', '?')} ({g.get('shape', '?')}) id={g.get('id', '')[:8]}")
+            return
+        except Exception as e:
+            print(f"Error fetching geofences: {e}")
+            return
+    elif args.audit:
+        try:
+            data = _fetch_json("/audit?limit=20")
+            if args.json:
+                print(json.dumps(data, indent=2))
+            else:
+                logs = data.get("logs", [])
+                print(f"\n{'='*60}")
+                print(f"Audit Log: {data.get('total', 0)} total (showing 20)")
+                print(f"{'='*60}")
+                for l in logs:
+                    print(f"  {l.get('timestamp', '')} {l.get('actor', '?')} -> {l.get('action', '?')} {l.get('target_type', '')}/{(l.get('target_id') or '')[:8]}")
+            return
+        except Exception as e:
+            print(f"Error fetching audit log: {e}")
+            return
     else:
         results = run_all_agents(
             notify=notify,
             firmware_version=args.firmware,
             min_group_size=args.min_group_size,
+            use_llm=args.llm,
         )
 
     if args.json:

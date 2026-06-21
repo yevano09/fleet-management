@@ -79,6 +79,11 @@ class SimulatedDevice:
         self.plug_status = "connected"
         self._v2g_action = "idle"
         self._v2g_end_time = 0.0
+        self._in_maintenance = False
+        # Simulated resource metrics (Feature 1 telemetry)
+        self.cpu_usage = random.uniform(5, 25)
+        self.memory_usage = random.uniform(30, 55)
+        self.temperature = random.uniform(35, 55)
 
         self._client = mqtt.Client(
             client_id=f"sim-{device_id[:8]}",
@@ -100,6 +105,11 @@ class SimulatedDevice:
             client.subscribe(config_topic, qos=1)
             v2g_topic = f"iot/fleet/{self.id}/command/v2g"
             client.subscribe(v2g_topic, qos=1)
+            # Feature 5/7/9: subscribe to new command topics
+            client.subscribe(f"iot/fleet/{self.id}/command/restart", qos=1)
+            client.subscribe(f"iot/fleet/{self.id}/command/rollback", qos=1)
+            client.subscribe(f"iot/fleet/{self.id}/command/maintenance", qos=1)
+            client.subscribe(f"iot/fleet/{self.id}/command/shadow", qos=1)
         else:
             logger.error(f"[{self.name}] MQTT connection failed: rc={reason_code}")
 
@@ -113,11 +123,65 @@ class SimulatedDevice:
                 )
             elif msg.topic.endswith("/command/config"):
                 logger.info(f"[{self.name}] Received remote config: {payload.get('config', {})}")
+                self._handle_config_command(payload)
             elif msg.topic.endswith("/command/v2g"):
                 logger.info(f"[{self.name}] Received V2G command: {payload.get('action', '')}")
                 self._handle_v2g_command(payload)
+            elif msg.topic.endswith("/command/restart"):
+                logger.info(f"[{self.name}] Received restart command: {payload.get('reason', '')}")
+                self._handle_restart_command(payload)
+            elif msg.topic.endswith("/command/rollback"):
+                logger.info(f"[{self.name}] Received rollback command")
+                self._handle_rollback_command(payload)
+            elif msg.topic.endswith("/command/maintenance"):
+                logger.info(f"[{self.name}] Received maintenance command: {payload.get('command', '')}")
+                self._handle_maintenance_command(payload)
+            elif msg.topic.endswith("/command/shadow"):
+                logger.info(f"[{self.name}] Received shadow desired state")
+                self._handle_shadow_command(payload)
         except Exception as e:
             logger.error(f"[{self.name}] Error processing command: {e}")
+
+    def _handle_config_command(self, payload: dict):
+        config = payload.get("config", {})
+        if "heartbeat_interval_seconds" in config:
+            global HEARTBEAT_INTERVAL
+            # Per-device would be better, but for the simulator this is a demo
+            logger.info(f"[{self.name}] Config update: heartbeat={config.get('heartbeat_interval_seconds')}")
+
+    def _handle_restart_command(self, payload: dict):
+        logger.info(f"[{self.name}] Soft restart: {payload.get('reason', 'unknown')}")
+        self.start_time = time.time()
+        self.uptime = 100.0
+
+    def _handle_rollback_command(self, payload: dict):
+        prev_fw = payload.get("previous_firmware", self.previous_firmware)
+        logger.info(f"[{self.name}] Rolling back firmware to {prev_fw}")
+        self.firmware_version = prev_fw
+
+    def _handle_maintenance_command(self, payload: dict):
+        cmd = payload.get("command", "")
+        reason = payload.get("reason", "")
+        if cmd == "enter_maintenance":
+            logger.info(f"[{self.name}] Entering maintenance mode: {reason}")
+            self._in_maintenance = True
+        elif cmd == "exit_maintenance":
+            logger.info(f"[{self.name}] Exiting maintenance mode: {reason}")
+            self._in_maintenance = False
+
+    def _handle_shadow_command(self, payload: dict):
+        state = payload.get("state", {})
+        logger.info(f"[{self.name}] Shadow desired state received: {list(state.keys())}")
+        # Publish reported state back (Feature 7)
+        reported = {
+            "action": "idle",
+            "soc": round(self.soc, 1) if self.is_ev else None,
+            "soh": round(self.soh, 1) if self.is_ev else None,
+            "firmware_version": self.firmware_version,
+            "signal_strength": self.signal_strength,
+        }
+        topic = f"iot/fleet/{self.id}/status/v2g"
+        self._client.publish(topic, json.dumps(reported), qos=1)
 
     async def _handle_ota_command(self, payload: dict):
         firmware_url = payload.get("firmware_url", "")
@@ -207,6 +271,15 @@ class SimulatedDevice:
         # SOH slowly degrades over time
         self.soh = max(70.0, self.soh - 0.001)
 
+    def _update_resources(self):
+        """Simulate CPU/memory/temperature drift for telemetry (Feature 1)."""
+        self.cpu_usage = max(1.0, min(95.0, self.cpu_usage + random.uniform(-2, 2)))
+        self.memory_usage = max(10.0, min(90.0, self.memory_usage + random.uniform(-1, 1)))
+        self.temperature = max(20.0, min(85.0, self.temperature + random.uniform(-0.5, 0.5)))
+        # Correlate temperature with CPU load
+        if self.cpu_usage > 70:
+            self.temperature += 0.5
+
     def _update_gps(self):
         now = time.time()
         if not self.gps_active and (now - self.start_time) >= GPS_INTERVAL:
@@ -225,21 +298,29 @@ class SimulatedDevice:
             "name": self.name,
             "firmware_version": self.firmware_version,
             "ip_address": f"10.0.0.{random.randint(1, 254)}",
+            "city": self.city,
         })
         self._client.publish("iot/fleet/register", payload, qos=1)
         self.status = "online"
-        logger.info(f"[{self.name}] Registered (fw={self.firmware_version})")
+        logger.info(f"[{self.name}] Registered (fw={self.firmware_version}, city={self.city})")
 
     async def send_heartbeat(self):
+        if self._in_maintenance:
+            return  # Skip heartbeats while in maintenance mode (Feature 9)
         self.uptime = min(100.0, 100.0 * (1.0 - (time.time() - self.start_time) / 86400) + 95.0)
         self.signal_strength = random.randint(max(-95, self.signal_strength - 2), min(-30, self.signal_strength + 2))
         self._update_battery()
         self._update_gps()
+        self._update_resources()
 
         payload = {
             "uptime_percentage": round(self.uptime, 1),
             "signal_strength": self.signal_strength,
             "firmware_version": self.firmware_version,
+            "city": self.city,
+            "cpu_usage": round(self.cpu_usage, 1),
+            "memory_usage": round(self.memory_usage, 1),
+            "temperature": round(self.temperature, 1),
         }
         if self.is_ev:
             payload["soc"] = round(self.soc, 1)

@@ -53,10 +53,13 @@ async def async_list_devices(db: AsyncSession, status: str | None = None) -> dic
                 "mqtt_client_id": d.mqtt_client_id or "",
                 "latitude": d.latitude,
                 "longitude": d.longitude,
+                "city": d.city,
                 "soc": d.soc,
                 "soh": d.soh,
                 "battery_temp": d.battery_temp,
                 "plug_status": d.plug_status or "disconnected",
+                "lifecycle_status": d.lifecycle_status.value if d.lifecycle_status else "active",
+                "current_ota_id": d.current_ota_id,
             }
             for d in devices
         ],
@@ -363,17 +366,22 @@ async def async_plan_ota_campaign(db: AsyncSession, firmware_version: str) -> di
 
     phases = []
     remaining = list(remainder)
+    phase_num = 0
     for pct, label in [(30, "Phase 1"), (60, "Phase 2"), (100, "Phase 3")]:
+        phase_num += 1
         batch_size = max(0, int(len(devices) * pct / 100) - canary_size)
         batch = remaining[:batch_size]
         remaining = remaining[batch_size:]
+        is_final = (pct == 100) or not remaining
         phases.append({
             "phase": label,
             "device_count": len(batch),
             "device_ids": [d["id"] for d in batch],
-            "gate": f"Wait {3 * len(phases) + 5} min, verify "
-                    f"failure rate < 20% before proceeding"
-                    if phases else "No gate (final phase)",
+            "gate": (
+                "No gate (final phase)"
+                if is_final
+                else f"Wait {3 * phase_num + 5} min, verify failure rate < 20% before proceeding"
+            ),
         })
         if not remaining:
             break
@@ -616,4 +624,98 @@ async def async_list_v2g_schedules(db: AsyncSession) -> dict:
             for s in schedules
         ],
         "total": len(schedules),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Predictive maintenance tools (Feature 3)
+# ---------------------------------------------------------------------------
+
+async def async_run_predictive_scan(db: AsyncSession) -> dict:
+    """Run a predictive maintenance analysis cycle.
+
+    Returns: {predictions_count, predictions: [...]}
+    """
+    from app.predictive_maintenance import run_prediction_cycle
+    predictions = await run_prediction_cycle(db)
+    return {
+        "predictions_count": len(predictions),
+        "predictions": [
+            {
+                "id": p.id,
+                "device_id": p.device_id,
+                "risk_type": p.risk_type,
+                "risk_score": p.risk_score,
+                "confidence": p.confidence,
+                "predicted_hours_to_failure": p.predicted_hours_to_failure,
+                "recommendation": p.recommendation,
+                "evidence": p.evidence,
+            }
+            for p in predictions
+        ],
+    }
+
+
+async def async_get_predictions(db: AsyncSession, min_risk: float = 0.0, resolved: bool = False, limit: int = 20) -> dict:
+    """Fetch active failure predictions.
+
+    Returns: {predictions: [...], total: N}
+    """
+    from app.predictive_maintenance import get_predictions
+    result = await get_predictions(db, min_risk=min_risk, resolved=resolved, limit=limit)
+    return {
+        "predictions": [
+            {
+                "id": p.id,
+                "device_id": p.device_id,
+                "risk_type": p.risk_type,
+                "risk_score": p.risk_score,
+                "confidence": p.confidence,
+                "predicted_hours_to_failure": p.predicted_hours_to_failure,
+                "recommendation": p.recommendation,
+                "evidence": p.evidence,
+                "created_at": p.created_at.isoformat() if p.created_at else None,
+            }
+            for p in result["predictions"]
+        ],
+        "total": result["total"],
+    }
+
+
+# ---------------------------------------------------------------------------
+# Telemetry query tools (Feature 1)
+# ---------------------------------------------------------------------------
+
+async def async_get_telemetry(db: AsyncSession, device_id: str, hours: int = 24, limit: int = 500) -> dict:
+    """Fetch telemetry time-series for a device.
+
+    Returns: {device_id, points: [...], total: N}
+    """
+    from app.models import Telemetry
+    from datetime import timedelta
+    cutoff = utcnow() - timedelta(hours=hours)
+    result = await db.execute(
+        select(Telemetry)
+        .where(Telemetry.device_id == device_id, Telemetry.timestamp >= cutoff)
+        .order_by(Telemetry.timestamp.asc())
+        .limit(limit)
+    )
+    points = result.scalars().all()
+    return {
+        "device_id": device_id,
+        "points": [
+            {
+                "timestamp": p.timestamp.isoformat() if p.timestamp else None,
+                "signal_strength": p.signal_strength,
+                "uptime_percentage": p.uptime_percentage,
+                "soc": p.soc,
+                "soh": p.soh,
+                "battery_temp": p.battery_temp,
+                "temperature": p.temperature,
+                "cpu_usage": p.cpu_usage,
+                "memory_usage": p.memory_usage,
+            }
+            for p in points
+        ],
+        "total": len(points),
     }

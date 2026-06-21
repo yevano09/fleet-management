@@ -1,7 +1,7 @@
 # Fleet Commander — Customer User Documentation (CUDO)
 
-> **Version:** 1.0.0  
-> **Document Date:** 2026-05-23  
+> **Version:** 2.0.0  
+> **Document Date:** 2026-06-21  
 > **System:** Fleet Commander IoT Device Management Module
 
 ---
@@ -14,18 +14,29 @@
 4. [Web Dashboard Usage](#4-web-dashboard-usage)
 5. [Device Management](#5-device-management)
 6. [OTA Firmware Updates](#6-ota-firmware-updates)
-7. [V2G (Vehicle-to-Grid) Arbitrage](#7-v2g-vehicle-to-grid-arbitrage)
-8. [AI Agent Recommendations](#8-ai-agent-recommendations)
-9. [MQTT Protocol Reference](#9-mqtt-protocol-reference)
-10. [REST API Reference](#10-rest-api-reference)
-11. [Prometheus Metrics](#11-prometheus-metrics)
-12. [Grafana Observability](#12-grafana-observability)
-13. [Configuration Reference](#13-configuration-reference)
-14. [Boundary Conditions & Limitations](#14-boundary-conditions--limitations)
-15. [Troubleshooting](#15-troubleshooting)
-16. [Security Considerations](#16-security-considerations)
-17. [Production Deployment](#17-production-deployment)
-18. [ESP32 / IoT Device Connection](#18-esp32--iot-device-connection)
+7. [Scheduled OTA & Maintenance Windows](#7-scheduled-ota--maintenance-windows)
+8. [Telemetry Time-Series](#8-telemetry-time-series)
+9. [Geofencing & Geo-alerts](#9-geofencing--geo-alerts)
+10. [Predictive Maintenance](#10-predictive-maintenance)
+11. [Offline Command Queue](#11-offline-command-queue)
+12. [Device Shadow / Digital Twin](#12-device-shadow--digital-twin)
+13. [Device Lifecycle & Decommissioning](#13-device-lifecycle--decommissioning)
+14. [Audit Log](#14-audit-log)
+15. [Webhook & Event Stream](#15-webhook--event-stream)
+16. [Bulk Provisioning & QR-Claim](#16-bulk-provisioning--qr-claim)
+17. [V2G (Vehicle-to-Grid) Arbitrage](#17-v2g-vehicle-to-grid-arbitrage)
+18. [AI Agent Recommendations](#18-ai-agent-recommendations)
+19. [Aegis Auto-Remediation](#19-aegis-auto-remediation)
+20. [MQTT Protocol Reference](#20-mqtt-protocol-reference)
+21. [REST API Reference](#21-rest-api-reference)
+22. [Prometheus Metrics](#22-prometheus-metrics)
+23. [Grafana Observability](#23-grafana-observability)
+24. [Configuration Reference](#24-configuration-reference)
+25. [RBAC Roles](#25-rbac-roles)
+26. [Troubleshooting](#26-troubleshooting)
+27. [Security Considerations](#27-security-considerations)
+28. [Production Deployment](#28-production-deployment)
+29. [ESP32 / IoT Device Connection](#29-esp32--iot-device-connection)
 
 ---
 
@@ -46,11 +57,25 @@ Fleet Commander is a production-grade **IoT device fleet management system**. It
 | Capability | Description |
 |---|---|
 | Device auto-registration | Devices register on first MQTT connect; no manual setup |
-| Heartbeat monitoring | Periodic heartbeats track uptime, signal strength, battery SOC |
-| OTA firmware updates | Upload firmware, trigger updates, automatic rollback on failure |
-| V2G arbitrage | Schedule EV battery charge/discharge to maximise revenue |
-| AI agents | OTA campaign planning, anomaly detection, device grouping |
-| Prometheus metrics | 14+ built-in metrics for fleet health, OTA, MQTT, API latency |
+| Heartbeat monitoring | Periodic heartbeats track uptime, signal, battery SOC, GPS, CPU/memory/temp |
+| Telemetry time-series | Every heartbeat recorded for trend analysis and predictive maintenance |
+| OTA firmware updates | Upload firmware (SHA256 + optional Ed25519 signing), trigger updates, automatic rollback |
+| Scheduled OTA | Cron-style OTA scheduling with blackout hours and canary percentage |
+| V2G arbitrage | Schedule EV battery charge/discharge to maximise revenue (real spot prices) |
+| Geofencing | Circle/polygon geofences with enter/exit alerts and map overlays |
+| Predictive maintenance | AI agent analyzes telemetry trends to predict device failures |
+| Offline command queue | Commands buffered for offline devices; delivered on reconnect |
+| Device shadow | Desired vs reported state (AWS IoT pattern); MQTT sync on reconnect |
+| Device lifecycle | active → maintenance → decommissioned; QR-claim provisioning |
+| Audit log | Every mutating action recorded with actor, target, details |
+| Webhook events | Outbound event delivery with HMAC signing and retry tracking |
+| Bulk provisioning | CSV device import; pre-register + QR-claim token flow |
+| Firmware signing | Ed25519 cryptographic signing and verification |
+| RBAC roles | user, admin, operator, viewer, fleet_manager |
+| AI agents | 6 agents: OTA campaign, anomaly, groups, onboarding, V2G, predictive |
+| Aegis auto-remediation | 8 rules, DLQ, dry-run mode, scrape → classify → decide → act |
+| Alert pipeline | Dedup, cooldown, escalation, Slack/Email/Webhook channels |
+| Prometheus metrics | 30+ built-in metrics for fleet health, OTA, MQTT, API, telemetry, geofences |
 | Grafana dashboards | Pre-built visualisation with auto-provisioning |
 | Remote device configuration | Push configs to devices via MQTT |
 | ESP32 support | Full Arduino sketch available for real hardware |
@@ -98,18 +123,21 @@ graph TB
 
 | Component | Technology | Version |
 |---|---|---|
-| Language | Python | 3.12 |
-| Web Framework | FastAPI | 0.115.12 |
+| Language | Python | 3.12+ |
+| Web Framework | FastAPI | 0.138.0 |
 | ASGI Server | Uvicorn | 0.30.0 |
 | ORM | SQLAlchemy | 2.0.49 |
 | Database | SQLite (dev) / PostgreSQL (prod) | — |
-| Validation | Pydantic / Pydantic-Settings | 2.9.0 / 2.14.1 |
+| Validation | Pydantic / Pydantic-Settings | 2.9.0 / 2.14.2 |
 | MQTT Client | paho-mqtt | 2.1.0 |
 | MQTT Broker | Eclipse Mosquitto | 2 |
 | Metrics | Prometheus Client | 0.25.0 |
 | Monitoring | Prometheus + Grafana | 2.53.0 / 11.1.0 |
 | Templates | Jinja2 | 3.1.6 |
-| Frontend | HTMX | 2.0.3 |
+| Frontend Charts | Chart.js | 4.4.1 |
+| Frontend Maps | Leaflet | 1.9.4 |
+| Crypto Signing | cryptography (Ed25519) | 45.0.13 |
+| Auth | PyJWT + Google OAuth | 2.13.0 |
 
 ---
 
@@ -188,17 +216,33 @@ Access the dashboard at **http://localhost:8000**.
 | **Offline Devices** | Devices that haven't sent a heartbeat in 60+ seconds |
 | **OTA In Progress** | Active OTA deployments currently in downloading/applying/verifying state |
 | **OTA Success Rate** | Percentage of successful OTA deployments out of total |
+| **Active Geofences** | Number of enabled geofences |
+| **Failure Predictions** | Number of active predictive maintenance risk predictions |
+| **Queued Commands** | Number of commands awaiting delivery to offline devices |
 
-Colour coding: green (healthy), red (critical), blue (in-progress).
+Colour coding: green (healthy), red (critical), blue (in-progress), purple (geofences), amber (predictions), teal (queue).
 
 ### 4.3 Device Table
 
-Columns: Device Name, Firmware, Status, Signal Strength, Uptime %, Last Seen, OTA Status.
+Columns: Checkbox, Device Name (with lifecycle badge + city), Firmware, Status, Signal, Uptime, Last Seen, OTA Status, Map button.
 
 - Status badges: `● Online` (green), `○ Offline` (red)
-- OTA Status badges: `success` (green), `failed` (red), `rolled_back` (yellow), `downloading` (blue), `applying` (purple), `verifying` (yellow), `pending` (grey)
+- Lifecycle badges: `active` (green), `maintenance` (amber), `decommissioned` (red)
+- OTA Status badges: `success`, `failed`, `rolled_back`, `downloading`, `applying`, `verifying`, `pending`
+- Click any row to open the **Device Detail Modal** with telemetry charts, shadow, lifecycle, and commands tabs
 - Checkbox column for selecting specific devices for OTA
 - "Select All" checkbox in the header
+
+### 4.4 Device Detail Modal
+
+Click any device row to open a modal with 4 tabs:
+
+| Tab | Content |
+|---|---|
+| **Telemetry** | Chart.js line charts for signal strength, SOC, and temperature over the last 24 hours |
+| **Shadow** | Desired vs reported state JSON; in-sync indicator |
+| **Lifecycle** | Current lifecycle status badge; maintenance/decommission/activate buttons |
+| **Commands** | Pending queued commands for this device with retry buttons |
 
 ### 4.4 OTA Deployments Section
 
@@ -234,7 +278,14 @@ Click **"Trigger OTA Update"** to open the modal:
 |---|---|
 | Device table & stats | 5 seconds |
 | MQTT status badge | 10 seconds |
+| Alerts panel | 10 seconds |
+| Aegis remediation panel | 10 seconds |
+| Command queue stat | 15 seconds |
 | Agent recommendation panels | 30 seconds |
+| Predictive maintenance panel | 30 seconds |
+| Scheduled OTA panel | 30 seconds |
+| Firmware list | 30 seconds |
+| Geofence panel | 60 seconds |
 
 ---
 
@@ -417,13 +468,362 @@ When a device reports `hash_mismatch`:
 # View all OTA deployments with counts
 curl http://localhost:8000/ota/status
 
-# List uploaded firmware versions
+# List uploaded firmware versions (includes signature fields)
 curl http://localhost:8000/ota/firmware
+```
+
+### 6.8 Firmware Cryptographic Signing (Feature 8)
+
+Firmware binaries can be cryptographically signed with Ed25519. When a signing key is configured, every upload is automatically signed.
+
+**Generate a keypair:**
+```bash
+python -c "from app.firmware_signing import generate_keypair; priv,pub=generate_keypair(); print(priv); print(pub)"
+```
+
+**Configure in `.env`:**
+```
+FIRMWARE_SIGNING_PRIVATE_KEY=<PEM private key>
+FIRMWARE_SIGNING_PUBLIC_KEY=<PEM public key>
+FIRMWARE_REQUIRE_SIGNATURE=false
+```
+
+When `FIRMWARE_REQUIRE_SIGNATURE=true`, unsigned firmware uploads are rejected. The `/ota/upload` response includes `signature`, `signing_key_id`, and `signed_by` fields. The dashboard shows a "signed" badge next to signed firmware versions.
+
+---
+
+## 7. Scheduled OTA & Maintenance Windows
+
+### 7.1 Overview
+
+Schedule OTA campaigns for specific times with blackout windows (e.g., skip peak hours 9am-5pm) and configurable canary percentages.
+
+### 7.2 Creating a Schedule
+
+```bash
+curl -X POST http://localhost:8000/ota/schedules \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Nightly v2.1 update",
+    "firmware_id": "<FW_ID>",
+    "all_devices": true,
+    "scheduled_for": "2026-06-22T02:00:00Z",
+    "blackout_start_hour": 9,
+    "blackout_end_hour": 17,
+    "canary_percent": 10
+  }'
+```
+
+### 7.3 Managing Schedules
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/ota/schedules` | List all schedules |
+| `POST` | `/ota/schedules/{id}/cancel` | Cancel a scheduled campaign |
+| `POST` | `/ota/schedules/{id}/pause` | Pause a campaign |
+| `POST` | `/ota/schedules/{id}/resume` | Resume a paused campaign |
+| `DELETE` | `/ota/schedules/{id}` | Delete a schedule |
+
+### 7.4 Dashboard
+
+The Scheduled OTA panel shows all campaigns with status badges (scheduled/running/completed/cancelled/paused/failed), scheduled time, blackout window, and canary percentage. Click "Schedule OTA" to create a new campaign via modal.
+
+---
+
+## 8. Telemetry Time-Series
+
+### 8.1 Overview
+
+Every heartbeat is recorded as a telemetry data point with signal strength, uptime, SOC, SOH, battery temp, GPS, CPU usage, memory usage, and device temperature. This enables trend analysis and predictive maintenance.
+
+### 8.2 API
+
+```bash
+# Fetch telemetry for a device (last 24 hours)
+curl http://localhost:8000/telemetry/{device_id}?hours=24&limit=500
+
+# Latest telemetry point
+curl http://localhost:8000/telemetry/{device_id}/latest
+
+# Summary statistics
+curl http://localhost:8000/telemetry/{device_id}/stats?hours=24
+
+# Prune old telemetry
+curl -X DELETE http://localhost:8000/telemetry/{device_id}?days=30
+```
+
+### 8.3 Dashboard Charts
+
+The Device Detail modal (click any device row) shows three Chart.js line charts:
+- **Signal Strength** over time (teal)
+- **State of Charge** over time (purple)
+- **Temperature** over time (amber)
+
+---
+
+## 9. Geofencing & Geo-alerts
+
+### 9.1 Overview
+
+Define geofences (circle or polygon) and receive alerts when devices enter or exit. Geofences are drawn on the dashboard Leaflet map.
+
+### 9.2 Creating a Geofence
+
+```bash
+# Circle geofence
+curl -X POST http://localhost:8000/geofences \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Bangalore Depot",
+    "shape": "circle",
+    "center_lat": 12.9716,
+    "center_lng": 77.5946,
+    "radius_meters": 5000,
+    "alert_on_enter": true,
+    "alert_on_exit": true,
+    "color": "#2DD4BF"
+  }'
+```
+
+### 9.3 Geofence Events
+
+When a device's GPS position crosses a geofence boundary, a `GeofenceEvent` is recorded and an alert is fired through the alert engine (dedup, cooldown, Slack/Email/Webhook).
+
+```bash
+# View geofence events
+curl http://localhost:8000/geofences/events/all?limit=50
+```
+
+### 9.4 Dashboard
+
+The Geofences panel lists all geofences with enable/disable and delete buttons. Enabled geofences are drawn as circles on the Leaflet map with their configured color.
+
+---
+
+## 10. Predictive Maintenance
+
+### 10.1 Overview
+
+The Predictive Maintenance Agent analyzes telemetry trends using linear regression to predict device failures before they happen. It checks four risk types:
+
+| Risk Type | Detection Method |
+|---|---|
+| `signal_degradation` | Signal strength trending downward (slope < -0.5) |
+| `thermal` | Temperature trending upward (slope > 0.3) or current > 70°C |
+| `battery_degradation` | SOH declining (slope < -0.05) or current < 75% |
+| `intermittent` | Uptime below 95% in 30%+ of samples |
+
+### 10.2 API
+
+```bash
+# Run a predictive scan
+curl -X POST http://localhost:8000/predictive/scan
+
+# List predictions (filter by minimum risk score)
+curl http://localhost:8000/predictive/predictions?min_risk=0.4
+
+# Mark a prediction as resolved
+curl -X POST http://localhost:8000/predictive/predictions/{id}/resolve
+```
+
+### 10.3 Dashboard
+
+The Predictive Maintenance panel shows risk cards with:
+- Risk type and color (red ≥ 0.7, amber ≥ 0.4, green < 0.4)
+- Risk score percentage and confidence
+- Predicted hours to failure (if available)
+- Recommendation text
+- Visual risk meter bar
+
+Click "Run Scan" to trigger analysis. The panel auto-refreshes every 30 seconds.
+
+---
+
+## 11. Offline Command Queue
+
+### 11.1 Overview
+
+When a device is offline, commands are queued and automatically delivered when it reconnects. This ensures no commands are lost during network interruptions.
+
+### 11.2 API
+
+```bash
+# Queue a command for a device
+curl -X POST http://localhost:8000/commands/queue \
+  -H "Content-Type: application/json" \
+  -d '{
+    "device_id": "<DEVICE_ID>",
+    "command_type": "config",
+    "payload": {"heartbeat_interval_seconds": 5},
+    "ttl_seconds": 3600
+  }'
+
+# List queued commands
+curl http://localhost:8000/commands?status=queued
+
+# Retry delivery
+curl -X POST http://localhost:8000/commands/{id}/retry
+
+# Pending commands for a device
+curl http://localhost:8000/commands/pending/{device_id}
+```
+
+### 11.3 Auto-delivery
+
+A background flusher loop (15s interval) checks for online devices with queued commands and delivers them via MQTT. On device reconnect, queued commands are immediately flushed.
+
+---
+
+## 12. Device Shadow / Digital Twin
+
+### 12.1 Overview
+
+Each device has a "shadow" with desired and reported state (AWS IoT pattern). The backend pushes desired state to devices via MQTT; devices report their state back.
+
+### 12.2 API
+
+```bash
+# Get current shadow
+curl http://localhost:8000/shadow/{device_id}
+
+# Update desired state (pushed to device via MQTT)
+curl -X PUT http://localhost:8000/shadow/{device_id} \
+  -H "Content-Type: application/json" \
+  -d '{"state": "desired", "payload": {"heartbeat_interval": 15, "log_level": "DEBUG"}}'
+
+# Shadow history
+curl http://localhost:8000/shadow/{device_id}/history
+```
+
+### 12.3 Sync on Reconnect
+
+When a device reconnects (registers after being offline), the backend automatically pushes the latest desired shadow state via `iot/fleet/{id}/command/shadow`.
+
+---
+
+## 13. Device Lifecycle & Decommissioning
+
+### 13.1 Lifecycle States
+
+| State | Description |
+|---|---|
+| `active` | Device is operational and receiving commands |
+| `maintenance` | Device is under maintenance; simulator skips heartbeats |
+| `decommissioned` | Device is retired; excluded from device list by default |
+
+### 13.2 API
+
+```bash
+# Enter maintenance mode
+curl -X POST http://localhost:8000/lifecycle/{id}/maintenance?reason=scheduled
+
+# Return to active
+curl -X POST http://localhost:8000/lifecycle/{id}/activate
+
+# Decommission
+curl -X POST http://localhost:8000/lifecycle/{id}/decommission \
+  -H "Content-Type: application/json" \
+  -d '{"reason": "retired", "factory_reset": true, "actor": "admin"}'
+
+# Generate claim token
+curl -X POST http://localhost:8000/lifecycle/{id}/claim-token
+
+# Claim a device via token
+curl -X POST http://localhost:8000/lifecycle/claim \
+  -H "Content-Type: application/json" \
+  -d '{"name": "MyDevice", "claim_token": "<token>", "firmware_version": "2.0.0"}'
 ```
 
 ---
 
-## 7. V2G (Vehicle-to-Grid) Arbitrage
+## 14. Audit Log
+
+### 14.1 Overview
+
+Every mutating action is recorded in the audit log with actor, action, target type/ID, details JSON, and timestamp.
+
+### 14.2 API
+
+```bash
+# List audit logs (filterable)
+curl http://localhost:8000/audit?limit=100&offset=0
+
+# Filter by actor
+curl http://localhost:8000/audit?actor=admin
+
+# Filter by action
+curl http://localhost:8000/audit?action=ota.trigger
+
+# Prune old logs
+curl -X DELETE http://localhost:8000/audit/old?days=90
+```
+
+### 14.3 Logged Actions
+
+Actions logged include: `device.register`, `device.reconnect`, `device.decommission`, `device.maintenance_enter`, `device.claimed`, `firmware.upload`, `ota.trigger`, `ota.schedule_create`, `geofence.create`, `webhook.create`, `shadow.desired_update`, and more.
+
+---
+
+## 15. Webhook & Event Stream
+
+### 15.1 Overview
+
+Subscribe external systems to fleet events. Events are delivered via HTTP POST with HMAC-SHA256 signing.
+
+### 15.2 API
+
+```bash
+# Create a webhook subscription
+curl -X POST http://localhost:8000/webhooks \
+  -H "Content-Type: application/json" \
+  -d '{"name": "My Integration", "url": "https://example.com/hook", "event_types": "*", "secret": "my-secret"}'
+
+# List webhooks
+curl http://localhost:8000/webhooks
+
+# View emitted events
+curl http://localhost:8000/webhooks/events?limit=50
+
+# Test a webhook
+curl -X POST http://localhost:8000/webhooks/test/{id}
+```
+
+### 15.3 Event Types
+
+Events emitted include: `device.registered`, `device.reconnected`, `device.decommissioned`, `device.claimed`, `device.bulk_imported`, `ota.triggered`, `ota.schedule_completed`, `geofence.event`, `webhook.test`.
+
+---
+
+## 16. Bulk Provisioning & QR-Claim
+
+### 16.1 Bulk CSV Import
+
+```bash
+# Upload a CSV file with columns: name, firmware_version, ip_address, mqtt_client_id, city
+curl -X POST http://localhost:8000/provisioning/bulk-import \
+  -F "file=@devices.csv"
+```
+
+Response includes imported count, skipped count, errors, and device IDs with claim tokens.
+
+### 16.2 Pre-register + QR-Claim
+
+```bash
+# Pre-register a device (creates offline device with claim token)
+curl -X POST "http://localhost:8000/provisioning/pre-register?name=Device-100&firmware_version=1.0.0"
+
+# Generate a claim token for an existing device
+curl -X POST http://localhost:8000/lifecycle/{id}/claim-token
+
+# Device claims itself using the token
+curl -X POST http://localhost:8000/lifecycle/claim \
+  -H "Content-Type: application/json" \
+  -d '{"name": "Device-100", "claim_token": "<token>"}'
+```
+
+---
+
+## 17. V2G (Vehicle-to-Grid) Arbitrage
 
 ### 7.1 Overview
 
@@ -472,7 +872,7 @@ The optimizer evaluates each time slot and decides:
 ### 7.4 V2G API
 
 ```bash
-# Get V2G dispatch schedule for all devices
+# Get V2G dispatch schedule for all devices (uses real spot prices if configured)
 curl 'http://localhost:8000/agents/v2g-dispatch'
 
 # Get V2G schedule for specific devices
@@ -493,7 +893,11 @@ curl 'http://localhost:8000/agents/v2g-dispatch?horizon_hours=12'
 | `schedule` | Array of hourly charge/discharge/idle slots |
 | `devices_used` | Number of devices with non-idle schedules |
 
-### 7.5 MQTT V2G Topics
+### 7.5 Real Spot-Price Integration (Feature 10)
+
+Set `SPOT_PRICE_PROVIDER` to `iex`, `entsoe`, or `api` and configure `SPOT_PRICE_URL` to fetch real electricity prices. Falls back to mock prices on any error.
+
+### 7.6 MQTT V2G Topics
 
 | Topic | Direction | Payload |
 |---|---|---|
@@ -502,17 +906,20 @@ curl 'http://localhost:8000/agents/v2g-dispatch?horizon_hours=12'
 
 ---
 
-## 8. AI Agent Recommendations
+## 18. AI Agent Recommendations
 
-### 8.1 Available Agents
+### 18.1 Available Agents
 
-The system includes three heuristic agents that run in-backend (no external LLM required). Optional Crew AI LLM integration can be enabled.
+The system includes 6 agents that run in-backend (no external LLM required). Optional CrewAI LLM integration via `--llm` flag and `CREWAI_ENABLED=1`.
 
-| Agent | Endpoint | Purpose | Human Input Required |
+| Agent | Endpoint | Purpose | Human Input |
 |---|---|---|---|
-| **OTA Campaign Strategist** | `GET /agents/ota-campaign` | Suggests canary-based phased rollout plan | Yes |
-| **Fleet Health Monitor** | `GET /agents/anomaly-check` | Detects weak signals, stuck OTAs, failure spikes, mass offline | No (Level 1) |
-| **Device Group Manager** | `GET /agents/device-groups` | Groups devices by firmware version and signal strength | Yes |
+| **OTA Campaign Strategist** | `GET /agents/ota-campaign` | Canary-based phased rollout plan | Yes |
+| **Fleet Health Monitor** | `GET /agents/anomaly-check` | Detects 8 anomaly types, fires alerts | No |
+| **Device Group Manager** | `GET /agents/device-groups` | Groups by firmware and signal strength | Yes |
+| **Device Onboarding Agent** | `GET /agents/onboarding` | Conflict checking + auto-registration | Optional |
+| **V2G Arbitrage Optimizer** | `GET /agents/v2g-dispatch` | Charge/discharge schedule with real prices | No |
+| **Predictive Maintenance** | `GET /agents/predictive-scan` | Telemetry trend analysis, failure prediction | No |
 
 ### 8.2 OTA Campaign Agent
 
@@ -589,7 +996,7 @@ python run_agents.py --json | jq .
 
 ---
 
-## 9. MQTT Protocol Reference
+## 19. MQTT Protocol Reference
 
 ### 9.1 Topic Structure
 
@@ -722,7 +1129,7 @@ All topics use the prefix `iot/fleet/` and **QoS 1** (at-least-once delivery).
 
 ---
 
-## 10. REST API Reference
+## 20. REST API Reference
 
 ### 10.1 Device Endpoints
 
@@ -818,7 +1225,7 @@ Error body:
 
 ---
 
-## 11. Prometheus Metrics
+## 21. Prometheus Metrics
 
 All metrics are exposed at `GET /metrics` in Prometheus text format.
 
@@ -850,7 +1257,7 @@ Grafana scrapes every 10 seconds from `backend:8000/metrics`. Prometheus retenti
 
 ---
 
-## 12. Grafana Observability
+## 22. Grafana Observability
 
 ### 12.1 Access
 
@@ -888,7 +1295,7 @@ Changes are **not persisted** across container restarts unless you create a new 
 
 ---
 
-## 13. Configuration Reference
+## 23. Configuration Reference
 
 ### 13.1 Backend Environment Variables
 
@@ -941,7 +1348,25 @@ The backend auto-loads `.env` files from the working directory.
 
 ---
 
-## 14. Boundary Conditions & Limitations
+## 24. RBAC Roles
+
+### 24.1 Role Definitions
+
+| Role | Permissions |
+|---|---|
+| `admin` | Full access including session management |
+| `fleet_manager` | Full fleet operations (OTA, lifecycle, geofences, schedules) |
+| `operator` | Device management, OTA triggers, alert acknowledge |
+| `viewer` | Read-only dashboard access |
+| `user` | Standard OAuth user (default: viewer) |
+
+### 24.2 Configuration
+
+Set the default role for new OAuth users via `DEFAULT_USER_ROLE` (default: `viewer`). The `UserRole` enum is defined in `app/models.py` and stored on `UserSession.role`.
+
+---
+
+## 25. Boundary Conditions & Limitations
 
 ### 14.1 Scalability
 
@@ -992,7 +1417,7 @@ Five tables: `devices`, `firmware`, `ota_deployments`, `v2g_schedules`.
 
 ---
 
-## 15. Troubleshooting
+## 26. Troubleshooting
 
 ### 15.1 Dashboard Shows No Devices
 
@@ -1109,7 +1534,7 @@ LOG_LEVEL=DEBUG docker compose --profile demo up -d
 
 ---
 
-## 16. Security Considerations
+## 27. Security Considerations
 
 ### 16.1 Default (Development) Configuration
 
@@ -1149,7 +1574,7 @@ For production deployment, see the full `SECURITY.md` file. Key measures include
 
 ---
 
-## 17. Production Deployment
+## 28. Production Deployment
 
 ### 17.1 PostgreSQL Migration
 
@@ -1206,7 +1631,7 @@ server {
 
 ---
 
-## 18. ESP32 / IoT Device Connection
+## 29. ESP32 / IoT Device Connection
 
 ### 18.1 Overview
 
@@ -1281,43 +1706,34 @@ docker compose --profile demo down -v
 ```
 fleet-management/
 ├── app/                       # Backend application
-│   ├── main.py                # Entry point, lifespan, MQTT handlers
+│   ├── main.py                # Entry point, lifespan, MQTT handlers, schedulers
 │   ├── config.py              # Pydantic settings (env-based)
 │   ├── database.py            # SQLAlchemy async engine + session
-│   ├── models.py              # ORM models (5 tables)
+│   ├── models.py              # ORM models (16 tables)
 │   ├── schemas.py             # Pydantic request/response schemas
 │   ├── mqtt_client.py         # MQTT v5 client wrapper
 │   ├── ota_manager.py         # OTA state machine + timeout watcher
-│   ├── metrics.py             # Prometheus metric definitions
+│   ├── alert_engine.py        # Alert engine with dedup, cooldown, multi-channel
+│   ├── metrics.py             # 30+ Prometheus metrics
+│   ├── audit.py               # Audit log helper
+│   ├── event_emitter.py       # Webhook event fan-out with HMAC
+│   ├── firmware_signing.py    # Ed25519 sign/verify
+│   ├── geofence_checker.py    # Geofence math (haversine, polygon)
+│   ├── predictive_maintenance.py  # Telemetry trend analysis
+│   ├── spot_prices.py         # Real spot-price integration
 │   ├── v2g_optimizer.py       # V2G arbitrage optimizer
-│   ├── routers/               # API route handlers
-│   │   ├── devices.py         # Device CRUD endpoints
-│   │   ├── ota.py             # OTA upload/trigger/status
-│   │   └── dashboard.py       # Fleet dashboard HTML
+│   ├── aegis/                 # Aegis Auto-Remediation Engine (8 files)
+│   ├── routers/               # 14 API route handlers
 │   └── templates/
-│       └── dashboard.html     # HTMX-powered dashboard (431 lines)
-├── agents/                    # Phase 1 AI agents
-│   ├── tools.py               # HTTP-based CLI tools
-│   ├── async_tools.py         # Async DB-backed tools
-│   ├── phase1_crew.py         # Agent definitions + Crew AI
-│   └── routers.py             # /agents/* API endpoints
-├── simulator/
-│   └── simulator.py           # Virtual device simulator
-├── tests/
-│   ├── test_e2e.py            # End-to-end integration tests
-│   └── test_v2g.py            # V2G optimizer unit tests
-├── docker/
-│   ├── prometheus/prometheus.yml
-│   ├── grafana/provisioning/  # Auto-provisioned dashboards
-│   │   ├── dashboards/
-│   │   └── datasources/
-│   └── mosquitto/mosquitto.conf
+│       └── dashboard.html     # Dashboard (Chart.js, Leaflet, modals)
+├── agents/                    # 6 AI agents (dual-mode: heuristic + CrewAI)
+├── simulator/                 # Virtual device simulator
+├── tests/                     # 91 unit tests + 40 E2E tests
+├── run_agents.py              # CLI agent runner
+├── demo_pitch.sh              # Automated demo pitch script
 ├── docker-compose.yml         # Multi-service orchestration
 ├── Dockerfile                 # Backend container
-├── Dockerfile.simulator       # Simulator container
-├── Dockerfile.tests           # Test runner container
 ├── requirements.txt           # Python dependencies
-├── run_agents.py              # CLI agent runner
 ├── .env.example               # Config template
 ├── CUDO.md                    # This file
 ├── ESP32_GUIDE.md             # ESP32 connection guide
@@ -1330,4 +1746,4 @@ fleet-management/
 
 ---
 
-*Document generated from code version 1.0.0 — Fleet Commander IoT Device Management Module*
+*Document generated from code version 2.0.0 — Fleet Commander IoT Device Management Module*

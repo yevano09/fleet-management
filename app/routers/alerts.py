@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Query, Body
+from fastapi import APIRouter, Depends, Query, Body, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -89,12 +89,13 @@ async def re_notify_alert(
     db: AsyncSession = Depends(get_db),
 ):
     """Force re-notification of an alert."""
-    engine = AlertEngine(db)
-    history = await engine.get_alert_history(status=None, limit=1, offset=0)
-    alerts = history.get("alerts", [])
-    alert = next((a for a in alerts if a["id"] == alert_id), None)
+    from sqlalchemy import select as sel
+    from app.models import Alert
+    result = await db.execute(sel(Alert).where(Alert.id == alert_id))
+    alert = result.scalar_one_or_none()
     if not alert:
-        return {"error": "Alert not found"}
+        raise HTTPException(status_code=404, detail="Alert not found")
+    engine = AlertEngine(db)
     await engine._notify_channels(alert)
     return {"message": "Alert re-notified", "alert_id": alert_id}
 

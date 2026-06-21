@@ -363,3 +363,260 @@ class TestE2E:
         ]
         for name in expected:
             assert name in text, f"Alert metric {name} not found in /metrics"
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # Session 5+ Feature Tests
+    # ═══════════════════════════════════════════════════════════════════════
+
+    def test_20_telemetry_endpoint(self):
+        """Feature 1: Telemetry time-series endpoint should work."""
+        r = requests.get(f"{BASE_URL}/telemetry/{self.created_device_ids[0]}?hours=1&limit=10", timeout=10)
+        assert r.status_code == 200, f"Telemetry endpoint failed: {r.text}"
+        data = r.json()
+        assert "device_id" in data
+        assert "points" in data
+        assert "total" in data
+
+    def test_21_geofence_crud(self):
+        """Feature 2: Geofence create, list, delete."""
+        # Create
+        body = {
+            "name": "E2E-Test-Geofence",
+            "shape": "circle",
+            "center_lat": 12.9716,
+            "center_lng": 77.5946,
+            "radius_meters": 5000,
+            "alert_on_enter": True,
+            "alert_on_exit": True,
+            "color": "#2DD4BF",
+        }
+        r = requests.post(f"{BASE_URL}/geofences", json=body, timeout=10)
+        assert r.status_code == 201, f"Geofence create failed: {r.text}"
+        gf_id = r.json()["id"]
+
+        # List
+        r = requests.get(f"{BASE_URL}/geofences", timeout=10)
+        assert r.status_code == 200
+        assert any(g["id"] == gf_id for g in r.json()["geofences"])
+
+        # Delete
+        r = requests.delete(f"{BASE_URL}/geofences/{gf_id}", timeout=10)
+        assert r.status_code == 200
+
+    def test_22_predictive_scan(self):
+        """Feature 3: Predictive maintenance scan endpoint."""
+        r = requests.post(f"{BASE_URL}/predictive/scan", timeout=30)
+        assert r.status_code == 200, f"Predictive scan failed: {r.text}"
+        data = r.json()
+        assert "predictions_count" in data
+
+    def test_23_scheduled_ota(self):
+        """Feature 4: Scheduled OTA campaign creation and listing."""
+        # Upload firmware for the schedule
+        fw_content = b"SCHEDULED_OTA_FW_TEST"
+        files = {"file": ("sched_fw.bin", fw_content, "application/octet-stream")}
+        r = requests.post(f"{BASE_URL}/ota/upload", data={"version": "5.0.0-sched"}, files=files, timeout=10)
+        assert r.status_code == 200
+        fw_id = r.json()["id"]
+
+        # Create schedule
+        from datetime import datetime, timedelta
+        sched_time = (datetime.utcnow() + timedelta(hours=1)).isoformat()
+        body = {
+            "name": "E2E-Schedule",
+            "firmware_id": fw_id,
+            "all_devices": True,
+            "scheduled_for": sched_time,
+            "canary_percent": 10,
+        }
+        r = requests.post(f"{BASE_URL}/ota/schedules", json=body, timeout=10)
+        assert r.status_code == 201, f"Schedule create failed: {r.text}"
+        sched_id = r.json()["id"]
+
+        # List
+        r = requests.get(f"{BASE_URL}/ota/schedules", timeout=10)
+        assert r.status_code == 200
+        assert any(s["id"] == sched_id for s in r.json()["schedules"])
+
+        # Cancel
+        r = requests.post(f"{BASE_URL}/ota/schedules/{sched_id}/cancel", timeout=10)
+        assert r.status_code == 200
+
+    def test_24_command_queue(self):
+        """Feature 5: Offline command queue."""
+        body = {
+            "device_id": self.created_device_ids[0],
+            "command_type": "config",
+            "payload": {"heartbeat_interval_seconds": 5},
+            "ttl_seconds": 3600,
+        }
+        r = requests.post(f"{BASE_URL}/commands/queue", json=body, timeout=10)
+        assert r.status_code == 201, f"Command queue failed: {r.text}"
+        cmd_id = r.json()["id"]
+
+        # List
+        r = requests.get(f"{BASE_URL}/commands?device_id={self.created_device_ids[0]}", timeout=10)
+        assert r.status_code == 200
+        assert any(c["id"] == cmd_id for c in r.json()["commands"])
+
+    def test_25_audit_log(self):
+        """Feature 6: Audit log endpoint."""
+        r = requests.get(f"{BASE_URL}/audit?limit=20", timeout=10)
+        assert r.status_code == 200, f"Audit log failed: {r.text}"
+        data = r.json()
+        assert "logs" in data
+        assert "total" in data
+
+    def test_26_device_shadow(self):
+        """Feature 7: Device shadow desired/reported state."""
+        # Update desired
+        body = {"state": "desired", "payload": {"heartbeat_interval": 15, "log_level": "DEBUG"}}
+        r = requests.put(f"{BASE_URL}/shadow/{self.created_device_ids[0]}", json=body, timeout=10)
+        assert r.status_code == 200, f"Shadow update failed: {r.text}"
+
+        # Get shadow
+        r = requests.get(f"{BASE_URL}/shadow/{self.created_device_ids[0]}", timeout=10)
+        assert r.status_code == 200
+        data = r.json()
+        assert data["desired"] is not None
+        assert data["desired"]["payload"]["log_level"] == "DEBUG"
+
+    def test_27_device_lifecycle(self):
+        """Feature 9: Device decommission and activate."""
+        dev_id = self.created_device_ids[0]
+        # Enter maintenance
+        r = requests.post(f"{BASE_URL}/lifecycle/{dev_id}/maintenance?reason=test", timeout=10)
+        assert r.status_code == 200, f"Maintenance failed: {r.text}"
+
+        # Activate
+        r = requests.post(f"{BASE_URL}/lifecycle/{dev_id}/activate", timeout=10)
+        assert r.status_code == 200
+
+    def test_28_bulk_import(self):
+        """Feature 13: Bulk CSV device import."""
+        csv_content = "name,firmware_version,ip_address,city\nBulkDevice-01,1.0.0,10.0.5.1,Bangalore\nBulkDevice-02,1.0.0,10.0.5.2,Mumbai\n"
+        files = {"file": ("devices.csv", csv_content.encode(), "text/csv")}
+        r = requests.post(f"{BASE_URL}/provisioning/bulk-import", files=files, timeout=10)
+        assert r.status_code == 200, f"Bulk import failed: {r.text}"
+        data = r.json()
+        assert data["imported"] == 2
+        assert len(data["device_ids"]) == 2
+
+    def test_29_webhook_crud(self):
+        """Feature 11: Webhook subscription CRUD."""
+        body = {"name": "E2E-Webhook", "url": "http://example.com/hook", "event_types": "*", "enabled": True}
+        r = requests.post(f"{BASE_URL}/webhooks", json=body, timeout=10)
+        assert r.status_code == 201, f"Webhook create failed: {r.text}"
+        wh_id = r.json()["id"]
+
+        # List
+        r = requests.get(f"{BASE_URL}/webhooks", timeout=10)
+        assert r.status_code == 200
+        assert any(w["id"] == wh_id for w in r.json())
+
+        # Delete
+        r = requests.delete(f"{BASE_URL}/webhooks/{wh_id}", timeout=10)
+        assert r.status_code == 200
+
+    def test_30_re_notify_alert_fix(self):
+        """Bug 3: Re-notify endpoint should query by ID and return 404 for nonexistent."""
+        r = requests.post(f"{BASE_URL}/alerts/nonexistent-id/re-notify", timeout=10)
+        assert r.status_code == 404, f"Expected 404 for nonexistent alert, got {r.status_code}"
+
+    def test_31_new_metrics_present(self):
+        """Verify new feature metrics are exposed."""
+        r = requests.get(f"{BASE_URL}/metrics", timeout=10)
+        assert r.status_code == 200
+        text = r.text
+        expected = [
+            "fleet_telemetry_points_total",
+            "fleet_geofence_events_total",
+            "fleet_geofences_active",
+            "fleet_command_queue_depth",
+            "fleet_predicted_failures_total",
+            "fleet_audit_events_total",
+            "fleet_shadow_updates_total",
+        ]
+        for name in expected:
+            assert name in text, f"New metric {name} not found in /metrics"
+
+    def test_32_predictive_agent_endpoint(self):
+        """Feature 3: Predictive maintenance agent endpoint."""
+        r = requests.get(f"{BASE_URL}/agents/predictive-scan", timeout=30)
+        assert r.status_code == 200, f"Predictive agent failed: {r.text}"
+        data = r.json()
+        assert data["type"] == "predictive_maintenance"
+
+    def test_33_device_with_city(self):
+        """Bug 2: Device should support city field."""
+        r = requests.post(f"{BASE_URL}/devices/register", json={
+            "name": "E2E-CityDevice", "firmware_version": "1.0.0", "city": "Chennai",
+        }, timeout=10)
+        assert r.status_code == 201
+        data = r.json()
+        assert data.get("city") == "Chennai"
+
+    def test_34_pre_register_and_claim(self):
+        """Feature 13: Pre-register device with claim token, then claim it."""
+        r = requests.post(f"{BASE_URL}/provisioning/pre-register?name=E2E-ClaimDevice&firmware_version=1.0.0", timeout=10)
+        assert r.status_code == 201, f"Pre-register failed: {r.text}"
+        dev_id = r.json()["id"]
+
+        # Generate claim token
+        r = requests.post(f"{BASE_URL}/lifecycle/{dev_id}/claim-token", timeout=10)
+        assert r.status_code == 200
+        token = r.json()["claim_token"]
+
+        # Claim the device
+        r = requests.post(f"{BASE_URL}/lifecycle/claim", json={
+            "name": "E2E-ClaimedDevice", "claim_token": token, "firmware_version": "2.0.0",
+        }, timeout=10)
+        assert r.status_code == 201, f"Claim failed: {r.text}"
+        assert r.json()["name"] == "E2E-ClaimedDevice"
+
+    def test_35_firmware_upload_returns_signature_fields(self):
+        """Feature 8: Firmware upload response should include signature fields."""
+        files = {"file": ("sig_test.bin", b"SIGNATURE_TEST", "application/octet-stream")}
+        r = requests.post(f"{BASE_URL}/ota/upload", data={"version": "6.0.0-sig"}, files=files, timeout=10)
+        assert r.status_code == 200
+        data = r.json()
+        assert "signature" in data
+        assert "signing_key_id" in data
+
+    def test_36_shadow_history(self):
+        """Feature 7: Shadow history endpoint."""
+        r = requests.get(f"{BASE_URL}/shadow/{self.created_device_ids[0]}/history", timeout=10)
+        assert r.status_code == 200
+
+    def test_37_geofence_events_endpoint(self):
+        """Feature 2: Geofence events listing."""
+        r = requests.get(f"{BASE_URL}/geofences/events/all?limit=10", timeout=10)
+        assert r.status_code == 200
+
+    def test_38_telemetry_stats(self):
+        """Feature 1: Telemetry statistics endpoint."""
+        r = requests.get(f"{BASE_URL}/telemetry/{self.created_device_ids[0]}/stats?hours=1", timeout=10)
+        assert r.status_code == 200, f"Telemetry stats failed: {r.text}"
+        data = r.json()
+        assert "samples" in data
+
+    def test_39_scheduled_ota_cancel_only_scheduled(self):
+        """Feature 4: Cannot cancel a completed schedule."""
+        # First create and let it be in scheduled state
+        fw_content = b"SCHED_CANCEL_TEST"
+        files = {"file": ("sched_cancel.bin", fw_content, "application/octet-stream")}
+        r = requests.post(f"{BASE_URL}/ota/upload", data={"version": "7.0.0-cancel"}, files=files, timeout=10)
+        fw_id = r.json()["id"]
+        from datetime import datetime, timedelta
+        sched_time = (datetime.utcnow() + timedelta(hours=2)).isoformat()
+        body = {"name": "E2E-Cancel-Test", "firmware_id": fw_id, "all_devices": True, "scheduled_for": sched_time}
+        r = requests.post(f"{BASE_URL}/ota/schedules", json=body, timeout=10)
+        sched_id = r.json()["id"]
+
+        # Cancel should work (it's scheduled)
+        r = requests.post(f"{BASE_URL}/ota/schedules/{sched_id}/cancel", timeout=10)
+        assert r.status_code == 200
+
+        # Cancel again should fail (it's now cancelled)
+        r = requests.post(f"{BASE_URL}/ota/schedules/{sched_id}/cancel", timeout=10)
+        assert r.status_code == 409

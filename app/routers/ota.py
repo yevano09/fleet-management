@@ -15,8 +15,11 @@ from app.schemas import (
 )
 from app.mqtt_client import mqtt_client
 from app.ota_manager import OtaStateMachine, ota_timeout_watcher
-from app.metrics import ota_deployments_total, ota_deployments_in_progress
+from app.metrics import ota_deployments_total, ota_deployments_in_progress, firmware_signed_total
 from app.config import settings
+from app.audit import log_action
+from app.event_emitter import emit_event
+from app.firmware_signing import sign_firmware
 
 logger = logging.getLogger(__name__)
 
@@ -55,18 +58,30 @@ async def upload_firmware(
     with open(file_path, "wb") as f:
         f.write(content)
 
+    # Feature 8: Cryptographically sign the firmware (if signing key configured)
+    signature_hex, key_id = sign_firmware(content)
+    signed_by = "system" if signature_hex else None
+    if signature_hex:
+        firmware_signed_total.inc()
+
     firmware = Firmware(
         version=version,
         filename=safe_filename,
         sha256_hash=sha256_hash,
         binary_path=file_path,
         file_size=len(content),
+        signature=signature_hex,
+        signing_key_id=key_id,
+        signed_by=signed_by,
     )
     db.add(firmware)
     await db.commit()
     await db.refresh(firmware)
 
-    logger.info("Firmware uploaded: %s (%s...)", firmware.version, firmware.sha256_hash[:16])
+    await log_action(db, "dashboard", "firmware.upload", "firmware", firmware.id, {
+        "version": version, "signed": bool(signature_hex),
+    })
+    logger.info("Firmware uploaded: %s (%s...) signed=%s", firmware.version, firmware.sha256_hash[:16], bool(signature_hex))
     return FirmwareUploadResponse(
         id=firmware.id,
         version=firmware.version,
@@ -74,6 +89,9 @@ async def upload_firmware(
         sha256_hash=firmware.sha256_hash,
         file_size=firmware.file_size,
         created_at=firmware.created_at,
+        signature=firmware.signature,
+        signing_key_id=firmware.signing_key_id,
+        signed_by=firmware.signed_by,
     )
 
 
@@ -147,12 +165,22 @@ async def trigger_ota(request: Request, req: OtaTriggerRequest, db: AsyncSession
 
     ota_deployments_total.labels(status="triggered").inc(len(deployment_ids) - len(mqtt_failures))
 
+    await log_action(db, "dashboard", "ota.trigger", "firmware", firmware.id, {
+        "firmware_version": firmware.version, "device_count": len(devices),
+        "deployment_ids": deployment_ids,
+    })
+    await emit_event(db, "ota.triggered", {
+        "firmware_id": firmware.id, "firmware_version": firmware.version,
+        "device_count": len(devices), "deployment_ids": deployment_ids,
+    })
+
     logger.info("OTA triggered for %s devices with firmware %s", len(devices), firmware.version)
     return {
         "message": f"OTA update triggered for {len(devices)} devices",
         "deployment_ids": deployment_ids,
         "mqtt_failures": mqtt_failures,
         "firmware_version": firmware.version,
+        "signature": firmware.signature,
     }
 
 
