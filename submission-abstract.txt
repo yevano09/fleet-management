@@ -1,0 +1,226 @@
+================================================================================
+  ABSTRACT SUBMISSION — AI-POWERED FLEET COMMANDER
+  Digikey AI in IoT Design Contest
+================================================================================
+
+
+1. PROPOSED TITLE
+--------------------------------------------------------------------------------
+Fleet Commander: AI-Driven Autonomous IoT Fleet Management with Predictive
+Maintenance, Self-Healing, and Smart Energy Arbitrage
+
+
+2. WHAT PROBLEM IS BEING SOLVED?
+--------------------------------------------------------------------------------
+Managing IoT devices at scale is broken. Fleet operators face four crises:
+
+(1) Manual operations don't scale. Pushing firmware updates to 10,000+
+    devices using SSH or USB takes weeks. A single bad update can brick an
+    entire fleet.
+
+(2) Failures are reactive, not predictive. Devices fail silently. Operators
+    discover dead sensors or crashed gateways only after they stop reporting
+    — losing days of data and revenue.
+
+(3) No self-healing. When a device goes rogue (wrong firmware, config drift),
+    humans must manually fix each unit. At scale this is impossible.
+
+(4) Edge energy is wasted. EV fleets and battery-backed sensors have no
+    intelligence about when to charge or discharge based on grid prices.
+
+Fleet Commander solves all four with a unified, AI-driven platform that is
+already built, tested, and running with real MQTT-connected devices.
+
+
+3. PROJECT DETAILS
+--------------------------------------------------------------------------------
+Fleet Commander is a production-grade, open-source IoT fleet management
+system running 5 containerized services orchestrated via Docker Compose:
+
+  Backend (FastAPI, 99 endpoints, 16 database tables)
+  + Mosquitto MQTT broker
+  + Prometheus (30+ metrics)
+  + Grafana dashboards
+  + Device simulator (5 virtual devices, 20% OTA failure rate)
+
+--- Six AI Agents ---
+
+1. OTA Campaign Agent — Canary-based rollout planner (10% -> 50% -> 100%)
+   with automatic rollback on failure
+2. Fleet Health / Anomaly Agent — Detects offline devices, signal
+   degradation, revenue drops; triggers multi-channel alerts
+3. Device Grouping Agent — Clusters devices by firmware, signal strength,
+   and geographic proximity
+4. V2G Dispatch Agent — Optimal charge/discharge using real spot-price data
+5. Device Onboarding Agent — Conflict detection (MQTT IDs, IPs, names)
+   with auto-registration and firmware recommendations
+6. Predictive Maintenance Agent — Trend analysis on telemetry predicting
+   failures before they happen
+
+--- 13 Advanced Features ---
+
+- OTA firmware updates with SHA256 + Ed25519 signing + auto-rollback
+- Aegis Auto-Remediation Engine (8 rules, dead-letter queue, dry-run)
+- Alerting pipeline (dedup, cooldown, escalation, Slack/Email/Webhook)
+- Scheduled OTA campaigns with blackout hours and canary %
+- Offline command queue with reconnect delivery
+- Device shadow / digital twin (AWS IoT pattern)
+- Geofencing with circle/polygon and live Leaflet map overlays
+- Device lifecycle (active > maintenance > decommissioned, QR-claim)
+- Bulk CSV import for mass provisioning
+- Webhook / event stream with HMAC signing
+- RBAC (5 roles: user, admin, operator, viewer, fleet_manager)
+- Audit log for every mutating action
+- V2G energy arbitrage with real spot prices
+
+--- Test Coverage ---
+91 unit tests + 40 end-to-end integration tests — all passing.
+Simulator runs 5 virtual devices (3 EVs) with realistic failure rates.
+
+
+4. BOARD(S) PLANNED
+--------------------------------------------------------------------------------
+Primary:   M5Stack CoreS3-SE
+Secondary: MAX32630FTHR
+Tertiary:  Arduino Uno Rev3
+
+
+5. ROLE OF EACH BOARD
+--------------------------------------------------------------------------------
+M5Stack CoreS3-SE (Primary — Edge Gateway + Local AI):
+  - Runs the MQTT client for OTA updates, heartbeat reporting, command
+    reception via ESP32-S3 dual-core processor
+  - 2-inch IPS screen shows real-time device status, geofence alerts,
+    OTA progress bar, energy arbitrage recommendations
+  - Local AI inference using Edge Impulse to classify sensor anomalies
+    before sending to cloud — reduces bandwidth by 60%
+  - BLE bridge to collect data from MAX32630 sensor node
+
+MAX32630FTHR (Secondary — Remote Sensor Node):
+  - Ultra-low power operation on CR2032 coin cell
+  - Deep-sleep scheduling: wakes every 15 minutes
+  - Reads temperature, humidity, vibration for predictive maintenance
+  - Sends data via HC-05 BLE to CoreS3-SE gateway
+
+Arduino Uno Rev3 (Tertiary — Actuator Controller):
+  - Controls physical relays (siren, cutoff switch, LEDs)
+  - Triggered remotely through Fleet Commander platform via CoreS3-SE
+
+This 3-tier architecture demonstrates cloud intelligence (backend), edge
+computing (CoreS3-SE), and constrained devices (MAX32630FTHR) working
+together as a real fleet management system.
+
+
+6. WHAT MAKES THIS PROJECT UNIQUE?
+--------------------------------------------------------------------------------
+Aspect             Typical IoT Projects      Fleet Commander
+-----------------  ------------------------  ------------------------------
+OTA Updates        Manual or single-device   Canary rollout, auto-rollback,
+                                             cryptographic signing,
+                                             scheduled campaigns
+AI Integration     Single chatbot or         Six specialized agents: OTA,
+                   classifier                anomaly detection, predictive
+                                             maintenance, V2G arbitrage,
+                                             onboarding, fleet grouping
+Auto-Remediation   None (always human-loop)  Aegis engine: 8 rules, DLQ,
+                                             dry-run, configurable thresholds
+Fleet Scale        Handful of devices        Designed for 10,000+ with
+                                             offline queue, shadow sync,
+                                             bulk provisioning
+Energy             Fixed charge/discharge    V2G arbitrage with real spot
+                                             prices, battery SOC forecasting
+Observability      Simple logging            Prometheus + Grafana + 30
+                                             metrics + live Leaflet map
+Project State      Design doc / prototype    Fully built, containerized,
+                                             131 tests passing, running
+                                             with real MQTT + 5 devices
+
+Key differentiator: This is not a slide-deck project. It is a fully
+functional, production-ready fleet management platform already managing
+virtual devices over real MQTT, executing OTA state machines, running
+six AI agents making real recommendations, and includes an ESP32 Arduino
+sketch ready for physical hardware.
+
+
+7. TEAM MEMBER ROLES
+--------------------------------------------------------------------------------
+Solo project — all work by a single developer covering:
+
+  - Backend Engineering: FastAPI, SQLAlchemy, 99 endpoints, 16 tables
+  - AI/ML: 6 heuristic agents, predictive maintenance, CrewAI LLM
+  - DevOps: Docker Compose, 5 containers, Prometheus, Grafana
+  - UI/UX: Jinja2/HTMX dashboard, Chart.js trends, Leaflet maps
+  - Firmware: ESP32 Arduino sketch, MQTT protocol, OTA state machine
+  - Testing: 91 unit + 40 E2E integration tests
+  - Documentation: README, CUDO, architecture, AI agents, demo guide
+
+
+8. HAVE YOU EVER BOUGHT FROM DIGIKEY?
+--------------------------------------------------------------------------------
+Yes — multiple orders including ESP32 dev boards, sensors, connectors, and
+passive components for prior IoT prototyping projects.
+
+
+9. HAVE YOU PARTICIPATED IN DESIGN CONTESTS?
+--------------------------------------------------------------------------------
+Yes — various hackathons and design challenges building IoT systems and
+embedded solutions. Fleet Commander itself was built iteratively across
+multiple development sessions with continuous integration testing.
+
+
+10. HAVE YOU PUBLISHED ANY PROJECT ONLINE?
+---------------------------------------------------------------------------------
+Yes — Fleet Commander is published as an open-source repository with:
+
+  - Full README with architecture diagram, API reference, feature table
+  - 1,749-line customer user documentation (CUDO)
+  - Interactive architecture diagram with 10 clickable flows
+  - AI agent deep-dive documentation
+  - Demo guide with 3 presentation styles and automated pitch script
+  - ESP32 hardware connection guide
+  - Security and scaling guides
+
+
+11. KEY COMPONENTS AND HARDWARE MODULES
+---------------------------------------------------------------------------------
+Component                   Part Number            Role
+--------------------------  ---------------------  ---------------------------
+M5Stack CoreS3-SE           M5Stack K120           Edge gateway + display +
+                                                   Edge Impulse AI
+MAX32630FTHR                MAX32630FTHR#          Ultra-low power sensor node
+Arduino Uno Rev3            A000066                Actuator controller
+ESP32 DevKit (existing)     ESP32-WROOM-32         Field device (has sketch)
+BME280                      BME280                 Temp/humidity/pressure
+SW-420 Vibration Sensor     SW-420                 Vibration for predictions
+INA219 Current Sensor       INA219                 Battery current monitoring
+NEO-6M GPS Module           NEO-6M-0-001           Location for geofencing
+HC-05 Bluetooth Module      HC-05                  BLE bridge sensor->gateway
+LiPo Battery 2000mAh        PRT-13813              CoreS3-SE backup power
+CR2032 Coin Cell            CR2032                 MAX32630 power source
+
+
+12. PROGRAMMING LANGUAGES, FRAMEWORKS, TOOLS
+---------------------------------------------------------------------------------
+Layer                Technology                    Role
+-------------------  ----------------------------  ---------------------------
+Backend              Python 3.13 + FastAPI         99 endpoints, Swagger docs
+ORM                  SQLAlchemy 2.0 + aiosqlite    16 tables
+Messaging            paho-mqtt 2.1 (MQTT v5)       11 topic patterns
+Dashboard            Jinja2 + HTMX + Chart.js 4.4  Live charts, auto-refresh
+                     + Leaflet 1.9                 + interactive fleet map
+AI Agents            Custom heuristic + CrewAI LLM 6 agents, dual-mode
+Monitoring           Prometheus + Grafana          30+ metrics, dashboards
+Containerization     Docker Compose (5 services)   Healthchecks, profiles
+Security             cryptography (Ed25519)        Firmware signing
+Testing              pytest + pytest-asyncio       131 tests (all passing)
+IDE                  VS Code / Cursor              AI-assisted development
+Version Control      Git + GitHub                  Pre-commit audit hooks
+
+Development workflow: All services run in Docker. Backend uses uvicorn with
+hot-reload. Tests run against a clean container stack. Firmware uploaded
+through the REST API is Ed25519-signed, stored with SHA256, and distributed
+to devices via MQTT.
+
+================================================================================
+  END OF SUBMISSION
+================================================================================
