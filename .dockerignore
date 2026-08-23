@@ -1,0 +1,18 @@
+# Keep build context small; runtime images only need app code.
+.git
+.env
+.env.*
+!.env.example
+__pycache__
+*.pyc
+.pytest_cache
+node_modules
+website
+screenshots
+certs
+data
+firmware
+*.db
+*.log
+.agents
+agents/__pycache__

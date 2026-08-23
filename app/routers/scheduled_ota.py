@@ -24,6 +24,7 @@ from app.mqtt_client import mqtt_client
 from app.ota_manager import ota_timeout_watcher
 from app.metrics import ota_scheduled_total, ota_deployments_total, ota_deployments_in_progress
 from app.event_emitter import emit_event
+from app.deps import require_user, require_role
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +34,7 @@ router = APIRouter(prefix="/ota/schedules", tags=["scheduled-ota"])
 @router.post("", response_model=OtaScheduleResponse, status_code=201)
 async def create_schedule(
     req: OtaScheduleCreateRequest,
+    principal: dict = Depends(require_role("fleet_manager")),
     db: AsyncSession = Depends(get_db),
 ):
     """Create a scheduled OTA campaign."""
@@ -46,13 +48,14 @@ async def create_schedule(
         blackout_end_hour=req.blackout_end_hour,
         canary_percent=req.canary_percent,
         status=ScheduleStatus.scheduled,
-        created_by="dashboard",
+        created_by=principal["email"],
+        org_id=principal["org_id"] if principal.get("org_id") not in (None, "*") else "org-default",
     )
     db.add(schedule)
     await db.commit()
     await db.refresh(schedule)
     ota_scheduled_total.labels(status="scheduled").inc()
-    await log_action(db, "dashboard", "ota.schedule_create", "schedule", schedule.id, {"name": req.name})
+    await log_action(db, principal["email"], "ota.schedule_create", "schedule", schedule.id, {"name": req.name})
     return OtaScheduleResponse.model_validate(schedule)
 
 
@@ -61,6 +64,7 @@ async def list_schedules(
     status: Optional[str] = Query(None),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
+    principal: dict = Depends(require_user()),
     db: AsyncSession = Depends(get_db),
 ):
     query = select(OtaSchedule)
@@ -80,7 +84,7 @@ async def list_schedules(
 
 
 @router.get("/{schedule_id}", response_model=OtaScheduleResponse)
-async def get_schedule(schedule_id: str, db: AsyncSession = Depends(get_db)):
+async def get_schedule(schedule_id: str, principal: dict = Depends(require_user()), db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(OtaSchedule).where(OtaSchedule.id == schedule_id))
     schedule = result.scalar_one_or_none()
     if not schedule:
@@ -89,7 +93,7 @@ async def get_schedule(schedule_id: str, db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/{schedule_id}/cancel")
-async def cancel_schedule(schedule_id: str, db: AsyncSession = Depends(get_db)):
+async def cancel_schedule(schedule_id: str, principal: dict = Depends(require_role("fleet_manager")), db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(OtaSchedule).where(OtaSchedule.id == schedule_id))
     schedule = result.scalar_one_or_none()
     if not schedule:
@@ -99,12 +103,12 @@ async def cancel_schedule(schedule_id: str, db: AsyncSession = Depends(get_db)):
     schedule.status = ScheduleStatus.cancelled
     await db.commit()
     ota_scheduled_total.labels(status="cancelled").inc()
-    await log_action(db, "dashboard", "ota.schedule_cancel", "schedule", schedule_id)
+    await log_action(db, principal["email"], "ota.schedule_cancel", "schedule", schedule_id)
     return {"message": "Schedule cancelled", "schedule_id": schedule_id}
 
 
 @router.post("/{schedule_id}/pause")
-async def pause_schedule(schedule_id: str, db: AsyncSession = Depends(get_db)):
+async def pause_schedule(schedule_id: str, principal: dict = Depends(require_role("fleet_manager")), db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(OtaSchedule).where(OtaSchedule.id == schedule_id))
     schedule = result.scalar_one_or_none()
     if not schedule:
@@ -117,7 +121,7 @@ async def pause_schedule(schedule_id: str, db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/{schedule_id}/resume")
-async def resume_schedule(schedule_id: str, db: AsyncSession = Depends(get_db)):
+async def resume_schedule(schedule_id: str, principal: dict = Depends(require_role("fleet_manager")), db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(OtaSchedule).where(OtaSchedule.id == schedule_id))
     schedule = result.scalar_one_or_none()
     if not schedule:
@@ -130,7 +134,7 @@ async def resume_schedule(schedule_id: str, db: AsyncSession = Depends(get_db)):
 
 
 @router.delete("/{schedule_id}")
-async def delete_schedule(schedule_id: str, db: AsyncSession = Depends(get_db)):
+async def delete_schedule(schedule_id: str, principal: dict = Depends(require_role("fleet_manager")), db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(OtaSchedule).where(OtaSchedule.id == schedule_id))
     schedule = result.scalar_one_or_none()
     if not schedule:
@@ -255,8 +259,14 @@ async def _create_deployment(db, device, firmware, firmware_url):
     device.current_ota_id = deployment.id
     device.previous_firmware_version = device.firmware_version
 
+    dl_token, dl_exp = ("", 0)
+    if settings.auth_mode == "strict":
+        from app.main import issue_firmware_download_token
+        dl_token, dl_exp = issue_firmware_download_token(device.id, firmware.sha256_hash)
+
     success = mqtt_client.publish_ota_command(
-        mqtt_topic_id, firmware_url, firmware.sha256_hash, deployment.id
+        mqtt_topic_id, firmware_url, firmware.sha256_hash, deployment.id,
+        download_token=dl_token, token_exp=dl_exp,
     )
     if success:
         deployment.status = OtaStatus.downloading

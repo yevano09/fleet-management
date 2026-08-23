@@ -15,6 +15,7 @@ from fastapi import APIRouter, Depends, Query, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
+from app.deps import require_user, require_role, require_admin
 from app.utils import utcnow
 from app.config import settings as app_settings
 from agents.async_tools import (
@@ -130,6 +131,7 @@ async def get_all_recommendations(
     notify: bool = Query(True, description="Send Slack alerts for critical anomalies"),
     firmware_version: Optional[str] = Query(None, description="Target firmware version for OTA"),
     min_group_size: int = Query(3, ge=1, description="Minimum devices per group"),
+    principal: dict = Depends(require_role("operator")),
     db: AsyncSession = Depends(get_db),
 ):
     """Run all three Phase 1 agents and return their recommendations."""
@@ -162,6 +164,7 @@ async def get_all_recommendations(
 @router.get("/ota-campaign")
 async def get_ota_recommendation(
     firmware_version: Optional[str] = Query(None),
+    principal: dict = Depends(require_user()),
     db: AsyncSession = Depends(get_db),
 ):
     """Run the OTA Campaign agent: suggests canary rollout plan."""
@@ -172,6 +175,7 @@ async def get_ota_recommendation(
 @router.get("/anomaly-check")
 async def get_anomaly_check(
     notify: bool = Query(True),
+    principal: dict = Depends(require_role("operator")),
     db: AsyncSession = Depends(get_db),
 ):
     """Run the Fleet Health agent: detect anomalies and optionally alert."""
@@ -181,6 +185,7 @@ async def get_anomaly_check(
 
 @router.get("/fleet-health")
 async def get_fleet_health(
+    principal: dict = Depends(require_role("operator")),
     db: AsyncSession = Depends(get_db),
 ):
     """Run anomaly detection and process through the alert engine.
@@ -195,6 +200,7 @@ async def get_fleet_health(
 @router.get("/device-groups")
 async def get_device_groups(
     min_group_size: int = Query(3, ge=1),
+    principal: dict = Depends(require_user()),
     db: AsyncSession = Depends(get_db),
 ):
     """Run the Device Group Manager agent: suggest device groupings."""
@@ -208,6 +214,7 @@ async def get_v2g_dispatch(
     device_ids: Optional[list[str]] = Query(None, description="Filter to specific device IDs"),
     all_devices: bool = Query(False, description="Include all devices"),
     horizon_hours: int = Query(24, description="Optimization horizon in hours"),
+    principal: dict = Depends(require_role("fleet_manager")),
 ):
     """Run the V2G Arbitrage Optimizer agent.
 
@@ -388,6 +395,7 @@ async def get_onboarding_recommendation(
     ip_address: str = Query("", description="Device IP address"),
     mqtt_client_id: Optional[str] = Query(None, description="MQTT client identifier"),
     auto_register: bool = Query(False, description="Execute onboarding (register + push config)"),
+    principal: dict = Depends(require_role("operator")),
     db: AsyncSession = Depends(get_db),
 ):
     """Run the Device Onboarding Agent: recommend or execute adding a new device to the fleet."""
@@ -440,6 +448,7 @@ async def _run_remediation_agent(db: AsyncSession) -> dict:
 
 @router.get("/aegis/scan")
 async def get_aegis_scan(
+    principal: dict = Depends(require_admin()),
     db: AsyncSession = Depends(get_db),
 ):
     """Run the Aegis Remediation Agent: check pressure and run a cycle if needed."""
@@ -453,6 +462,7 @@ async def get_aegis_history(
     action: Optional[str] = Query(None, description="Filter by action name"),
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
+    principal: dict = Depends(require_user()),
     db: AsyncSession = Depends(get_db),
 ):
     """Fetch Aegis remediation history via agent interface."""
@@ -466,6 +476,7 @@ async def get_aegis_history(
 @router.post("/aegis/rerun/{remediation_id}")
 async def rerun_remediation(
     remediation_id: str,
+    principal: dict = Depends(require_admin()),
     db: AsyncSession = Depends(get_db),
 ):
     """Re-run a specific remediation action from history."""
@@ -505,7 +516,7 @@ async def rerun_remediation(
 # ---------------------------------------------------------------------------
 
 @router.get("/predictive-scan")
-async def get_predictive_scan(db: AsyncSession = Depends(get_db)):
+async def get_predictive_scan(principal: dict = Depends(require_role("operator")), db: AsyncSession = Depends(get_db)):
     """Run the Predictive Maintenance Agent: analyze telemetry trends and predict failures."""
     from agents.async_tools import async_run_predictive_scan, async_get_predictions
     scan = await async_run_predictive_scan(db)
@@ -535,6 +546,7 @@ async def get_predictive_scan(db: AsyncSession = Depends(get_db)):
 async def get_predictive_history(
     min_risk: float = Query(0.0, ge=0.0, le=1.0),
     limit: int = Query(20, ge=1, le=100),
+    principal: dict = Depends(require_user()),
     db: AsyncSession = Depends(get_db),
 ):
     """Fetch active failure predictions."""

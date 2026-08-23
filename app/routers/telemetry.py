@@ -15,6 +15,7 @@ from sqlalchemy import select, delete, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db, async_session_factory
+from app.deps import require_user, require_role
 from app.models import Telemetry, Device
 from app.schemas import TelemetrySeriesResponse, TelemetryPoint
 from app.utils import utcnow
@@ -30,6 +31,7 @@ async def get_telemetry(
     device_id: str,
     hours: int = Query(24, ge=1, le=168, description="Lookback window in hours"),
     limit: int = Query(500, ge=1, le=5000),
+    principal: dict = Depends(require_user()),
     db: AsyncSession = Depends(get_db),
 ):
     """Fetch telemetry time-series for a device."""
@@ -55,6 +57,7 @@ async def get_telemetry(
 @router.get("/{device_id}/latest", response_model=Optional[TelemetryPoint])
 async def get_latest_telemetry(
     device_id: str,
+    principal: dict = Depends(require_user()),
     db: AsyncSession = Depends(get_db),
 ):
     """Fetch the most recent telemetry point for a device."""
@@ -74,6 +77,7 @@ async def get_latest_telemetry(
 async def prune_telemetry(
     device_id: str,
     days: int = Query(settings.telemetry_retention_days, ge=1),
+    principal: dict = Depends(require_role("operator")),
     db: AsyncSession = Depends(get_db),
 ):
     """Delete telemetry older than N days for a device."""
@@ -89,6 +93,7 @@ async def prune_telemetry(
 async def get_telemetry_stats(
     device_id: str,
     hours: int = Query(24, ge=1, le=168),
+    principal: dict = Depends(require_user()),
     db: AsyncSession = Depends(get_db),
 ):
     """Compute summary statistics over the telemetry window."""

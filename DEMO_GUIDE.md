@@ -4,6 +4,14 @@ Three presentation styles for showcasing the Fleet Commander IoT device manageme
 
 ---
 
+
+> **Security modes (P0).** The demo commands below run the legacy open profile
+> (`AUTH_MODE=open`: anonymous MQTT 1883, unauthenticated REST). A hardened
+> production profile exists — mTLS broker on 8883, PostgreSQL, RBAC/API-keys,
+> multi-tenancy, HA replicas. See `SECURITY.md § P0 Production Hardening`,
+> `.env.example`, and `scripts/verify-p0.sh`. The demo behaviour itself is
+> unchanged.
+
 ## Short Style (~2 minutes) — Elevator Pitch
 
 **Goal:** Show the bulk OTA update and a rollback in real time.

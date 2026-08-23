@@ -11,6 +11,7 @@ from app.utils import utcnow
 from app.aegis.models import Remediation
 from app.aegis.schemas import RemediationResponse, RemediationListResponse, IngestRequest
 from app.aegis.engine import get_engine
+from app.deps import require_user, require_admin
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +47,7 @@ async def get_remediation_history(
     metric: Optional[str] = Query(None, description="Filter by metric name"),
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
+    principal: dict = Depends(require_user()),
     db: AsyncSession = Depends(get_db),
 ):
     query = select(Remediation)
@@ -80,6 +82,7 @@ async def get_remediation_history(
 @router.get("/history/{remediation_id}", response_model=RemediationResponse)
 async def get_remediation_detail(
     remediation_id: str,
+    principal: dict = Depends(require_user()),
     db: AsyncSession = Depends(get_db),
 ):
     result = await db.execute(select(Remediation).where(Remediation.id == remediation_id))
@@ -93,6 +96,7 @@ async def get_remediation_detail(
 @router.post("/ingest")
 async def ingest_alert(
     req: IngestRequest,
+    principal: dict = Depends(require_admin()),
     db: AsyncSession = Depends(get_db),
 ):
     engine = get_engine()
@@ -108,6 +112,7 @@ async def ingest_alert(
 @router.delete("/history")
 async def prune_history(
     older_than_days: int = Query(90, ge=1, description="Delete records older than N days"),
+    principal: dict = Depends(require_admin()),
     db: AsyncSession = Depends(get_db),
 ):
     from datetime import timedelta
@@ -121,6 +126,7 @@ async def prune_history(
 
 @router.get("/scan")
 async def trigger_scan(
+    principal: dict = Depends(require_admin()),
     db: AsyncSession = Depends(get_db),
 ):
     """Trigger an on-demand Aegis remediation scan cycle."""
@@ -131,6 +137,7 @@ async def trigger_scan(
 
 @router.get("/summary")
 async def get_aegis_summary(
+    principal: dict = Depends(require_user()),
     db: AsyncSession = Depends(get_db),
 ):
     """Return summary data for the dashboard Aegis panel."""

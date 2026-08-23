@@ -1,0 +1,15 @@
+# Fleet Commander — production MQTT ACL (P0 UC-24).
+# With `use_identity_as_username true`, %u below is the TLS client-cert CN.
+#
+#   fleet-backend  → full control of iot/fleet/# (command publisher)
+#   sim-001 …      → may publish only to its own heartbeat/status/register,
+#                    and subscribe only its own command topics.
+
+user fleet-backend
+topic readwrite iot/fleet/#
+
+# Every certified device: locked to topics carrying ITS OWN id (%u = CN).
+pattern write iot/fleet/%u/register
+pattern write iot/fleet/%u/heartbeat
+pattern write iot/fleet/%u/status/#
+pattern read  iot/fleet/%u/command/#

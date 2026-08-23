@@ -66,6 +66,56 @@ class UserRole(str, enum.Enum):
     fleet_manager = "fleet_manager"
 
 
+# ── P0 UC-26: Multi-tenancy ──────────────────────────────────────────────────
+# Constants live in app.config (imported here for backwards compatibility).
+
+DEFAULT_ORG_ID = "org-default"
+SUPER_ORG = "*"
+
+
+class Organization(Base):
+    __tablename__ = "organizations"
+
+    id = Column(String, primary_key=True)
+    name = Column(String, nullable=False)
+    slug = Column(String, nullable=False, unique=True, index=True)
+    created_at = Column(DateTime, default=utcnow)
+
+
+class ApiKey(Base):
+    """Automation tokens (UC-23). Secret is stored as SHA-256 hash only;
+    the raw `fck_...` secret is returned exactly once at creation."""
+
+    __tablename__ = "api_keys"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    org_id = Column(String, ForeignKey("organizations.id"), default=DEFAULT_ORG_ID, index=True)
+    name = Column(String, nullable=False)
+    prefix = Column(String, nullable=False)          # first chars of secret for identification
+    key_hash = Column(String, nullable=False, index=True)  # sha256 hex of full secret
+    role = Column(SAEnum(UserRole), default=UserRole.viewer)
+    created_at = Column(DateTime, default=utcnow)
+    revoked = Column(Integer, default=0)             # 0 = active, 1 = revoked
+
+
+class DeviceCertificate(Base):
+    """Device X.509 certificates issued by the internal CA (UC-25).
+    Private keys are returned once at issue time and never persisted here."""
+
+    __tablename__ = "device_certificates"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    device_id = Column(String, nullable=True, index=True)   # CN; null until JITP claim
+    org_id = Column(String, ForeignKey("organizations.id"), default=DEFAULT_ORG_ID, index=True)
+    fingerprint_sha256 = Column(String, nullable=False, unique=True, index=True)
+    pem = Column(Text, nullable=False)               # public certificate only
+    serial = Column(String, nullable=False)
+    status = Column(String, default="active", index=True)   # issued|active|revoked|expired
+    issued_at = Column(DateTime, default=utcnow)
+    expires_at = Column(DateTime, nullable=True)
+    revoked_at = Column(DateTime, nullable=True)
+
+
 class Device(Base):
     __tablename__ = "devices"
 
@@ -98,6 +148,9 @@ class Device(Base):
     decommissioned_by = Column(String, nullable=True)
     decommissioned_reason = Column(Text, nullable=True)
     claim_token = Column(String, nullable=True)  # QR-claim provisioning token
+
+    # P0 UC-26: tenancy
+    org_id = Column(String, ForeignKey("organizations.id"), default=DEFAULT_ORG_ID, index=True)
 
     ota_deployments = relationship("OtaDeployment", back_populates="device")
     v2g_schedules = relationship("V2gSchedule", back_populates="device")
@@ -141,6 +194,9 @@ class Firmware(Base):
     signing_key_id = Column(String, nullable=True)  # public key identifier
     signed_by = Column(String, nullable=True)       # user/system that signed
 
+    # P0 UC-26: tenancy (firmware scoped per org)
+    org_id = Column(String, ForeignKey("organizations.id"), default=DEFAULT_ORG_ID, index=True)
+
 
 class OtaDeployment(Base):
     __tablename__ = "ota_deployments"
@@ -182,6 +238,7 @@ class Alert(Base):
     resolved_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=utcnow)
     updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
+    org_id = Column(String, ForeignKey("organizations.id"), default=DEFAULT_ORG_ID, index=True)
 
 
 class UserSession(Base):
@@ -195,6 +252,7 @@ class UserSession(Base):
     last_active = Column(DateTime, default=utcnow, onupdate=utcnow)
     revoked = Column(Integer, default=0)  # 0 = active, 1 = revoked
     role = Column(SAEnum(UserRole), default=UserRole.user)
+    org_id = Column(String, ForeignKey("organizations.id"), default=DEFAULT_ORG_ID, index=True)
 
 
 # ── Feature 1: Telemetry time-series ──────────────────────────────────────────
@@ -241,6 +299,7 @@ class Geofence(Base):
     color = Column(String, default="#2DD4BF")
     enabled = Column(Boolean, default=True)
     created_at = Column(DateTime, default=utcnow)
+    org_id = Column(String, ForeignKey("organizations.id"), default=DEFAULT_ORG_ID, index=True)
 
 
 class GeofenceEvent(Base):
@@ -327,6 +386,7 @@ class OtaSchedule(Base):
     completed_at = Column(DateTime, nullable=True)
     deployment_ids = Column(Text, default="")
     error_message = Column(Text, nullable=True)
+    org_id = Column(String, ForeignKey("organizations.id"), default=DEFAULT_ORG_ID, index=True)
 
     firmware = relationship("Firmware")
 
@@ -362,6 +422,7 @@ class WebhookSubscription(Base):
     secret = Column(String, nullable=True)   # HMAC signing secret
     enabled = Column(Boolean, default=True)
     created_at = Column(DateTime, default=utcnow)
+    org_id = Column(String, ForeignKey("organizations.id"), default=DEFAULT_ORG_ID, index=True)
 
 
 class EventLog(Base):

@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.alert_engine import AlertEngine
+from app.deps import require_user, require_role
 from app.schemas import AlertListResponse, AlertResponse, AcknowledgeRequest
 
 logger = logging.getLogger(__name__)
@@ -28,6 +29,7 @@ async def list_alerts(
     alert_type: Optional[str] = Query(None, description="Filter by alert type"),
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
+    principal: dict = Depends(require_user()),
     db: AsyncSession = Depends(get_db),
 ):
     """List alerts with optional filtering and pagination."""
@@ -45,6 +47,7 @@ async def list_alerts(
 @router.get("/active", response_model=AlertListResponse)
 async def active_alerts(
     severity: Optional[str] = Query(None, description="Filter by severity: critical, warning, info"),
+    principal: dict = Depends(require_user()),
     db: AsyncSession = Depends(get_db),
 ):
     """List active (and acknowledged) alerts only."""
@@ -60,6 +63,7 @@ async def active_alerts(
 async def acknowledge_alert(
     alert_id: str,
     req: AcknowledgeRequest = Body(...),
+    principal: dict = Depends(require_role("operator")),
     db: AsyncSession = Depends(get_db),
 ):
     """Acknowledge an active alert."""
@@ -73,6 +77,7 @@ async def acknowledge_alert(
 @router.post("/{alert_id}/resolve")
 async def resolve_alert(
     alert_id: str,
+    principal: dict = Depends(require_role("operator")),
     db: AsyncSession = Depends(get_db),
 ):
     """Resolve an alert."""
@@ -86,6 +91,7 @@ async def resolve_alert(
 @router.post("/{alert_id}/re-notify")
 async def re_notify_alert(
     alert_id: str,
+    principal: dict = Depends(require_role("operator")),
     db: AsyncSession = Depends(get_db),
 ):
     """Force re-notification of an alert."""
@@ -103,6 +109,7 @@ async def re_notify_alert(
 @router.delete("/old")
 async def prune_old_alerts(
     days: int = Query(7, ge=1, description="Delete resolved alerts older than N days"),
+    principal: dict = Depends(require_role("operator")),
     db: AsyncSession = Depends(get_db),
 ):
     """Prune resolved alerts older than N days."""

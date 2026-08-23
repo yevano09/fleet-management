@@ -20,6 +20,26 @@ logger = logging.getLogger(__name__)
 BASE_URL = os.environ.get("FLEET_BACKEND_URL", "http://backend:8000")
 SLACK_WEBHOOK = os.environ.get("SLACK_WEBHOOK_URL", "")
 ALERT_EMAIL = os.environ.get("ALERT_EMAIL", "")
+# P0 UC-23: automation tools authenticate with an API key in strict mode.
+FLEET_API_KEY = os.environ.get("FLEET_API_KEY", "")
+
+
+def _headers() -> dict:
+    if FLEET_API_KEY:
+        return {"X-API-Key": FLEET_API_KEY}
+    return {}
+
+
+def _get(url: str, **kw) -> requests.Response:
+    kw.setdefault("timeout", 10)
+    kw.setdefault("headers", _headers())
+    return requests.get(url, **kw)
+
+
+def _post(url: str, **kw) -> requests.Response:
+    kw.setdefault("timeout", 10)
+    kw.setdefault("headers", _headers())
+    return requests.post(url, **kw)
 
 
 # ---------------------------------------------------------------------------
@@ -34,7 +54,7 @@ def list_devices(status: Optional[str] = None) -> dict:
     params = {}
     if status:
         params["status"] = status
-    resp = requests.get(f"{BASE_URL}/devices", params=params, timeout=10)
+    resp = _get(f"{BASE_URL}/devices", params=params, timeout=10)
     resp.raise_for_status()
     return resp.json()
 
@@ -52,7 +72,8 @@ def register_device(name: str, firmware_version: str = "1.0.0",
     }
     if mqtt_client_id:
         payload["mqtt_client_id"] = mqtt_client_id
-    resp = requests.post(f"{BASE_URL}/devices/register", json=payload, timeout=10)
+    resp = _post(
+        f"{BASE_URL}/devices/register", json=payload, timeout=10)
     resp.raise_for_status()
     return resp.json()
 
@@ -68,8 +89,8 @@ def upload_firmware(version: str, file_path: str) -> dict:
     """
     with open(file_path, "rb") as f:
         files = {"file": (f"firmware_{version}.bin", f, "application/octet-stream")}
-        resp = requests.post(
-            f"{BASE_URL}/ota/upload",
+        resp = _post(
+        f"{BASE_URL}/ota/upload",
             data={"version": version},
             files=files,
             timeout=30,
@@ -87,7 +108,8 @@ def trigger_ota(firmware_id: str, device_ids: Optional[list[str]] = None,
     payload = {"firmware_id": firmware_id, "all_devices": all_devices}
     if device_ids:
         payload["device_ids"] = device_ids
-    resp = requests.post(f"{BASE_URL}/ota/trigger", json=payload, timeout=10)
+    resp = _post(
+        f"{BASE_URL}/ota/trigger", json=payload, timeout=10)
     resp.raise_for_status()
     return resp.json()
 
@@ -98,7 +120,7 @@ def get_ota_status() -> dict:
     Returns: {deployments: [...], total, success_count,
               failed_count, in_progress_count}
     """
-    resp = requests.get(f"{BASE_URL}/ota/status", timeout=10)
+    resp = _get(f"{BASE_URL}/ota/status", timeout=10)
     resp.raise_for_status()
     return resp.json()
 
@@ -108,7 +130,7 @@ def list_firmware() -> list[dict]:
 
     Returns: [{id, version, filename, sha256_hash, file_size, created_at}, ...]
     """
-    resp = requests.get(f"{BASE_URL}/ota/firmware", timeout=10)
+    resp = _get(f"{BASE_URL}/ota/firmware", timeout=10)
     resp.raise_for_status()
     return resp.json()
 
@@ -122,7 +144,7 @@ def fetch_metrics() -> str:
 
     Returns: Raw prometheus text (agent can parse relevant lines).
     """
-    resp = requests.get(f"{BASE_URL}/metrics", timeout=10)
+    resp = _get(f"{BASE_URL}/metrics", timeout=10)
     resp.raise_for_status()
     return resp.text
 
@@ -245,8 +267,8 @@ def push_remote_config(device_id: str, config: dict) -> bool:
     Returns: True if the config was published via MQTT.
     """
     try:
-        resp = requests.post(
-            f"{BASE_URL}/devices/{device_id}/config",
+        resp = _post(
+        f"{BASE_URL}/devices/{device_id}/config",
             json={"config": config},
             timeout=10,
         )
@@ -286,7 +308,7 @@ def fetch_alerts(status: Optional[str] = None, severity: Optional[str] = None) -
         params["status"] = status
     if severity:
         params["severity"] = severity
-    resp = requests.get(f"{BASE_URL}/alerts/", params=params, timeout=10)
+    resp = _get(f"{BASE_URL}/alerts/", params=params, timeout=10)
     resp.raise_for_status()
     return resp.json()
 
@@ -296,7 +318,7 @@ def acknowledge_alert(alert_id: str, user: str) -> dict:
 
     Returns: {success: bool, message: str}
     """
-    resp = requests.post(
+    resp = _post(
         f"{BASE_URL}/alerts/{alert_id}/acknowledge",
         json={"user": user},
         timeout=10,
@@ -310,7 +332,8 @@ def resolve_alert(alert_id: str) -> dict:
 
     Returns: {success: bool, message: str}
     """
-    resp = requests.post(f"{BASE_URL}/alerts/{alert_id}/resolve", timeout=10)
+    resp = _post(
+        f"{BASE_URL}/alerts/{alert_id}/resolve", timeout=10)
     resp.raise_for_status()
     return resp.json()
 
@@ -560,7 +583,7 @@ def detect_resource_pressure() -> dict:
     Returns: {pressure_detected: bool, signals: [...], metrics_summary: str}
     """
     try:
-        resp = requests.get(f"{BASE_URL}/aegis/scan", timeout=15)
+        resp = _get(f"{BASE_URL}/aegis/scan", timeout=15)
         resp.raise_for_status()
         data = resp.json()
         return {"pressure_detected": True, "scan_result": data}
@@ -573,7 +596,7 @@ def run_remediation_cycle() -> dict:
     Returns: {cycle_completed: bool, summary: str}
     """
     try:
-        resp = requests.get(f"{BASE_URL}/aegis/scan", timeout=30)
+        resp = _get(f"{BASE_URL}/aegis/scan", timeout=30)
         resp.raise_for_status()
         return {"cycle_completed": True, "message": "Remediation cycle completed"}
     except requests.RequestException as e:
@@ -590,7 +613,7 @@ def get_remediation_history(status: str = None, action: str = None, limit: int =
     if action:
         params["action"] = action
     params["limit"] = limit
-    resp = requests.get(f"{BASE_URL}/aegis/history", params=params, timeout=10)
+    resp = _get(f"{BASE_URL}/aegis/history", params=params, timeout=10)
     resp.raise_for_status()
     return resp.json()
 
@@ -600,7 +623,8 @@ def rerun_remediation(remediation_id: str) -> dict:
     Returns: {success: bool, message: str}
     """
     try:
-        resp = requests.post(f"{BASE_URL}/aegis/rerun/{remediation_id}", timeout=30)
+        resp = _post(
+        f"{BASE_URL}/aegis/rerun/{remediation_id}", timeout=30)
         resp.raise_for_status()
         return resp.json()
     except requests.RequestException as e:
@@ -617,7 +641,7 @@ def run_predictive_scan() -> dict:
     Returns: {predictions_count, predictions: [...]}
     """
     try:
-        resp = requests.get(f"{BASE_URL}/agents/predictive-scan", timeout=30)
+        resp = _get(f"{BASE_URL}/agents/predictive-scan", timeout=30)
         resp.raise_for_status()
         return resp.json()
     except requests.RequestException as e:
@@ -627,7 +651,7 @@ def run_predictive_scan() -> dict:
 def get_predictions(min_risk: float = 0.0, limit: int = 20) -> dict:
     """Fetch active failure predictions via the API."""
     try:
-        resp = requests.get(
+        resp = _get(
             f"{BASE_URL}/agents/predictive-history",
             params={"min_risk": min_risk, "limit": limit},
             timeout=10,

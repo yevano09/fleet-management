@@ -20,6 +20,8 @@ from app.schemas import (
     GeofenceEventResponse,
 )
 from app.utils import utcnow
+from app.deps import require_user, require_role
+from app.deps import require_user, require_role
 from app.audit import log_action
 from app.metrics import geofence_active
 
@@ -31,6 +33,7 @@ router = APIRouter(prefix="/geofences", tags=["geofences"])
 @router.get("", response_model=GeofenceListResponse)
 async def list_geofences(
     enabled: Optional[bool] = Query(None),
+    principal: dict = Depends(require_user()),
     db: AsyncSession = Depends(get_db),
 ):
     query = select(Geofence)
@@ -48,6 +51,7 @@ async def list_geofences(
 @router.post("", response_model=GeofenceResponse, status_code=201)
 async def create_geofence(
     req: GeofenceCreateRequest,
+    principal: dict = Depends(require_role("operator")),
     db: AsyncSession = Depends(get_db),
 ):
     if req.shape == "circle" and (req.center_lat is None or req.center_lng is None or req.radius_meters is None):
@@ -71,12 +75,12 @@ async def create_geofence(
     db.add(gf)
     await db.commit()
     await db.refresh(gf)
-    await log_action(db, "dashboard", "geofence.create", "geofence", gf.id, {"name": req.name})
+    await log_action(db, principal["email"], "geofence.create", "geofence", gf.id, {"name": req.name})
     return GeofenceResponse.model_validate(gf)
 
 
 @router.get("/{geofence_id}", response_model=GeofenceResponse)
-async def get_geofence(geofence_id: str, db: AsyncSession = Depends(get_db)):
+async def get_geofence(geofence_id: str, principal: dict = Depends(require_user()), db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Geofence).where(Geofence.id == geofence_id))
     gf = result.scalar_one_or_none()
     if not gf:
@@ -85,19 +89,19 @@ async def get_geofence(geofence_id: str, db: AsyncSession = Depends(get_db)):
 
 
 @router.delete("/{geofence_id}")
-async def delete_geofence(geofence_id: str, db: AsyncSession = Depends(get_db)):
+async def delete_geofence(geofence_id: str, principal: dict = Depends(require_role("operator")), db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Geofence).where(Geofence.id == geofence_id))
     gf = result.scalar_one_or_none()
     if not gf:
         raise HTTPException(status_code=404, detail="Geofence not found")
     await db.delete(gf)
     await db.commit()
-    await log_action(db, "dashboard", "geofence.delete", "geofence", geofence_id)
+    await log_action(db, principal["email"], "geofence.delete", "geofence", geofence_id)
     return {"message": f"Geofence '{gf.name}' deleted"}
 
 
 @router.patch("/{geofence_id}/toggle")
-async def toggle_geofence(geofence_id: str, enabled: bool = True, db: AsyncSession = Depends(get_db)):
+async def toggle_geofence(geofence_id: str, enabled: bool = True, principal: dict = Depends(require_role("operator")), db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Geofence).where(Geofence.id == geofence_id))
     gf = result.scalar_one_or_none()
     if not gf:
@@ -111,6 +115,7 @@ async def toggle_geofence(geofence_id: str, enabled: bool = True, db: AsyncSessi
 async def get_geofence_events(
     geofence_id: str,
     limit: int = Query(50, ge=1, le=500),
+    principal: dict = Depends(require_user()),
     db: AsyncSession = Depends(get_db),
 ):
     result = await db.execute(
@@ -128,6 +133,7 @@ async def get_all_events(
     device_id: Optional[str] = Query(None),
     event_type: Optional[str] = Query(None),
     limit: int = Query(50, ge=1, le=500),
+    principal: dict = Depends(require_user()),
     db: AsyncSession = Depends(get_db),
 ):
     query = select(GeofenceEvent)

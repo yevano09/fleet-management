@@ -5,6 +5,8 @@
 **Stack:** FastAPI + SQLAlchemy (async) + Mosquitto MQTT + Prometheus + Grafana + Docker Compose
 **Scope:** Device registration, remote configuration, OTA firmware updates with rollback, AI agents, alerting, geofencing, predictive maintenance, V2G arbitrage, and more.
 
+**P0 hardening note:** UC-23 … UC-27 (below) add API auth/RBAC, MQTT mTLS + ACLs, certificate lifecycle, multi-tenancy and a hardened production profile — all proven by `scripts/verify-p0.sh` (exit 0).
+
 Each use case below follows a fixed framework:
 1. **Overview** — description, actors/trigger, preconditions, postconditions
 2. **Technical Execution Flow** — entry points, key components, data flow & dependencies, error handling & edge cases
@@ -925,6 +927,214 @@ sequenceDiagram
     end
 ```
 
+
+---
+
+### Use Case [UC-23]: Enforce REST Authentication, RBAC & Audited Automation
+
+#### 1. Overview
+* **Description:** Closes the wide-open REST surface. Every tenant read/mutation requires an authenticated principal; role rank (`viewer<user<operator<fleet_manager<admin`) gates each operation class; automation uses SHA-256-hashed API keys; firmware downloads are gated by short-lived HMAC tokens; audit rows carry real actor identities.
+* **Actors / Trigger:** Any HTTP client. Dependencies resolve principals from Google/admin JWT cookies, `Authorization: Bearer`, or `X-API-Key`; `AUTH_MODE=open` short-circuits for the legacy demo.
+* **Preconditions:** `AUTH_MODE=strict` refuses default `JWT_SECRET_KEY`/admin password at startup; docs disabled via `DOCS_ENABLED=false` in production compose.
+* **Postconditions:** Unauthenticated writes → 401; insufficient rank → 403; cross-scope → 404; audit `actor` ∈ {oauth email, `admin:<user>`, `apikey:<name>`, `system`} — never `"dashboard"`.
+
+#### 2. Technical Execution Flow
+* **Entry Point(s):** `app/deps.py` (`require_user/require_role/require_admin/resolve_principal/_api_key_lookup/allowed_orgs/scope_devices`); applied across every router in `app/routers/*.py`, `agents/routers.py`, `app/aegis/router.py`.
+* **Key Components & Services:** `app/models.py:ApiKey` (prefix+hash only); admin CRUD `app/routers/apikeys.py`; token helpers in `app/main.py` (`issue/verify_firmware_download_token`); e2e/CLI header injection (`tests/test_e2e.py`, `agents/tools.py:_headers()`).
+* **Data Flow & Dependencies:** X-API-Key → hash lookup → principal{email=f"apikey:{name}", role, org_id}; JWT → claims incl. `org_id`+`role`, session-revocation check; open mode → synthetic super principal.
+* **Error Handling & Edge Cases:** Unknown/garbage tokens fail closed (401); non-admin can never hold `org_id='*'` (defensive clamp); unknown role strings raise at dependency construction; strict-mode startup guard tested (`test_auth_rbac.py::TestStrictStartupGuardrails`).
+
+#### 3. Sequence & Flow Diagram
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Caller as Client / Automation
+    participant D as deps.resolve_principal
+    participant DB as Database
+    participant R as Router Handler
+    participant A as Audit Log
+
+    Caller->>D: request (+cookie|bearer|X-API-Key)
+    alt AUTH_MODE=open
+        D-->>R: synthetic super principal
+    else strict
+        alt X-API-Key
+            D->>DB: sha256 lookup api_keys (revoked=0)
+            DB-->>D: key row or 401
+        else JWT cookie/bearer
+            D->>D: decode + session revocation check
+        else none
+            D-->>Caller: 401
+        end
+        D->>R: principal{role, org_id}
+        R->>R: require_role minimum-rank check → 403 if below
+    end
+    R->>DB: scoped query (allowed_orgs)
+    R->>A: log_action(actor=principal.email)
+```
+
+---
+
+### Use Case [UC-24]: Lock the Broker with mTLS Identity & Topic ACLs
+
+#### 1. Overview
+* **Description:** Production broker accepts only CA-signed clients on TLS port 8883; identity is the certificate CN; ACL patterns confine every device to its own `iot/fleet/{cn}/…` subtree while the backend keeps fleet-wide rights. Anonymous 1883 disappears from production.
+* **Actors / Trigger:** Devices/backend connecting over MQTT; `scripts/gen-mqtt-pki.sh` provisions material.
+* **Preconditions:** PKI generated into `./certs` (CA, server SAN mosquitto/mosquitto-tls/localhost, `fleet-backend`, per-device certs); broker started with `mosquitto.ssl.conf`.
+* **Postconditions:** No-cert and wrong-topic publishes are refused by the broker; backend connects with its privileged cert; demo profile remains anonymous on 1883.
+
+#### 2. Technical Execution Flow
+* **Entry Point(s):** `docker/mosquitto/mosquitto.ssl.conf` + `docker/mosquitto/acl`; `app/mqtt_client.py:connect()` TLS branch; `simulator/simulator.py` per-device cert loading.
+* **Key Components & Services:** `use_identity_as_username true` makes CN the ACL `%u`; pattern rules grant `write %u/{register,heartbeat,status/#}` and `read %u/command/#`; healthcheck itself authenticates with the backend cert.
+* **Data Flow & Dependencies:** Compose mounts `./certs` read-only into broker/simulator and rw into backend; simulator env derives host/port/TLS from shared `MQTT_BROKER_*` vars so demo→production switches stay consistent.
+* **Error Handling & Edge Cases:** Hostname verification forced (`PROTOCOL_TLS_CLIENT`); SAN includes both service names; QoS0 denials are silent client-side, so verification asserts delivery behaviour (see diagram) rather than exit codes.
+
+#### 3. Sequence & Flow Diagram
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor DevA as Device A (cert CN=dev-a)
+    participant B as mosquitto-tls :8883
+    participant L as Leader backend
+
+    DevA->>B: TLS handshake (no cert)
+    B-->>DevA: ✗ refused
+
+    DevA->>B: TLS handshake (cert dev-a) → username=dev-a
+    B-->>DevA: connected
+    DevA->>B: PUBLISH iot/fleet/dev-a/heartbeat
+    B->>L: delivered (ACL ok)
+    Note over L: last_seen advances
+
+    DevA->>B: PUBLISH iot/fleet/dev-b/heartbeat
+    Note over B: ACL denies write to %u≠dev-a
+    L--xDevA: not delivered (proven by absent subscriber receipt)
+```
+
+---
+
+### Use Case [UC-25]: Manage Device Certificate Lifecycle with JITP
+
+#### 1. Overview
+* **Description:** Internal CA issues per-device certificates (key shown once), supports rotation and revocation with CRL regeneration, and auto-provisions devices on first verified registration (Just-in-Time Provisioning).
+* **Actors / Trigger:** fleet_manager/admin via `/devices/{id}/certs[...]` + `/certs/{fp}/revoke`; devices via verified register topic; operator runs `scripts/reload-broker.sh` after revocation.
+* **Preconditions:** cryptography available; internal CA present under `INTERNAL_CA_DIR` (auto-created if missing); `certs/ca.crl` exists before broker start (gen-script writes initial empty CRL).
+* **Postconditions:** `device_certificates` rows track fingerprint/serial/status; revoked serial lands in `ca.crl`; post-restart broker refuses revoked certs at TLS; JITP creates the device row inside the certificate's org; rejections counted by `fleet_device_cert_rejected_total{reason}`.
+
+#### 2. Technical Execution Flow
+* **Entry Point(s):** `app/pki.py` (`issue_device_cert/build_and_write_crl/refresh_crl_from_db`); `app/routers/certs.py`; register path `app/main.py:handle_mqtt_register(payload, verified_id)`.
+* **Key Components & Services:** Ed25519 CA + leaf signing (`sign(key, None)` semantics); pre-issue flow allows certs for never-seen identities (JITP bootstrap); rotation revokes old actives then issues replacement atomically; backend gate blocks only identities with **no active cert remaining** (rotation-safe defense-in-depth).
+* **Data Flow & Dependencies:** Verified identity comes from topic segment `iot/fleet/{cn}/register` (ACL-bound), never from spoofable payload fields; mismatched `device_id` payloads are rejected; legacy shared register topic is ignored in strict mode.
+* **Error Handling & Edge Cases:** Unknown-CN registers rejected+metric'd; expired/revoked-only identities blocked at application layer even if a stale TLS session persists until broker restart.
+
+#### 3. Sequence & Flow Diagram
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Op as Operator (fleet_manager)
+    participant API as certs router / pki.py
+    participant DB as Database
+    participant BR as mosquitto-tls (CRL)
+
+    Op->>API: POST /devices/new-cn/certs
+    API-->>Op: cert_pem + key_pem(once) + fingerprint
+    Note over DB: DeviceCertificate(status=active, org)
+
+    Dev->>BR: TLS with new cert; PUBLISH iot/fleet/new-cn/register
+    BR->>API: handle_register(verified_id=new-cn)
+    API->>DB: JITP create Device(org=cert.org)
+
+    Op->>API: POST /devices/x/certs/rotate | POST /certs/{fp}/revoke
+    API->>DB: revoke row(s); regenerate ca.crl
+    Op->>BR: scripts/reload-broker.sh (restart)
+    DevOld->>BR: TLS with revoked cert
+    BR--xDevOld: ✗ rejected via CRL
+```
+
+---
+
+### Use Case [UC-26]: Isolate Fleets per Organization
+
+#### 1. Overview
+* **Description:** Multi-tenancy at the query layer: organizations are first-class, tenant-owned tables carry `org_id`, every read/write filters by caller scope, and cross-tenant access returns indistinguishable 404s. A seeded `org-default` preserves single-tenant demo flows.
+* **Actors / Trigger:** Admin manages orgs via `/orgs`; keys/users carry `org_id` claims; device/cert issuance assigns org automatically.
+* **Preconditions:** `organizations` seeded (`init_db` backfills legacy SQLite columns too); JWT/API-key principals include `org_id`.
+* **Postconditions:** Org-A listings exclude Org-B devices; direct GET of foreign id → 404; OTA trigger against foreign ids → 404 (targets invisible); child tables inherit tenancy via `device_id` without duplicated columns.
+
+#### 2. Technical Execution Flow
+* **Entry Point(s):** `app/routers/orgs.py`; scoping helpers `app/deps.allowed_orgs/scope_devices`; tenancy bootstrap `app/database.py:_bootstrap_tenancy/_seed_default_org`.
+* **Key Components & Services:** `scope_devices(query, principal)` centralizes `Device.org_id.in_(scope)`; firmware lists/uploads and schedules inherit caller org; REST device registration stamps the caller's org; JITP uses the certificate's org.
+* **Data Flow & Dependencies:** Super-admin (`org_id='*'`) bypasses filters (Prometheus/ops paths); everyone else always concrete-id filtered.
+* **Error Handling & Edge Cases:** Non-admin holding '*' clamped to default; missing claim defaults to `org-default`; duplicate slugs → 409; slug regex validated.
+
+#### 3. Sequence & Flow Diagram
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Adm as Admin
+    participant A as Org-A key (fm)
+    participant B as Org-B key (op)
+    participant R as devices/ota routers
+    participant DB as Database
+
+    Adm->>R: POST /orgs alpha, beta
+    A->>R: POST /devices/register {name:device-alpha}
+    R->>DB: Device(org=A)
+    B->>R: POST /devices/register {name:device-beta}
+    R->>DB: Device(org=B)
+
+    A->>R: GET /devices
+    R->>DB: WHERE org_id IN (A)
+    R-->>A: no device-beta visible
+    A->>R: GET /devices/{beta-id}
+    R-->>A: 404 (no existence leak)
+    A->>R: POST /ota/trigger [...beta-id]
+    R->>DB: targets scoped → empty
+    R-->>A: 404
+```
+
+---
+
+### Use Case [UC-27]: Run Production on PostgreSQL with Honest HA
+
+#### 1. Overview
+* **Description:** The production profile boots PostgreSQL (async driver) plus a split topology: one **leader** owning the process-local singleton loops (MQTT subscriber, Aegis scheduler, OTA watchers, queue flusher) and N stateless **api replicas** serving HTTP. Health endpoints decouple liveness/readiness from auth and from MQTT where it doesn't apply.
+* **Actors / Trigger:** Compose production profile; orchestrator scales replicas; monitoring hits `/health` (liveness) and `/health/ready` (readiness).
+* * **Preconditions:** `.env` supplies `AUTH_MODE=strict`, strong secrets, `postgresql+asyncpg://…`, `MQTT_TLS_ENABLED=true` + broker host/port; PKI generated.
+* **Postconditions:** `create_all`+bootstrap succeeds on empty Postgres (pool: size5/overflow10/pre-ping); leader ingests MQTT while any replica is stopped/killed; replica readiness checks DB only; 1883 unpublished.
+
+#### 2. Technical Execution Flow
+* **Entry Point(s):** `app/database.py` dialect-aware engine kwargs; lifespan role-gating `settings.role == "api"` (skip MQTT/schedulers, DB-retry loop ×10); endpoints `GET /health`, `GET /health/ready`; compose services `backend` (leader) + `backend-api` (profiles:[production], scaleable) sharing `firmware_data`.
+* **Key Components & Services:** `asyncpg==0.30.0` pinned; readiness = DB `SELECT 1` (+ MQTT `_connected` only when role=leader); Prometheus scrapes leader only (no gauge double-count).
+* **Data Flow & Dependencies:** Replicas depend on nothing profile-crossing (avoids compose auto-profile activation); they tolerate broker/postgres absence like the leader does (retry/reconnect) instead of fragile cross-profile `depends_on`.
+* **Error Handling & Edge Cases:** Postgres slower than backend → lifespan retries then hard-fails; killing one replica never touches ingestion (verified by heartbeat-during-stop assertion).
+
+#### 3. Sequence & Flow Diagram
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant C as docker compose (--profile production)
+    participant PG as postgres:16
+    participant L as backend (ROLE=leader)
+    participant R as backend-api ×N (ROLE=api)
+    participant MQ as mosquitto-tls
+
+    C->>PG: start (healthcheck pg_isready)
+    C->>L: start → init_db retry-loop → create_all+bootstrap
+    C->>R: start ×N → init_db → skip MQTT/schedulers
+    C->>MQ: start (mTLS 8883, CRL)
+    L->>MQ: TLS connect (fleet-backend cert) + subscribe iot/fleet/#
+    MQ-->>L: device messages → DB writes
+    R->>PG: HTTP requests → pooled async queries
+    Note over R: kill any replica ⇒ leader ingestion unaffected
+    Monitoring->>L: GET /health/ready → db+mqtt
+    Monitoring->>R: GET /health/ready → db only
+
 ---
 
 ## Cross-Cutting Architecture Notes
@@ -946,3 +1156,4 @@ sequenceDiagram
 | UC-07, UC-22 | Sessions 2/4 (security + alerting/Aegis) |
 | UC-21 | Session 3 onboarding agent |
 | UC-06, UC-08..20 | Session 5 realism features (13 features, 8 bug fixes) |
+| UC-23..27 | Session 6 P0 hardening — proven by `scripts/verify-p0.sh` (exit 0) |

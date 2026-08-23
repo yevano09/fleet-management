@@ -8,7 +8,7 @@ from fastapi import Request, HTTPException
 from httpx import AsyncClient
 from sqlalchemy import select
 
-from app.config import settings
+from app.config import settings, DEFAULT_ORG_ID, SUPER_ORG
 from app.database import async_session_factory
 from app.models import UserSession
 from app.utils import utcnow
@@ -25,23 +25,32 @@ ADMIN_COOKIE_NAME = "fleet_admin_token"
 
 # ── JWT helpers ──────────────────────────────────────────────────────────
 
-def create_user_jwt_token(email: str, name: str, picture: str, session_id: str) -> str:
+def create_user_jwt_token(
+    email: str,
+    name: str,
+    picture: str,
+    session_id: str,
+    role: str = "user",
+    org_id: str = DEFAULT_ORG_ID,
+) -> str:
     payload = {
         "email": email,
         "name": name,
         "picture": picture,
         "session_id": session_id,
-        "role": "user",
+        "role": role,
+        "org_id": org_id,  # P0 UC-26: tenancy claim (UC-23: role claim)
         "iat": utcnow(),
         "exp": utcnow() + timedelta(minutes=settings.jwt_expiration_minutes),
     }
     return jwt.encode(payload, settings.jwt_secret_key, algorithm=settings.jwt_algorithm)
 
 
-def create_admin_jwt_token(username: str) -> str:
+def create_admin_jwt_token(username: str, org_id: str = SUPER_ORG) -> str:
     payload = {
         "username": username,
         "role": "admin",
+        "org_id": org_id,  # "*" = super-admin over all orgs (UC-26)
         "iat": utcnow(),
         "exp": utcnow() + timedelta(minutes=settings.jwt_expiration_minutes),
     }
@@ -60,8 +69,16 @@ def decode_jwt_token(token: str) -> Optional[dict]:
 
 # ── Session tracking ─────────────────────────────────────────────────────
 
-async def create_session(email: str, name: str, picture: str) -> str:
+async def create_session(email: str, name: str, picture: str,
+                         role: str = None, org_id: str = DEFAULT_ORG_ID) -> str:
+    from app.models import UserRole
+
     session_id = str(uuid.uuid4())
+    resolved_role = role or settings.default_user_role
+    try:
+        role_enum = UserRole(resolved_role)
+    except ValueError:
+        role_enum = UserRole.viewer
     async with async_session_factory() as db:
         session = UserSession(
             id=session_id,
@@ -71,6 +88,8 @@ async def create_session(email: str, name: str, picture: str) -> str:
             login_time=utcnow(),
             last_active=utcnow(),
             revoked=0,
+            role=role_enum,
+            org_id=org_id,
         )
         db.add(session)
         await db.commit()

@@ -322,6 +322,28 @@ void loop() {
 }
 ```
 
+
+## Production Devices: Certificates & Register Topic (P0)
+
+The demo sketch above works against the anonymous demo profile only.
+Connecting to a **production** deployment requires:
+
+1. **Client certificate** — flash `certs/ca.crt` plus a device cert/key whose
+   CN equals your device id (issue via `POST /devices/{id}/certs`, fleet_manager+).
+   Configure `WiFiClientSecure wifiClient; wifiClient.setCACert(ca);
+   wifiClient.setCertificate(dev_cert); wifiClient.setPrivateKey(dev_key);`
+   and connect to port **8883**.
+2. **Register topic** — publish registration to
+   `iot/fleet/{YOUR_DEVICE_ID}/register` (per-device topic). The broker ACL
+   binds this topic to your cert CN, giving the backend a verified identity
+   (JITP will auto-provision the device row into its pre-assigned org).
+   The legacy shared `iot/fleet/register` topic is rejected in strict mode.
+3. **Firmware download** — OTA commands include `download_token` +
+   `token_exp`; append them to the firmware URL as `?did=<id>&exp=<exp>&token=<hmac>`
+   before `http.begin()`.
+
+Demo-profile users need none of this — the original sketch is unchanged.
+
 ## Network Setup
 
 ### 1. Find the MQTT Broker Address

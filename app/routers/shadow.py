@@ -21,6 +21,7 @@ from app.utils import utcnow
 from app.audit import log_action
 from app.mqtt_client import mqtt_client
 from app.metrics import shadow_updates_total
+from app.deps import require_user, require_role
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +29,7 @@ router = APIRouter(prefix="/shadow", tags=["shadow"])
 
 
 @router.get("/{device_id}")
-async def get_shadow(device_id: str, db: AsyncSession = Depends(get_db)):
+async def get_shadow(device_id: str, principal: dict = Depends(require_user()), db: AsyncSession = Depends(get_db)):
     """Get the latest desired and reported shadow states for a device."""
     dev_result = await db.execute(select(Device).where(Device.id == device_id))
     if not dev_result.scalar_one_or_none():
@@ -59,6 +60,7 @@ async def get_shadow(device_id: str, db: AsyncSession = Depends(get_db)):
 async def update_shadow(
     device_id: str,
     req: ShadowUpdateRequest,
+    principal: dict = Depends(require_role("operator")),
     db: AsyncSession = Depends(get_db),
 ):
     """Update the desired or reported shadow state for a device.
@@ -89,7 +91,7 @@ async def update_shadow(
     await db.commit()
     await db.refresh(shadow)
     shadow_updates_total.labels(state=req.state).inc()
-    await log_action(db, "dashboard", f"shadow.{req.state}_update", "device", device_id, {"version": version})
+    await log_action(db, principal["email"], f"shadow.{req.state}_update", "device", device_id, {"version": version})
 
     # Push desired state to device via MQTT
     if req.state == "desired" and mqtt_client.is_connected:
@@ -103,6 +105,7 @@ async def get_shadow_history(
     device_id: str,
     state: Optional[str] = None,
     limit: int = 20,
+    principal: dict = Depends(require_user()),
     db: AsyncSession = Depends(get_db),
 ):
     query = select(DeviceShadow).where(DeviceShadow.device_id == device_id)

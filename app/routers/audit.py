@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.audit import get_audit_logs, prune_old_logs
 from app.schemas import AuditLogResponse, AuditLogListResponse
+from app.deps import require_user, require_admin
 
 router = APIRouter(prefix="/audit", tags=["audit"])
 
@@ -22,6 +23,7 @@ async def list_audit_logs(
     target_id: str = Query(None),
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
+    principal: dict = Depends(require_user()),
     db: AsyncSession = Depends(get_db),
 ):
     result = await get_audit_logs(db, actor=actor, action=action, target_type=target_type,
@@ -33,6 +35,6 @@ async def list_audit_logs(
 
 
 @router.delete("/old")
-async def prune_audit_logs(days: int = Query(90, ge=1), db: AsyncSession = Depends(get_db)):
+async def prune_audit_logs(days: int = Query(90, ge=1), principal: dict = Depends(require_admin()), db: AsyncSession = Depends(get_db)):
     deleted = await prune_old_logs(db, days=days)
     return {"deleted": deleted, "days": days}

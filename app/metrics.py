@@ -13,6 +13,12 @@ ota_deployments_total = Counter(
 )
 ota_deployments_in_progress = Gauge("fleet_ota_in_progress", "OTA deployments currently in progress")
 
+# P0 UC-25: device identity rejections (revoked / unknown certs in strict mode)
+device_cert_rejected_total = Counter(
+    "fleet_device_cert_rejected_total", "Device MQTT messages rejected by identity checks",
+    ["reason"],
+)
+
 # API metrics
 api_request_latency = Histogram(
     "fleet_api_request_latency_seconds",
@@ -37,8 +43,7 @@ alert_notifications_total = Counter(
 )
 
 # MQTT metrics
-mqtt_messages_published = Counter(
-    "fleet_mqtt_messages_published_total", "MQTT messages published", ["topic"]
+mqtt_messages_published = Counter(    "fleet_mqtt_messages_published_total", "MQTT messages published", ["topic"]
 )
 mqtt_messages_received = Counter(
     "fleet_mqtt_messages_received_total", "MQTT messages received", ["topic"]

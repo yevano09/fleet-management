@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.predictive_maintenance import run_prediction_cycle, get_predictions
 from app.schemas import PredictedFailureResponse, PredictedFailureListResponse
+from app.deps import require_user, require_role
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +27,7 @@ async def list_predictions(
     min_risk: float = Query(0.0, ge=0.0, le=1.0),
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
+    principal: dict = Depends(require_user()),
     db: AsyncSession = Depends(get_db),
 ):
     result = await get_predictions(db, device_id=device_id, resolved=resolved, min_risk=min_risk,
@@ -37,7 +39,7 @@ async def list_predictions(
 
 
 @router.post("/scan")
-async def run_predictive_scan(db: AsyncSession = Depends(get_db)):
+async def run_predictive_scan(principal: dict = Depends(require_role("operator")), db: AsyncSession = Depends(get_db)):
     """Trigger a predictive maintenance analysis cycle across all online devices."""
     predictions = await run_prediction_cycle(db)
     return {
@@ -58,6 +60,7 @@ async def run_predictive_scan(db: AsyncSession = Depends(get_db)):
 @router.post("/predictions/{prediction_id}/resolve")
 async def resolve_prediction(
     prediction_id: str,
+    principal: dict = Depends(require_role("operator")),
     db: AsyncSession = Depends(get_db),
 ):
     """Mark a predicted failure as resolved (addressed by maintenance)."""

@@ -21,14 +21,30 @@ DEFAULT_PORT = os.environ.get("FLEET_PORT", "8181")
 BASE_URL = os.environ.get("BASE_URL", f"http://localhost:{DEFAULT_PORT}")
 DEVICE_COUNT = int(os.environ.get("TEST_DEVICE_COUNT", 3))
 TIMEOUT = int(os.environ.get("TEST_TIMEOUT", 30))
+AUTH_MODE = os.environ.get("AUTH_MODE", "open")
+FLEET_API_KEY = os.environ.get("FLEET_API_KEY", "")
 
 pytestmark = pytest.mark.e2e
 
+# P0 UC-23: in strict mode every request carries the automation API key.
+if FLEET_API_KEY:
+    _orig_request = requests.request
+
+    def _authed_request(method, url, **kw):  # noqa: E301
+        headers = dict(kw.pop("headers", None) or {})
+        if url.startswith(BASE_URL):
+            headers.setdefault("X-API-Key", FLEET_API_KEY)
+        return _orig_request(method, url, headers=headers, **kw)
+
+    requests.request = _authed_request
+
 
 def wait_for_backend(max_retries: int = 15, delay: int = 2) -> bool:
+    """P0 rule 4: wait on the unauthenticated /health endpoint (never /devices,
+    which returns 401 under AUTH_MODE=strict)."""
     for i in range(max_retries):
         try:
-            r = requests.get(f"{BASE_URL}/devices", timeout=5)
+            r = requests.get(f"{BASE_URL}/health", timeout=5)
             if r.status_code == 200:
                 return True
         except requests.RequestException:

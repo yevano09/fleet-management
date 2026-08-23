@@ -145,7 +145,11 @@ def run_anomaly_agent(notify: bool = True) -> dict:
         try:
             import urllib.request, json
             base = os.environ.get("FLEET_BACKEND_URL", "http://localhost:8181")
-            with urllib.request.urlopen(f"{base}/agents/fleet-health", timeout=30) as resp:
+            api_key = os.environ.get("FLEET_API_KEY", "")
+            req = urllib.request.Request(f"{base}/agents/fleet-health")
+            if api_key:
+                req.add_header("X-API-Key", api_key)  # P0 UC-23: strict-mode auth
+            with urllib.request.urlopen(req, timeout=30) as resp:
                 return json.loads(resp.read().decode())
         except Exception as e:
             logger.warning("Fleet-health endpoint failed, falling back to local analysis: %s", e)

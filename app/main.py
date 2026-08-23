@@ -1,6 +1,7 @@
 import os
 import json
 import hashlib
+import hmac
 import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
@@ -11,9 +12,9 @@ from fastapi.responses import RedirectResponse
 from fastapi.responses import FileResponse, HTMLResponse
 from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
 from fastapi.responses import Response
-from sqlalchemy import select, update, delete
+from sqlalchemy import select, update, delete, text
 
-from app.config import settings, validate_settings
+from app.config import settings, validate_settings, DEFAULT_ORG_ID
 from app.database import init_db, async_session_factory
 from app.mqtt_client import mqtt_client
 from app.routers import devices, ota, dashboard, auth, admin
@@ -28,6 +29,9 @@ from app.routers.shadow import router as shadow_router
 from app.routers.predictive import router as predictive_router
 from app.routers.webhooks import router as webhooks_router
 from app.routers.provisioning import router as provisioning_router
+from app.routers.orgs import router as orgs_router
+from app.routers.apikeys import router as apikeys_router
+from app.routers.certs import router as certs_router
 from agents.routers import router as agents_router
 from app.aegis.router import router as aegis_router
 from app.ota_manager import OtaStateMachine, ota_timeout_watcher
@@ -35,11 +39,11 @@ from app.metrics import (
     metrics_middleware, active_devices, total_devices, mqtt_messages_received,
     v2g_active_discharges, device_soc, telemetry_points_total, command_queue_depth,
     command_queue_delivered_total, command_queue_expired_total, device_lifecycle_transitions,
-    shadow_updates_total,
+    shadow_updates_total, device_cert_rejected_total,
 )
 from app.models import (
     Device, DeviceStatus, DeviceLifecycle, Firmware, Telemetry, CommandQueue,
-    CommandStatus, DeviceShadow, OtaDeployment, OtaStatus,
+    CommandStatus, DeviceShadow, OtaDeployment, OtaStatus, DeviceCertificate,
 )
 from app.utils import utcnow
 from app.audit import log_action
@@ -47,6 +51,26 @@ from app.event_emitter import emit_event
 
 logging.basicConfig(level=getattr(logging, settings.log_level.upper()))
 logger = logging.getLogger(__name__)
+
+
+# ── P0 UC-23 rule 5: HMAC download tokens for the firmware C2 channel ──────
+
+def _firmware_token_sig(device_id: str, sha256_hash: str, exp: int) -> str:
+    msg = f"{device_id}:{sha256_hash}:{exp}".encode()
+    return hmac.new(settings.jwt_secret_key.encode(), msg, hashlib.sha256).hexdigest()
+
+
+def issue_firmware_download_token(device_id: str, sha256_hash: str) -> tuple[str, int]:
+    """Short-lived signed token embedded in OTA commands (strict mode only)."""
+    exp = int(utcnow().timestamp()) + settings.firmware_token_ttl_seconds
+    return _firmware_token_sig(device_id, sha256_hash, exp), exp
+
+
+def verify_firmware_download_token(device_id: str, sha256_hash: str, exp: int, token: str) -> bool:
+    if int(exp) < int(utcnow().timestamp()):
+        return False
+    expected = _firmware_token_sig(device_id, sha256_hash, int(exp))
+    return hmac.compare_digest(expected, token or "")
 
 
 async def _record_telemetry(device: Device, payload: dict):
@@ -169,12 +193,72 @@ async def _sync_shadow_to_device(device_id: str):
         logger.debug("Shadow sync failed", exc_info=True)
 
 
-async def handle_mqtt_register(payload: dict):
+async def _revoked_device_ids() -> set[str]:
+    """Device ids with NO active certificate remaining (strict-mode gate).
+
+    Rotation issues a new `active` row before/alongside revoking the old one,
+    so a rotated device keeps flowing while a fully-revoked one is blocked.
+    Certificate-level revocation itself is enforced by the broker via CRL;
+    this is defense-in-depth for the application layer.
+    """
+    try:
+        async with async_session_factory() as db:
+            result = await db.execute(
+                select(DeviceCertificate.device_id, DeviceCertificate.status).where(
+                    DeviceCertificate.device_id.isnot(None)
+                )
+            )
+            statuses: dict[str, list[str]] = {}
+            for device_id, status in result.all():
+                statuses.setdefault(device_id, []).append(status)
+            return {
+                d for d, sts in statuses.items() if "active" not in sts
+            }
+    except Exception:
+        return set()
+
+
+async def handle_mqtt_register(payload: dict, verified_id: str | None = None):
+    """Device registration over MQTT.
+
+    P0 UC-24/UC-25 identity rules:
+      - verified_id comes from the per-device topic `iot/fleet/{id}/register`,
+        which the broker ACL binds to the TLS cert CN. In strict mode,
+        registrations without a verified id are REJECTED (spoofable legacy
+        shared topic).
+      - JITP: an unknown device_id presenting on its own verified topic is
+        provisioned into the organization recorded on its issued certificate.
+    """
     async with async_session_factory() as db:
+        strict = settings.auth_mode == "strict"
+
+        if strict and not verified_id:
+            device_cert_rejected_total.labels(reason="unverified_register_topic").inc()
+            logger.warning("Rejected register via legacy topic in strict mode: %s", payload.get("name"))
+            return
+
         name = payload.get("name", "unknown")
-        device_id = payload.get("device_id")
+        device_id = payload.get("device_id") or verified_id
         mqtt_id = payload.get("device_id")  # the MQTT client's identifier (MAC for ESP32)
         city = payload.get("city")
+
+        if strict and verified_id:
+            if device_id and device_id != verified_id:
+                device_cert_rejected_total.labels(reason="identity_mismatch").inc()
+                logger.warning(
+                    "Register identity mismatch: topic CN=%s payload device_id=%s",
+                    verified_id, device_id,
+                )
+                return
+            device_id = verified_id
+            mqtt_id = mqtt_id or verified_id
+
+        # Revocation check (defense-in-depth behind the broker CRL)
+        if strict and device_id and device_id in await _revoked_device_ids():
+            device_cert_rejected_total.labels(reason="revoked_cert").inc()
+            logger.warning("Rejected register for revoked device cert: %s", device_id)
+            return
+
         # Look up by mqtt_client_id first, then by device.id, then by name
         existing = None
         if mqtt_id:
@@ -186,6 +270,7 @@ async def handle_mqtt_register(payload: dict):
         if not existing:
             result = await db.execute(select(Device).where(Device.name == name))
             existing = result.scalar_one_or_none()
+
         if existing:
             was_offline = existing.status == DeviceStatus.offline
             existing.status = DeviceStatus.online
@@ -206,6 +291,25 @@ async def handle_mqtt_register(payload: dict):
             await log_action(db, "system", "device.reconnect", "device", existing.id, {"name": name})
             await emit_event(db, "device.reconnected", {"device_id": existing.id, "name": name})
         else:
+            # JITP (UC-25): resolve the org from the device's issued certificate.
+            org_id = DEFAULT_ORG_ID
+            if device_id:
+                cert_result = await db.execute(
+                    select(DeviceCertificate).where(
+                        DeviceCertificate.device_id == device_id,
+                        DeviceCertificate.status.in_(("active", "issued")),
+                    ).order_by(DeviceCertificate.issued_at.desc()).limit(1)
+                )
+                cert_row = cert_result.scalar_one_or_none()
+                if cert_row:
+                    org_id = cert_row.org_id or DEFAULT_ORG_ID
+                elif strict:
+                    device_cert_rejected_total.labels(reason="unknown_identity").inc()
+                    logger.warning(
+                        "JITP rejected: no active certificate for CN/device '%s'", device_id
+                    )
+                    return
+
             device = Device(
                 id=device_id,
                 name=name,
@@ -215,19 +319,28 @@ async def handle_mqtt_register(payload: dict):
                 last_seen=utcnow(),
                 ip_address=payload.get("ip_address", ""),
                 city=city,
+                org_id=org_id,
             )
             db.add(device)
             await db.commit()
             await db.refresh(device)
             active_devices.inc()
             total_devices.inc()
-            await log_action(db, "system", "device.register", "device", device.id, {"name": name, "city": city})
+            await log_action(db, "system", "device.register", "device", device.id,
+                             {"name": name, "city": city, "org_id": org_id})
             await emit_event(db, "device.registered", {"device_id": device.id, "name": name, "city": city})
-            logger.info("MQTT auto-registered device: %s (id=%s, mqtt_id=%s)", name, device_id, mqtt_id)
+            logger.info("MQTT auto-registered device: %s (id=%s, mqtt_id=%s, org=%s)",
+                        name, device_id, mqtt_id, org_id)
     mqtt_messages_received.labels(topic="register").inc()
 
 
 async def handle_mqtt_heartbeat(device_id: str, payload: dict):
+    # P0 UC-25 defense-in-depth: ignore heartbeats from revoked identities.
+    if settings.auth_mode == "strict" and device_id in await _revoked_device_ids():
+        device_cert_rejected_total.labels(reason="revoked_cert").inc()
+        logger.warning("Dropped heartbeat from revoked device cert: %s", device_id)
+        return
+
     async with async_session_factory() as db:
         result = await db.execute(select(Device).where(Device.id == device_id))
         device = result.scalar_one_or_none()
@@ -388,11 +501,35 @@ async def _flush_command_queue_for_device(db, device_id: str):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logger.info("Starting Fleet Commander backend...")
+    logger.info("Starting Fleet Commander backend (role=%s, auth_mode=%s)...",
+                settings.role, settings.auth_mode)
     validate_settings()
     os.makedirs(settings.firmware_storage_path, exist_ok=True)
-    await init_db()
+
+    # P0 UC-27: retry DB init — production profile may race postgres health.
+    last_err = None
+    for attempt in range(10):
+        try:
+            await init_db()
+            last_err = None
+            break
+        except Exception as e:
+            last_err = e
+            logger.warning("DB init attempt %d failed: %s (retrying in 3s)", attempt + 1, e)
+            await asyncio.sleep(3)
+    if last_err is not None:
+        raise RuntimeError(f"Database unavailable after retries: {last_err}")
+
     loop = asyncio.get_running_loop()
+
+    if settings.role == "api":
+        # P0 HA split: API replicas serve HTTP only. MQTT subscription,
+        # Aegis scheduler, OTA watchers and queue flusher are LEADER-only so
+        # replicas never double-consume commands or duplicate schedulers.
+        logger.info("ROLE=api replica: skipping MQTT + background schedulers")
+        yield
+        return
+
     mqtt_client.set_event_loop(loop)
     mqtt_client.on_ota_status(OtaStateMachine.handle_ota_status)
     mqtt_client.on_heartbeat(handle_mqtt_heartbeat)
@@ -467,11 +604,17 @@ async def lifespan(app: FastAPI):
     logger.info("Fleet Commander backend shut down.")
 
 
+# P0 rule 4: docs may be disabled entirely in production (DOCS_ENABLED=false).
+_docs_kwargs = {}
+if not settings.docs_enabled:
+    _docs_kwargs = {"docs_url": None, "redoc_url": None, "openapi_url": None}
+
 app = FastAPI(
     title="Fleet Commander",
     description="Production-grade IoT device management module",
-    version="2.0.0",
+    version="2.1.0",
     lifespan=lifespan,
+    **_docs_kwargs,
 )
 
 app.middleware("http")(metrics_middleware)
@@ -494,17 +637,74 @@ app.include_router(shadow_router)
 app.include_router(predictive_router)
 app.include_router(webhooks_router)
 app.include_router(provisioning_router)
+app.include_router(orgs_router)      # P0 UC-26
+app.include_router(apikeys_router)   # P0 UC-23
+app.include_router(certs_router)     # P0 UC-25
+
+
+@app.get("/health")
+async def health():
+    """Liveness: process is up. Never auth-gated (P0 rule 4)."""
+    return {"status": "ok", "role": settings.role, "auth_mode": settings.auth_mode}
+
+
+@app.get("/health/ready")
+async def health_ready():
+    """Readiness: DB reachable (+ MQTT for the leader). Never auth-gated."""
+    try:
+        async with async_session_factory() as db:
+            await db.execute(text("SELECT 1"))
+        db_ok = True
+    except Exception:
+        db_ok = False
+
+    if settings.role == "api":
+        # Replicas have no MQTT loop — DB-only readiness.
+        if not db_ok:
+            raise HTTPException(status_code=503, detail={"database": False})
+        return {"status": "ready", "role": settings.role, "database": True}
+
+    mqtt_ok = bool(mqtt_client._connected)
+    if not db_ok or not mqtt_ok:
+        raise HTTPException(
+            status_code=503,
+            detail={"database": db_ok, "mqtt": mqtt_ok},
+        )
+    return {"status": "ready", "role": settings.role, "database": True, "mqtt": True}
 
 
 @app.get("/firmware/{filename}")
-async def serve_firmware(filename: str):
+async def serve_firmware(filename: str, request: Request):
     storage = os.path.realpath(settings.firmware_storage_path)
     file_path = os.path.realpath(os.path.join(storage, filename))
     if not file_path.startswith(storage + os.sep):
         raise HTTPException(status_code=403, detail="Access denied")
     if not os.path.exists(file_path):
         raise HTTPException(status_code=404, detail="Firmware file not found")
+
+    # P0 UC-23 rule 5: firmware download is a C2 channel — in strict mode a
+    # short-lived HMAC token (issued when the OTA command was published) is
+    # mandatory: ?did=<device_id>&exp=<unix>&token=<hmac>.
+    if settings.auth_mode == "strict":
+        did = request.query_params.get("did", "")
+        exp = request.query_params.get("exp", "0")
+        token = request.query_params.get("token", "")
+        result = await db_lookup_firmware_hash(filename)
+        if result is None:
+            raise HTTPException(status_code=404, detail="Firmware file not found")
+        sha256_hash = result
+        if not did or not verify_firmware_download_token(did, sha256_hash, int(exp or 0), token):
+            device_cert_rejected_total.labels(reason="firmware_token_invalid").inc()
+            raise HTTPException(status_code=401, detail="Invalid or expired firmware token")
+
     return FileResponse(file_path, media_type="application/octet-stream", filename=filename)
+
+
+async def db_lookup_firmware_hash(filename: str):
+    async with async_session_factory() as db:
+        result = await db.execute(select(Firmware).where(Firmware.filename == filename))
+        fw = result.scalar_one_or_none()
+        return fw.sha256_hash if fw else None
 
 
 @app.get("/architect-diagram", response_class=HTMLResponse)

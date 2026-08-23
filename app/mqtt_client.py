@@ -1,4 +1,5 @@
 import json
+import ssl
 import logging
 from typing import Optional, Callable
 from datetime import datetime, timezone
@@ -15,6 +16,10 @@ MQTT_TOPIC_COMMAND_OTA = "iot/fleet/{device_id}/command/ota"
 MQTT_TOPIC_STATUS_OTA = "iot/fleet/{device_id}/status/ota"
 MQTT_TOPIC_HEARTBEAT = "iot/fleet/{device_id}/heartbeat"
 MQTT_TOPIC_REGISTER = "iot/fleet/register"
+# P0 UC-25 (JITP): per-device register topic. With broker ACL
+# `pattern write iot/fleet/%u/register` (%u = TLS cert CN), the topic segment
+# is a broker-verified device identity — the legacy shared topic cannot be.
+MQTT_TOPIC_REGISTER_SINGULAR = "iot/fleet/{device_id}/register"
 
 
 class MqttClient:
@@ -49,6 +54,7 @@ class MqttClient:
             client.subscribe("iot/fleet/+/status/ota", qos=1)
             client.subscribe("iot/fleet/+/heartbeat", qos=1)
             client.subscribe("iot/fleet/register", qos=1)
+            client.subscribe("iot/fleet/+/register", qos=1)  # P0 JITP identity topic
             client.subscribe("iot/fleet/+/status/v2g", qos=1)
         else:
             logger.error("Failed to connect to MQTT broker, rc=%s", reason_code)
@@ -86,23 +92,41 @@ class MqttClient:
                             self._on_v2g_status(device_id, payload), self._loop
                         )
             elif msg.topic.endswith("/register"):
+                # Per-device topic `iot/fleet/{id}/register` carries a
+                # broker-verified identity (ACL-bound CN). The legacy shared
+                # topic yields verified_id=None (open mode only trusts it).
+                verified_id = topic_parts[2] if len(topic_parts) >= 4 else None
                 if self._on_register:
                     if self._loop and self._loop.is_running():
                         asyncio.run_coroutine_threadsafe(
-                            self._on_register(payload), self._loop
+                            self._on_register(payload, verified_id), self._loop
                         )
         except Exception:
             logger.exception("Error processing MQTT message")
 
     def connect(self):
         self.client = mqtt.Client(
-            client_id="fleet-commander-backend",
+            client_id="fleet-backend",
             protocol=mqtt.MQTTv5,
             callback_api_version=mqtt.CallbackAPIVersion.VERSION2,
         )
 
         if settings.mqtt_username and settings.mqtt_password:
             self.client.username_pw_set(settings.mqtt_username, settings.mqtt_password)
+
+        # P0 UC-24: mutual TLS with the internal CA in production.
+        if settings.mqtt_tls_enabled:
+            self.client.tls_set(
+                ca_certs=settings.mqtt_ca_cert or None,
+                certfile=settings.mqtt_client_cert or None,
+                keyfile=settings.mqtt_client_key or None,
+                tls_version=ssl.PROTOCOL_TLS_CLIENT,
+            )
+            self.client.tls_insecure_set(False)
+            logger.info(
+                "MQTT TLS enabled (ca=%s cert=%s port=%s)",
+                settings.mqtt_ca_cert, settings.mqtt_client_cert, settings.mqtt_broker_port,
+            )
 
         self.client.on_connect = self._on_connect
         self.client.on_disconnect = self._on_disconnect
@@ -121,7 +145,15 @@ class MqttClient:
             self.client.disconnect()
             self._connected = False
 
-    def publish_ota_command(self, device_id: str, firmware_url: str, sha256_hash: str, deployment_id: str = ""):
+    def publish_ota_command(
+        self,
+        device_id: str,
+        firmware_url: str,
+        sha256_hash: str,
+        deployment_id: str = "",
+        download_token: str = "",
+        token_exp: int = 0,
+    ):
         if not self._connected:
             logger.warning("MQTT not connected, cannot publish OTA command")
             return False
@@ -129,10 +161,16 @@ class MqttClient:
         payload_dict = {
             "firmware_url": firmware_url,
             "sha256_hash": sha256_hash,
+            "device_id": device_id,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
         if deployment_id:
             payload_dict["deployment_id"] = deployment_id
+        # P0 UC-23 rule 5: strict mode gates GET /firmware behind a short-lived
+        # HMAC token; devices must echo it back as query params on download.
+        if download_token:
+            payload_dict["download_token"] = download_token
+            payload_dict["token_exp"] = token_exp
         payload = json.dumps(payload_dict)
         result = self.client.publish(topic, payload, qos=1)
         logger.info(f"Published OTA command to {topic}: result={result.rc}")

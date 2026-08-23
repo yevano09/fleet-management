@@ -16,6 +16,7 @@ from app.models import WebhookSubscription, EventLog
 from app.schemas import WebhookCreateRequest, WebhookResponse, EventLogResponse
 from app.audit import log_action
 from app.event_emitter import get_events
+from app.deps import require_user, require_role
 
 logger = logging.getLogger(__name__)
 
@@ -23,13 +24,13 @@ router = APIRouter(prefix="/webhooks", tags=["webhooks"])
 
 
 @router.get("", response_model=list[WebhookResponse])
-async def list_webhooks(db: AsyncSession = Depends(get_db)):
+async def list_webhooks(principal: dict = Depends(require_user()), db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(WebhookSubscription).order_by(WebhookSubscription.created_at.desc()))
     return [WebhookResponse.model_validate(w) for w in result.scalars().all()]
 
 
 @router.post("", response_model=WebhookResponse, status_code=201)
-async def create_webhook(req: WebhookCreateRequest, db: AsyncSession = Depends(get_db)):
+async def create_webhook(req: WebhookCreateRequest, principal: dict = Depends(require_role("fleet_manager")), db: AsyncSession = Depends(get_db)):
     sub = WebhookSubscription(
         name=req.name, url=req.url, event_types=req.event_types,
         secret=req.secret, enabled=req.enabled,
@@ -37,12 +38,12 @@ async def create_webhook(req: WebhookCreateRequest, db: AsyncSession = Depends(g
     db.add(sub)
     await db.commit()
     await db.refresh(sub)
-    await log_action(db, "dashboard", "webhook.create", "webhook", sub.id, {"name": req.name, "url": req.url})
+    await log_action(db, principal["email"], "webhook.create", "webhook", sub.id, {"name": req.name, "url": req.url})
     return WebhookResponse.model_validate(sub)
 
 
 @router.delete("/{webhook_id}")
-async def delete_webhook(webhook_id: str, db: AsyncSession = Depends(get_db)):
+async def delete_webhook(webhook_id: str, principal: dict = Depends(require_role("fleet_manager")), db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(WebhookSubscription).where(WebhookSubscription.id == webhook_id))
     sub = result.scalar_one_or_none()
     if not sub:
@@ -53,7 +54,7 @@ async def delete_webhook(webhook_id: str, db: AsyncSession = Depends(get_db)):
 
 
 @router.patch("/{webhook_id}/toggle")
-async def toggle_webhook(webhook_id: str, enabled: bool = True, db: AsyncSession = Depends(get_db)):
+async def toggle_webhook(webhook_id: str, enabled: bool = True, principal: dict = Depends(require_role("fleet_manager")), db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(WebhookSubscription).where(WebhookSubscription.id == webhook_id))
     sub = result.scalar_one_or_none()
     if not sub:
@@ -68,6 +69,7 @@ async def list_events(
     event_type: Optional[str] = Query(None),
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
+    principal: dict = Depends(require_user()),
     db: AsyncSession = Depends(get_db),
 ):
     result = await get_events(db, event_type=event_type, limit=limit, offset=offset)
@@ -75,7 +77,7 @@ async def list_events(
 
 
 @router.post("/test/{webhook_id}")
-async def test_webhook(webhook_id: str, db: AsyncSession = Depends(get_db)):
+async def test_webhook(webhook_id: str, principal: dict = Depends(require_role("fleet_manager")), db: AsyncSession = Depends(get_db)):
     """Send a test event to a webhook subscription."""
     result = await db.execute(select(WebhookSubscription).where(WebhookSubscription.id == webhook_id))
     sub = result.scalar_one_or_none()

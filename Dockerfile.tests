@@ -18,4 +18,4 @@ COPY .env.example .env
 ENV PYTHONPATH=/app
 ENV BASE_URL=http://backend:8000
 
-CMD ["pytest", "tests/test_e2e.py", "-v", "--tb=short"]
+CMD ["pytest", "tests/test_e2e.py", "tests/test_e2e_strict.py", "-v", "--tb=short"]

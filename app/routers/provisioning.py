@@ -22,6 +22,7 @@ from app.utils import utcnow
 from app.audit import log_action
 from app.metrics import active_devices, total_devices
 from app.event_emitter import emit_event
+from app.deps import require_role
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +32,7 @@ router = APIRouter(prefix="/provisioning", tags=["provisioning"])
 @router.post("/bulk-import", response_model=BulkImportResponse)
 async def bulk_import_devices(
     file: UploadFile = File(...),
+    principal: dict = Depends(require_role("fleet_manager")),
     db: AsyncSession = Depends(get_db),
 ):
     """Bulk import devices from a CSV file.
@@ -84,7 +86,7 @@ async def bulk_import_devices(
 
     await db.commit()
     if imported:
-        await log_action(db, "dashboard", "device.bulk_import", "device", None, {"imported": imported, "skipped": skipped})
+        await log_action(db, principal["email"], "device.bulk_import", "device", None, {"imported": imported, "skipped": skipped})
         await emit_event(db, "device.bulk_imported", {"imported": imported, "skipped": skipped})
 
     return BulkImportResponse(
@@ -97,6 +99,7 @@ async def pre_register_device(
     name: str,
     firmware_version: str = "1.0.0",
     city: str = "",
+    principal: dict = Depends(require_role("fleet_manager")),
     db: AsyncSession = Depends(get_db),
 ):
     """Pre-register a device and generate a QR-claim token.
@@ -122,5 +125,5 @@ async def pre_register_device(
     await db.commit()
     await db.refresh(device)
     total_devices.inc()
-    await log_action(db, "dashboard", "device.pre_register", "device", device.id, {"name": name})
+    await log_action(db, principal["email"], "device.pre_register", "device", device.id, {"name": name})
     return DeviceResponse.model_validate(device)

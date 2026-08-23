@@ -22,6 +22,7 @@ from app.utils import utcnow
 from app.config import settings
 from app.audit import log_action
 from app.metrics import command_queue_delivered_total
+from app.deps import require_user, require_role
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +32,7 @@ router = APIRouter(prefix="/commands", tags=["command-queue"])
 @router.post("/queue", response_model=CommandQueueResponse, status_code=201)
 async def queue_command(
     req: CommandQueueRequest,
+    principal: dict = Depends(require_role("operator")),
     db: AsyncSession = Depends(get_db),
 ):
     """Queue a command for delivery to a device (immediately if online, on reconnect if offline)."""
@@ -50,7 +52,7 @@ async def queue_command(
     db.add(cmd)
     await db.commit()
     await db.refresh(cmd)
-    await log_action(db, "dashboard", "command.queue", "command", cmd.id, {
+    await log_action(db, principal["email"], "command.queue", "command", cmd.id, {
         "device_id": req.device_id, "command_type": req.command_type,
     })
 
@@ -74,6 +76,7 @@ async def list_commands(
     status: Optional[str] = Query(None),
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
+    principal: dict = Depends(require_user()),
     db: AsyncSession = Depends(get_db),
 ):
     query = select(CommandQueue)
@@ -96,7 +99,7 @@ async def list_commands(
 
 
 @router.get("/{command_id}", response_model=CommandQueueResponse)
-async def get_command(command_id: str, db: AsyncSession = Depends(get_db)):
+async def get_command(command_id: str, principal: dict = Depends(require_user()), db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(CommandQueue).where(CommandQueue.id == command_id))
     cmd = result.scalar_one_or_none()
     if not cmd:
@@ -105,7 +108,7 @@ async def get_command(command_id: str, db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/{command_id}/retry")
-async def retry_command(command_id: str, db: AsyncSession = Depends(get_db)):
+async def retry_command(command_id: str, principal: dict = Depends(require_role("operator")), db: AsyncSession = Depends(get_db)):
     """Manually re-attempt delivery of a queued command."""
     result = await db.execute(select(CommandQueue).where(CommandQueue.id == command_id))
     cmd = result.scalar_one_or_none()
@@ -127,7 +130,7 @@ async def retry_command(command_id: str, db: AsyncSession = Depends(get_db)):
 
 
 @router.delete("/{command_id}")
-async def cancel_command(command_id: str, db: AsyncSession = Depends(get_db)):
+async def cancel_command(command_id: str, principal: dict = Depends(require_role("operator")), db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(CommandQueue).where(CommandQueue.id == command_id))
     cmd = result.scalar_one_or_none()
     if not cmd:
@@ -138,7 +141,7 @@ async def cancel_command(command_id: str, db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/pending/{device_id}", response_model=CommandQueueListResponse)
-async def get_pending_commands(device_id: str, db: AsyncSession = Depends(get_db)):
+async def get_pending_commands(device_id: str, principal: dict = Depends(require_user()), db: AsyncSession = Depends(get_db)):
     """List all queued (undelivered) commands for a device."""
     result = await db.execute(
         select(CommandQueue)

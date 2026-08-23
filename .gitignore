@@ -21,3 +21,10 @@ noproxy.sh
 skills-lock.json
 session-*.md
 behindproxy.ps1
+
+# P0 UC-24/25: PKI material — never commit private keys or certs.
+certs/*
+!certs/README.md
+
+# Generated production verification secrets
+.env.p0

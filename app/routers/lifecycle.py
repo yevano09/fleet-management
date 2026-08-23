@@ -14,6 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
+from app.deps import require_user, require_role
 from app.models import Device, DeviceLifecycle, DeviceStatus
 from app.schemas import DecommissionRequest, ClaimDeviceRequest, DeviceResponse
 from app.utils import utcnow
@@ -31,6 +32,7 @@ router = APIRouter(prefix="/lifecycle", tags=["lifecycle"])
 async def decommission_device(
     device_id: str,
     req: DecommissionRequest,
+    principal: dict = Depends(require_role("fleet_manager")),
     db: AsyncSession = Depends(get_db),
 ):
     """Decommission a device — mark as retired, optionally factory reset."""
@@ -41,17 +43,18 @@ async def decommission_device(
     if device.lifecycle_status == DeviceLifecycle.decommissioned:
         raise HTTPException(status_code=409, detail="Device already decommissioned")
 
+    actor = req.actor if req.actor != "system" else principal["email"]
     old_status = device.lifecycle_status.value if device.lifecycle_status else "active"
     device.lifecycle_status = DeviceLifecycle.decommissioned
     device.decommissioned_at = utcnow()
-    device.decommissioned_by = req.actor
+    device.decommissioned_by = actor
     device.decommissioned_reason = req.reason
     device.status = DeviceStatus.offline
     await db.commit()
 
     device_lifecycle_transitions.labels(from_status=old_status, to_status="decommissioned").inc()
-    await log_action(db, req.actor, "device.decommission", "device", device_id, {"reason": req.reason, "factory_reset": req.factory_reset})
-    await emit_event(db, "device.decommissioned", {"device_id": device_id, "reason": req.reason, "actor": req.actor})
+    await log_action(db, actor, "device.decommission", "device", device_id, {"reason": req.reason, "factory_reset": req.factory_reset})
+    await emit_event(db, "device.decommissioned", {"device_id": device_id, "reason": req.reason, "actor": actor})
 
     if req.factory_reset and mqtt_client.is_connected:
         mqtt_client.publish_maintenance_command(device_id, enter=True, reason="decommission_factory_reset")
@@ -64,6 +67,7 @@ async def enter_maintenance(
     device_id: str,
     reason: str = "scheduled_maintenance",
     actor: str = "system",
+    principal: dict = Depends(require_role("operator")),
     db: AsyncSession = Depends(get_db),
 ):
     """Put a device into maintenance mode."""
@@ -72,6 +76,7 @@ async def enter_maintenance(
     if not device:
         raise HTTPException(status_code=404, detail="Device not found")
 
+    actor = actor if actor != "system" else principal["email"]
     old_status = device.lifecycle_status.value if device.lifecycle_status else "active"
     device.lifecycle_status = DeviceLifecycle.maintenance
     await db.commit()
@@ -88,6 +93,7 @@ async def enter_maintenance(
 async def activate_device(
     device_id: str,
     actor: str = "system",
+    principal: dict = Depends(require_role("operator")),
     db: AsyncSession = Depends(get_db),
 ):
     """Return a device from maintenance/decommissioned to active."""
@@ -96,6 +102,7 @@ async def activate_device(
     if not device:
         raise HTTPException(status_code=404, detail="Device not found")
 
+    actor = actor if actor != "system" else principal["email"]
     old_status = device.lifecycle_status.value if device.lifecycle_status else "active"
     device.lifecycle_status = DeviceLifecycle.active
     device.decommissioned_at = None
@@ -110,7 +117,7 @@ async def activate_device(
 
 
 @router.post("/{device_id}/claim-token")
-async def generate_claim_token(device_id: str, db: AsyncSession = Depends(get_db)):
+async def generate_claim_token(device_id: str, principal: dict = Depends(require_role("fleet_manager")), db: AsyncSession = Depends(get_db)):
     """Generate a QR-claim provisioning token for a pre-registered device."""
     result = await db.execute(select(Device).where(Device.id == device_id))
     device = result.scalar_one_or_none()
