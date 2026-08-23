@@ -46,7 +46,7 @@ sequenceDiagram
     alt Existing device
         Service->>DB: UPDATE status=online, refresh fields
         Service->>MQ: active_devices.inc(); emit device.reconnected
-        Service--)Service: flush queue + sync shadow tasks
+        Service--Service: flush queue + sync shadow tasks
     else New device
         Service->>DB: INSERT Device(status=online)
         Service->>MQ: total_devices.inc(), active_devices.inc()
