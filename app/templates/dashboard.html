@@ -435,19 +435,23 @@ Auto-register (skip review)
 <div class="modal-overlay" id="device-detail-modal">
 <div class="modal modal-large">
 <h3 id="detail-title">Device Details</h3>
-<div class="detail-tabs">
-<div class="detail-tab active" onclick="switchDetailTab('telemetry')">Telemetry</div>
-<div class="detail-tab" onclick="switchDetailTab('shadow')">Shadow</div>
-<div class="detail-tab" onclick="switchDetailTab('lifecycle')">Lifecycle</div>
-<div class="detail-tab" onclick="switchDetailTab('commands')">Commands</div>
-</div>
+ <div class="detail-tabs">
+ <div class="detail-tab active" onclick="switchDetailTab('telemetry')">Telemetry</div>
+ <div class="detail-tab" onclick="switchDetailTab('twin')">Twin</div>
+ <div class="detail-tab" onclick="switchDetailTab('shadow')">Shadow</div>
+ <div class="detail-tab" onclick="switchDetailTab('lifecycle')">Lifecycle</div>
+ <div class="detail-tab" onclick="switchDetailTab('commands')">Commands</div>
+ </div>
 <div class="detail-tab-content active" id="detail-tab-telemetry">
 <div class="chart-container"><canvas id="chart-signal"></canvas></div>
 <div class="chart-container"><canvas id="chart-soc"></canvas></div>
 <div class="chart-container"><canvas id="chart-temp"></canvas></div>
-<div id="detail-stats" style="font-size:0.8rem;color:var(--text-muted);margin-top:0.5rem;"></div>
-</div>
-<div class="detail-tab-content" id="detail-tab-shadow">
+ <div id="detail-stats" style="font-size:0.8rem;color:var(--text-muted);margin-top:0.5rem;"></div>
+ </div>
+ <div class="detail-tab-content" id="detail-tab-twin">
+ <div id="twin-display" style="font-size:0.85rem;"></div>
+ </div>
+ <div class="detail-tab-content" id="detail-tab-shadow">
 <div id="shadow-display" style="font-size:0.85rem;"></div>
 </div>
 <div class="detail-tab-content" id="detail-tab-lifecycle">
@@ -1218,6 +1222,7 @@ async function openDeviceDetail(deviceId) {
       document.getElementById('detail-title').textContent = `${device.name} — ${device.firmware_version}`;
     }
     renderTelemetryCharts(telRes.points || [], device);
+    loadTwinForDevice(deviceId);
     loadShadowForDevice(deviceId);
     loadLifecycleForDevice(device);
     loadCommandsForDevice(deviceId);
@@ -1271,6 +1276,36 @@ function renderTelemetryCharts(points, device) {
   });
 
   document.getElementById('detail-stats').innerHTML = `Samples: ${points.length} | City: ${device?.city || 'N/A'} | Lifecycle: ${device?.lifecycle_status || 'active'}`;
+}
+
+async function loadTwinForDevice(deviceId) {
+  const display = document.getElementById('twin-display');
+  display.innerHTML = '<div style="color:var(--text-muted);">Loading twin…</div>';
+  try {
+    const t = await fetchJson(`/twin/${deviceId}`);
+    const score = t.health_score ?? 0;
+    const scoreColor = score >= 80 ? 'var(--green)' : score >= 50 ? 'var(--amber)' : 'var(--red)';
+    const risks = (t.open_risks || []).map(r => `
+      <div style="display:flex;justify-content:space-between;padding:0.3rem 0;border-bottom:1px solid var(--border);font-size:0.78rem;">
+        <span><strong>${escapeHtml(r.risk_type)}</strong> <span style="color:var(--text-muted);">[${escapeHtml(r.model_version || 'legacy')}]</span></span>
+        <span style="color:${r.risk_score >= 0.7 ? 'var(--red)' : 'var(--amber)'};">${(r.risk_score * 100).toFixed(0)}%</span>
+      </div>`).join('') || '<div style="color:var(--text-muted);font-size:0.78rem;">No open risks</div>';
+    const alerts = (t.active_alerts || []).map(a => `
+      <div style="font-size:0.78rem;padding:0.2rem 0;">⚠ ${escapeHtml(a.type)} — ${escapeHtml(a.severity)}${a.work_order_id ? ' (WO open)' : ''}</div>`).join('');
+    const sh = t.shadow || {};
+    display.innerHTML = `
+      <div style="display:flex;align-items:center;gap:0.75rem;margin-bottom:0.75rem;">
+        <div style="font-family:var(--font-display);font-size:1.6rem;font-weight:700;color:${scoreColor};">${score}</div>
+        <div style="font-size:0.75rem;color:var(--text-muted);">twin health<br>${escapeHtml(t.status || '')} · ${escapeHtml(t.lifecycle_status || 'active')}</div>
+      </div>
+      <div style="margin-bottom:0.75rem;"><strong>Shadow:</strong>
+        <span style="font-size:0.75rem;color:var(--text-muted);">desired v${sh.desired ? sh.desired.version : '–'} (${escapeHtml((sh.desired || {}).source || '–')}) / reported v${sh.reported ? sh.reported.version : '–'} (${escapeHtml((sh.reported || {}).source || '–')}) — ${t.shadow && t.shadow.in_sync ? '<span style="color:var(--green);">in sync</span>' : '<span style="color:var(--amber);">drifted</span>'}</span>
+      </div>
+      <div style="margin-bottom:0.5rem;"><strong>Open risks (${(t.open_risks || []).length})</strong></div>
+      <div style="margin-bottom:0.75rem;">${risks}</div>
+      ${alerts ? `<div style="margin-bottom:0.5rem;"><strong>Alerts</strong></div><div style="margin-bottom:0.5rem;">${alerts}</div>` : ''}
+      <div style="font-size:0.72rem;color:var(--text-muted);">Last sync: ${t.last_sync ? new Date(t.last_sync + 'Z').toLocaleString() : 'N/A'}${(t.relevant_schedules || []).length ? ` · ${t.relevant_schedules.length} campaign(s) relevant` : ''}</div>`;
+  } catch { display.innerHTML = '<div style="color:var(--text-muted);">No twin data</div>'; }
 }
 
 async function loadShadowForDevice(deviceId) {

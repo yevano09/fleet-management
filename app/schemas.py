@@ -396,6 +396,12 @@ class AuditLogListResponse(BaseModel):
 class ShadowUpdateRequest(BaseModel):
     state: str = "desired"  # desired or reported
     payload: dict
+    # ── MVP TWIN-01: optimistic-concurrency write ──
+    # base_version: the latest version the writer saw. When set and stale,
+    # the write is rejected with 409 + both versions instead of clobbering.
+    base_version: Optional[int] = None
+    source: Optional[str] = "cloud"  # cloud | edge | device
+    ttl_seconds: Optional[int] = None  # edge snapshots may expire
 
 
 class DeviceShadowResponse(BaseModel):
@@ -406,6 +412,9 @@ class DeviceShadowResponse(BaseModel):
     version: int
     metadata_json: str = "{}"
     timestamp: datetime
+    supersedes_version: Optional[int] = None
+    source: Optional[str] = "cloud"
+    expires_at: Optional[datetime] = None
 
     model_config = {"from_attributes": True}
 

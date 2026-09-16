@@ -403,6 +403,13 @@ class DeviceShadow(Base):
     version = Column(Integer, default=1)
     metadata_json = Column(Text, default="{}")
     timestamp = Column(DateTime, default=utcnow, index=True)
+    # ── MVP TWIN-01: versioned twin writes ──
+    # supersedes_version: the version this row replaced (chain head = latest).
+    supersedes_version = Column(Integer, nullable=True)
+    # source: cloud | edge | device — which pipeline wrote this row.
+    source = Column(String, default="cloud")
+    # expires_at: TTL for edge-reported snapshots (NULL = retain).
+    expires_at = Column(DateTime, nullable=True)
 
     device = relationship("Device", back_populates="shadows")
 

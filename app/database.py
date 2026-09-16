@@ -155,6 +155,30 @@ async def _bootstrap_alert_work_order() -> None:
             await conn.execute(text("ALTER TABLE alerts ADD COLUMN work_order_id VARCHAR"))
 
 
+# MVP TWIN-01: versioned shadow writes.
+_TWIN_SHADOW_COLUMNS = {
+    "supersedes_version": "INTEGER",
+    "source": "VARCHAR DEFAULT 'cloud'",
+    "expires_at": "TIMESTAMP",
+}
+
+
+async def _bootstrap_shadow_versioning() -> None:
+    """Add twin versioning columns to pre-existing device_shadows tables."""
+    async with engine.begin() as conn:
+        def _existing(sync_conn) -> set:
+            insp = sa_inspect(sync_conn)
+            if "device_shadows" not in insp.get_table_names():
+                return set()
+            return {c["name"] for c in insp.get_columns("device_shadows")}
+
+        cols = await conn.run_sync(_existing)
+        for col, ddl in _TWIN_SHADOW_COLUMNS.items():
+            if col not in cols:
+                await conn.execute(text(f"ALTER TABLE device_shadows ADD COLUMN {col} {ddl}"))
+        await conn.execute(text("UPDATE device_shadows SET source = 'cloud' WHERE source IS NULL"))
+
+
 async def init_db():
     from app.models import (
         Device, Firmware, OtaDeployment, V2gSchedule, Alert, UserSession,
@@ -173,4 +197,5 @@ async def init_db():
     await _bootstrap_telemetry_v2()
     await _bootstrap_prediction_model_version()
     await _bootstrap_alert_work_order()
+    await _bootstrap_shadow_versioning()
     await _seed_default_org()

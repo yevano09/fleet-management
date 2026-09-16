@@ -228,12 +228,26 @@ class MqttClient:
         result = self.client.publish(topic, payload, qos=1)
         return result.rc == 0
 
-    def publish_shadow_desired(self, device_id: str, state: dict) -> bool:
-        """Push desired shadow state to a device (Feature 7)."""
+    def publish_shadow_desired(
+        self,
+        device_id: str,
+        state: dict,
+        version: int | None = None,
+        base_version: int | None = None,
+    ) -> bool:
+        """Push desired shadow state to a device (Feature 7 + MVP TWIN-01).
+
+        Carries version metadata so edge/device ends can reject stale pushes.
+        """
         if not self._connected:
             return False
         topic = f"iot/fleet/{device_id}/command/shadow"
-        payload = json.dumps({"state": state, "timestamp": datetime.now(timezone.utc).isoformat()})
+        payload = json.dumps({
+            "state": state,
+            "version": version,
+            "base_version": base_version,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        })
         result = self.client.publish(topic, payload, qos=1)
         return result.rc == 0
 

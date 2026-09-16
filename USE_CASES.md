@@ -32,7 +32,7 @@ Legend: **Done** = implemented + e2e-covered · **Done\*** = implemented with no
 | UC-12 | Manage Device Lifecycle (Maintenance / Decommission / QR-Claim) | Done | e2e test_27/34 |
 | UC-13 | Queue Commands for Offline Devices | Done | TTL queue + flush; e2e test_24 |
 | UC-14 | Record & Query Audit Trail | Done | e2e test_25 |
-| UC-15 | Synchronize Device Shadow (Digital Twin) | Done\* | Desired/reported equality check only — not a versioned twin; see G-06 |
+| UC-15 | Synchronize Device Shadow (Digital Twin) | Done | Versioned writes (409 on stale base), source/TTL, `GET /twin/{id}` merged view |
 | UC-16 | Predict Failures from Telemetry Trends | Done\* | **Heuristic slopes, not ML** (≥5 pts, ≤24h, max-risk-only); see G-07 |
 | UC-17 | Sign Firmware Cryptographically (Ed25519) | Done\* | Opt-in; bypassed unless key provisioned + require flag |
 | UC-18 | Integrate Real Spot Prices | Partial | Provider path wired; default `mock`; prices not persisted; see G-08 |

@@ -28,6 +28,7 @@ from app.routers.audit import router as audit_router
 from app.routers.shadow import router as shadow_router
 from app.routers.predictive import router as predictive_router
 from app.routers.workorders import router as workorders_router
+from app.routers.twin import router as twin_router
 from app.routers.webhooks import router as webhooks_router
 from app.routers.provisioning import router as provisioning_router
 from app.routers.orgs import router as orgs_router
@@ -654,6 +655,7 @@ app.include_router(audit_router)
 app.include_router(shadow_router)
 app.include_router(predictive_router)
 app.include_router(workorders_router)
+app.include_router(twin_router)
 app.include_router(webhooks_router)
 app.include_router(provisioning_router)
 app.include_router(orgs_router)      # P0 UC-26

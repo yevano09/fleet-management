@@ -689,3 +689,48 @@ class TestE2E:
             assert r.status_code == 200, f"scan?model={mode} failed: {r.text}"
         r = requests.post(f"{BASE_URL}/predictive/scan?model=bogus", timeout=10)
         assert r.status_code == 422
+
+    def test_42_shadow_conflict_and_twin_view(self):
+        """MVP TWIN-01: versioned writes reject stale bases; twin merges state."""
+        dev_id = self.created_device_ids[0]
+
+        # v1 write, no base (first write always wins)
+        r = requests.put(f"{BASE_URL}/shadow/{dev_id}", json={
+            "state": "desired", "payload": {"interval": 10}, "source": "cloud",
+        }, timeout=10)
+        assert r.status_code == 200, f"shadow v1 failed: {r.text}"
+        v1 = r.json()["version"]
+
+        # Stale base -> 409 with current version
+        r = requests.put(f"{BASE_URL}/shadow/{dev_id}", json={
+            "state": "desired", "payload": {"interval": 5},
+            "base_version": v1 - 1, "source": "edge",
+        }, timeout=10)
+        assert r.status_code == 409, f"stale write should conflict: {r.text}"
+
+        # Correct base -> v2, supersedes v1
+        r = requests.put(f"{BASE_URL}/shadow/{dev_id}", json={
+            "state": "desired", "payload": {"interval": 5},
+            "base_version": v1, "source": "edge",
+        }, timeout=10)
+        assert r.status_code == 200
+        body = r.json()
+        assert body["version"] == v1 + 1
+        assert body["supersedes_version"] == v1
+        assert body["source"] == "edge"
+
+        # since_version filter
+        r = requests.get(f"{BASE_URL}/shadow/{dev_id}/history?state=desired&since_version={v1}", timeout=10)
+        assert r.status_code == 200
+        assert all(s["version"] > v1 for s in r.json())
+
+        # Merged twin view
+        r = requests.get(f"{BASE_URL}/twin/{dev_id}", timeout=10)
+        assert r.status_code == 200, f"twin failed: {r.text}"
+        twin = r.json()
+        assert 0 <= twin["health_score"] <= 100
+        assert "shadow" in twin and "open_risks" in twin
+        assert twin["shadow"]["desired"]["version"] == v1 + 1
+
+        r = requests.get(f"{BASE_URL}/twin/nonexistent-id", timeout=10)
+        assert r.status_code == 404

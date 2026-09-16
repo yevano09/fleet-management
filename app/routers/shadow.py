@@ -65,26 +65,53 @@ async def update_shadow(
 ):
     """Update the desired or reported shadow state for a device.
 
-    When updating 'desired', the new state is pushed to the device via MQTT.
+    MVP TWIN-01 optimistic concurrency: pass base_version with the latest
+    version you read. A stale base is rejected with 409 (current version
+    included) instead of silently overwriting another writer's state.
+
+    When updating 'desired', the new state is pushed to the device via MQTT
+    with its version so edge/device ends can reject stale pushes.
     """
+    if req.state not in ("desired", "reported"):
+        raise HTTPException(status_code=422, detail="state must be desired or reported")
+    if (req.source or "cloud") not in ("cloud", "edge", "device"):
+        raise HTTPException(status_code=422, detail="source must be cloud, edge or device")
     dev_result = await db.execute(select(Device).where(Device.id == device_id))
     device = dev_result.scalar_one_or_none()
     if not device:
         raise HTTPException(status_code=404, detail="Device not found")
 
-    # Get current version
-    count_result = await db.execute(
-        select(func.count()).select_from(DeviceShadow)
+    # Latest version for this (device, state) chain.
+    latest_result = await db.execute(
+        select(DeviceShadow)
         .where(DeviceShadow.device_id == device_id, DeviceShadow.state == req.state)
+        .order_by(DeviceShadow.version.desc()).limit(1)
     )
-    version = (count_result.scalar() or 0) + 1
+    latest = latest_result.scalar_one_or_none()
+    latest_version = latest.version if latest else 0
+
+    if req.base_version is not None and req.base_version != latest_version:
+        raise HTTPException(status_code=409, detail={
+            "message": "stale base_version: another writer updated this shadow",
+            "attempted_base_version": req.base_version,
+            "current": _shadow_to_dict(latest) if latest else None,
+        })
+
+    version = latest_version + 1
+    expires_at = None
+    if req.ttl_seconds:
+        from datetime import timedelta
+        expires_at = utcnow() + timedelta(seconds=req.ttl_seconds)
 
     shadow = DeviceShadow(
         device_id=device_id,
         state=req.state,
         payload=json.dumps(req.payload),
         version=version,
-        metadata_json=json.dumps({"updated_by": "dashboard"}),
+        supersedes_version=latest_version or None,
+        source=req.source or "cloud",
+        expires_at=expires_at,
+        metadata_json=json.dumps({"updated_by": principal.get("email", "dashboard")}),
         timestamp=utcnow(),
     )
     db.add(shadow)
@@ -93,9 +120,9 @@ async def update_shadow(
     shadow_updates_total.labels(state=req.state).inc()
     await log_action(db, principal["email"], f"shadow.{req.state}_update", "device", device_id, {"version": version})
 
-    # Push desired state to device via MQTT
+    # Push desired state to device via MQTT (carries versions for stale rejection)
     if req.state == "desired" and mqtt_client.is_connected:
-        mqtt_client.publish_shadow_desired(device_id, req.payload)
+        mqtt_client.publish_shadow_desired(device_id, req.payload, version=version, base_version=latest_version or None)
 
     return DeviceShadowResponse.model_validate(shadow)
 
@@ -105,12 +132,15 @@ async def get_shadow_history(
     device_id: str,
     state: Optional[str] = None,
     limit: int = 20,
+    since_version: Optional[int] = None,
     principal: dict = Depends(require_user()),
     db: AsyncSession = Depends(get_db),
 ):
     query = select(DeviceShadow).where(DeviceShadow.device_id == device_id)
     if state:
         query = query.where(DeviceShadow.state == state)
+    if since_version is not None:
+        query = query.where(DeviceShadow.version > since_version)
     query = query.order_by(DeviceShadow.version.desc()).limit(limit)
     result = await db.execute(query)
     shadows = result.scalars().all()
@@ -122,6 +152,8 @@ def _shadow_to_dict(shadow: DeviceShadow) -> dict:
         "state": shadow.state,
         "payload": json.loads(shadow.payload),
         "version": shadow.version,
+        "supersedes_version": shadow.supersedes_version,
+        "source": shadow.source,
         "timestamp": shadow.timestamp.isoformat() if shadow.timestamp else None,
     }
 
