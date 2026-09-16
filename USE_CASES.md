@@ -45,8 +45,10 @@ Legend: **Done** = implemented + e2e-covered · **Done\*** = implemented with no
 | UC-25 | Manage Device Certificate Lifecycle with JITP | Done | Issue/rotate/revoke + CRL |
 | UC-26 | Isolate Fleets per Organization | Done | `org_id` tenancy + backfill |
 | UC-27 | Run Production on PostgreSQL with Honest HA | Done | Postgres profile + leader/api roles |
+| UC-28 | Open/Track/Close Work Orders from Alerts (MVP WO-01) | Done | `POST/GET /workorders`, auto-create on 3rd escalation, MTTR histogram |
+| UC-29 | Score Predictions with Registry Models + Eval Gates (MVP ML-01/EVAL-01) | Done | Seeded IsolationForest, `?model=auto\|ml\|legacy`, `tests/test_ml_eval.py` 5/5, `scripts/backtest.py` gates pass |
 
-Not yet a UC (AIoT roadmap, see `docs/aiot-gap-analysis.md` §4–§5): edge inference + offline tier, model registry/OTA-canary, eval harness, work orders, driver scoring/coaching, fuel-fraud, video events, BI/MCP export.
+Not yet a UC (AIoT roadmap, see `docs/aiot-gap-analysis.md` §4–§5): edge inference + offline tier, model OTA-canary, driver scoring/coaching, fuel-fraud, video events, BI/MCP export.
 
 ---
 
