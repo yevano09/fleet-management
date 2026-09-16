@@ -415,8 +415,23 @@ class PredictedFailure(Base):
     recommendation = Column(Text, nullable=True)
     resolved = Column(Boolean, default=False)
     created_at = Column(DateTime, default=utcnow, index=True)
+    # MVP ML-01: which scorer produced this row ("legacy" or a registry version)
+    model_version = Column(String, default="legacy")
 
     device = relationship("Device", back_populates="predicted_failures")
+
+
+# ── MVP ML-01: model registry ─────────────────────────────────────────────────
+
+class MLModel(Base):
+    __tablename__ = "ml_models"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    version = Column(String, unique=True, nullable=False, index=True)
+    artifact_path = Column(String, nullable=True)
+    metrics_json = Column(Text, default="{}")
+    stage = Column(String, default="staging")  # staging | production | archived
+    trained_at = Column(DateTime, default=utcnow)
 
 
 # ── Feature 11: Webhook / event stream ────────────────────────────────────────

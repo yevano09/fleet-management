@@ -15,9 +15,17 @@ from datetime import timedelta
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
+import json
+
 from app.models import Telemetry, PredictedFailure, Device, DeviceStatus
 from app.utils import utcnow
-from app.metrics import predicted_failures_total, predicted_failures_active
+from app.metrics import (
+    predicted_failures_total,
+    predicted_failures_active,
+    ml_inference_latency_seconds,
+    ml_predictions_total,
+    ml_fallback_total,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -51,26 +59,60 @@ def _hours_to_threshold(current: float, slope_per_step: float, threshold: float,
     return steps * step_hours
 
 
-async def analyze_device(db: AsyncSession, device: Device, lookback_hours: int = 24) -> Optional[PredictedFailure]:
-    """Analyze a single device's telemetry trends and create a prediction if risk found."""
-    cutoff = utcnow() - timedelta(hours=lookback_hours)
-    result = await db.execute(
-        select(Telemetry)
-        .where(Telemetry.device_id == device.id, Telemetry.timestamp >= cutoff)
-        .order_by(Telemetry.timestamp.asc())
-    )
-    points = result.scalars().all()
+def _parse_json_list(raw) -> list:
+    if not raw:
+        return []
+    if isinstance(raw, list):
+        return raw
+    try:
+        val = json.loads(raw)
+        return val if isinstance(val, list) else []
+    except Exception:
+        return []
 
+
+def _parse_json_dict(raw) -> dict:
+    if not raw:
+        return {}
+    if isinstance(raw, dict):
+        return raw
+    try:
+        val = json.loads(raw)
+        return val if isinstance(val, dict) else {}
+    except Exception:
+        return {}
+
+
+def row_to_point(p: Telemetry) -> dict:
+    """Convert a Telemetry ORM row to the scorer point-dict (EVAL-01 contract)."""
+    return {
+        "signal_strength": p.signal_strength,
+        "temperature": p.temperature,
+        "cpu_usage": p.cpu_usage,
+        "memory_usage": p.memory_usage,
+        "uptime_percentage": p.uptime_percentage,
+        "soh": p.soh,
+        "dtc_codes": _parse_json_list(p.dtc_codes),
+        "fuel_level_pct": p.fuel_level_pct,
+        "tire_pressures": _parse_json_dict(p.tire_pressures),
+    }
+
+
+def score_point_series(points: list[dict], step_hours: float) -> list[dict]:
+    """Legacy slope-heuristic scorer as a pure function (EVAL-01 harness entry).
+
+    Operates on point-dicts so the eval harness can score synthetic series
+    without a database. Returns candidate dicts; caller picks/persists.
+    Behavior is byte-identical to the pre-MVP analyze_device checks.
+    """
     if len(points) < MIN_POINTS:
-        return None
-
-    step_hours = lookback_hours / max(len(points), 1)
+        return []
     predictions = []
 
     # ── Signal degradation trend ──
-    signals = [p.signal_strength for p in points if p.signal_strength is not None]
+    signals = [float(p["signal_strength"]) for p in points if p.get("signal_strength") is not None]
     if len(signals) >= MIN_POINTS:
-        slope = _linear_slope([float(s) for s in signals])
+        slope = _linear_slope(signals)
         if slope < -0.5:  # signal getting weaker over time
             current_sig = float(signals[-1])
             htf = _hours_to_threshold(current_sig, slope, -100.0, step_hours)
@@ -86,9 +128,9 @@ async def analyze_device(db: AsyncSession, device: Device, lookback_hours: int =
                 })
 
     # ── Thermal trend (rising temperature) ──
-    temps = [p.temperature for p in points if p.temperature is not None]
+    temps = [float(p["temperature"]) for p in points if p.get("temperature") is not None]
     if len(temps) >= MIN_POINTS:
-        slope = _linear_slope([float(t) for t in temps])
+        slope = _linear_slope(temps)
         current_temp = float(temps[-1])
         if slope > 0.3 or current_temp > 70:
             htf = _hours_to_threshold(current_temp, slope, 85.0, step_hours)
@@ -104,9 +146,9 @@ async def analyze_device(db: AsyncSession, device: Device, lookback_hours: int =
                 })
 
     # Battery degradation (EV devices)
-    sohs = [p.soh for p in points if p.soh is not None]
+    sohs = [float(p["soh"]) for p in points if p.get("soh") is not None]
     if len(sohs) >= MIN_POINTS:
-        slope = _linear_slope([float(s) for s in sohs])
+        slope = _linear_slope(sohs)
         current_soh = float(sohs[-1])
         if slope < -0.05 or current_soh < 75:
             htf = _hours_to_threshold(current_soh, slope, 60.0, step_hours)
@@ -122,9 +164,9 @@ async def analyze_device(db: AsyncSession, device: Device, lookback_hours: int =
                 })
 
     # Intermittent connectivity (uptime fluctuations)
-    uptimes = [p.uptime_percentage for p in points if p.uptime_percentage is not None]
+    uptimes = [float(p["uptime_percentage"]) for p in points if p.get("uptime_percentage") is not None]
     if len(uptimes) >= MIN_POINTS:
-        low_count = sum(1 for u in uptimes if float(u) < 95.0)
+        low_count = sum(1 for u in uptimes if u < 95.0)
         if low_count >= len(uptimes) * 0.3:
             risk = min(1.0, low_count / len(uptimes))
             predictions.append({
@@ -132,16 +174,66 @@ async def analyze_device(db: AsyncSession, device: Device, lookback_hours: int =
                 "risk_score": round(risk, 3),
                 "confidence": min(1.0, len(uptimes) / 20),
                 "predicted_hours_to_failure": None,
-                "evidence": {"low_uptime_samples": low_count, "total_samples": len(uptimes), "avg_uptime": round(sum(float(u) for u in uptimes) / len(uptimes), 2)},
+                "evidence": {"low_uptime_samples": low_count, "total_samples": len(uptimes), "avg_uptime": round(sum(uptimes) / len(uptimes), 2)},
                 "recommendation": "Device showing intermittent connectivity. Check power supply and network.",
             })
 
-    if not predictions:
+    return predictions
+
+
+async def analyze_device(
+    db: AsyncSession,
+    device: Device,
+    lookback_hours: int = 24,
+    model: str = "legacy",
+    bundle: dict | None = None,
+) -> Optional[PredictedFailure]:
+    """Analyze a single device's telemetry trends and create a prediction if risk found.
+
+    model: "legacy" (slope heuristics), "ml" (registry bundle, explicit), or
+    "auto" (bundle when available, else legacy). bundle is resolved once per
+    cycle by run_prediction_cycle — do not pass per-device DB lookups here.
+    """
+    cutoff = utcnow() - timedelta(hours=lookback_hours)
+    result = await db.execute(
+        select(Telemetry)
+        .where(Telemetry.device_id == device.id, Telemetry.timestamp >= cutoff)
+        .order_by(Telemetry.timestamp.asc())
+    )
+    rows = result.scalars().all()
+
+    if len(rows) < MIN_POINTS:
+        return None
+
+    points = [row_to_point(p) for p in rows]
+    step_hours = lookback_hours / max(len(points), 1)
+    used_version = "legacy"
+
+    if model in ("auto", "ml") and bundle is not None:
+        try:
+            import time as _time
+
+            from app.ml.inference import ml_score_points
+
+            _t0 = _time.perf_counter()
+            candidates = ml_score_points(points, step_hours, bundle)
+            ml_inference_latency_seconds.observe(_time.perf_counter() - _t0)
+            used_version = bundle.get("version", "ml")
+        except Exception:
+            logger.exception("ML scoring failed for device %s — falling back to legacy", device.id)
+            if model == "ml":
+                ml_fallback_total.inc()
+            candidates = score_point_series(points, step_hours)
+    else:
+        if model == "ml":
+            ml_fallback_total.inc()  # explicit ML requested, none available
+        candidates = score_point_series(points, step_hours)
+
+    if not candidates:
         return None
 
     # Pick the highest-risk prediction
-    best = max(predictions, key=lambda p: p["risk_score"])
-    import json
+    best = max(candidates, key=lambda p: p["risk_score"])
     pred = PredictedFailure(
         device_id=device.id,
         risk_type=best["risk_type"],
@@ -150,6 +242,8 @@ async def analyze_device(db: AsyncSession, device: Device, lookback_hours: int =
         predicted_hours_to_failure=best["predicted_hours_to_failure"],
         evidence=json.dumps(best["evidence"]),
         recommendation=best["recommendation"],
+        model_version=best["evidence"].get("model_version", used_version)
+        if isinstance(best.get("evidence"), dict) else used_version,
         created_at=utcnow(),
     )
     db.add(pred)
@@ -157,18 +251,36 @@ async def analyze_device(db: AsyncSession, device: Device, lookback_hours: int =
     await db.refresh(pred)
     predicted_failures_total.labels(risk_type=best["risk_type"]).inc()
     predicted_failures_active.inc()
-    logger.info("Predicted failure for device %s: %s (risk=%.2f)", device.name, best["risk_type"], best["risk_score"])
+    if used_version != "legacy":
+        ml_predictions_total.labels(risk_type=best["risk_type"], model_version=used_version).inc()
+    logger.info("Predicted failure for device %s: %s (risk=%.2f, model=%s)", device.name, best["risk_type"], best["risk_score"], used_version)
     return pred
 
 
-async def run_prediction_cycle(db: AsyncSession, lookback_hours: int = 24) -> list[PredictedFailure]:
-    """Run predictive analysis across all online devices."""
+async def run_prediction_cycle(
+    db: AsyncSession, lookback_hours: int = 24, model: str = "auto"
+) -> list[PredictedFailure]:
+    """Run predictive analysis across all online devices.
+
+    model: "legacy" | "ml" | "auto" (bundle when available, else legacy).
+    The bundle is resolved once per cycle so per-device scoring is lookup-free.
+    """
+    bundle = None
+    if model in ("auto", "ml"):
+        try:
+            from app.config import settings
+            from app.ml.registry import get_active_bundle
+
+            bundle = await get_active_bundle(db, settings.model_storage_path)
+        except Exception:
+            logger.warning("ML bundle lookup failed — using legacy heuristics", exc_info=True)
+            bundle = None
     result = await db.execute(select(Device).where(Device.status == DeviceStatus.online))
     devices = result.scalars().all()
     predictions = []
     for device in devices:
         try:
-            pred = await analyze_device(db, device, lookback_hours)
+            pred = await analyze_device(db, device, lookback_hours, model=model, bundle=bundle)
             if pred:
                 predictions.append(pred)
         except Exception:

@@ -1,0 +1,11 @@
+{
+  "_comment": "EVAL-01 gates: seeded-scenario bars for legacy-vs-model backtests. Tune only with evidence in the PR.",
+  "series_len": 48,
+  "min_risk": 0.4,
+  "max_fp_rate": 0.05,
+  "min_lead_steps": {
+    "drift": 8,
+    "thermal": 8,
+    "tpms": 4
+  }
+}

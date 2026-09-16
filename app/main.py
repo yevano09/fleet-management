@@ -526,6 +526,17 @@ async def lifespan(app: FastAPI):
     if last_err is not None:
         raise RuntimeError(f"Database unavailable after retries: {last_err}")
 
+    # MVP ML-01: seed the documented stand-in model when no production model
+    # exists. Idempotent — never clobbers a real trained model. Never fatal.
+    try:
+        os.makedirs(settings.model_storage_path, exist_ok=True)
+        from app.ml.bootstrap import ensure_default_model
+
+        async with async_session_factory() as _db:
+            await ensure_default_model(_db, settings.model_storage_path)
+    except Exception:
+        logger.warning("ML bootstrap skipped", exc_info=True)
+
     loop = asyncio.get_running_loop()
 
     if settings.role == "api":

@@ -122,20 +122,40 @@ async def _bootstrap_telemetry_v2() -> None:
         await conn.execute(text("UPDATE telemetry SET source = 'sim' WHERE source IS NULL"))
 
 
+async def _bootstrap_prediction_model_version() -> None:
+    """Add PredictedFailure.model_version to pre-existing databases."""
+    async with engine.begin() as conn:
+        def _existing(sync_conn) -> set:
+            insp = sa_inspect(sync_conn)
+            if "predicted_failures" not in insp.get_table_names():
+                return set()
+            return {c["name"] for c in insp.get_columns("predicted_failures")}
+
+        cols = await conn.run_sync(_existing)
+        if "model_version" not in cols:
+            await conn.execute(text(
+                "ALTER TABLE predicted_failures ADD COLUMN model_version VARCHAR DEFAULT 'legacy'"
+            ))
+        await conn.execute(text(
+            "UPDATE predicted_failures SET model_version = 'legacy' WHERE model_version IS NULL"
+        ))
+
+
 async def init_db():
     from app.models import (
         Device, Firmware, OtaDeployment, V2gSchedule, Alert, UserSession,
         Telemetry, Geofence, GeofenceEvent, CommandQueue, AuditLog,
         DeviceShadow, OtaSchedule, PredictedFailure, WebhookSubscription, EventLog,
-        Organization, ApiKey, DeviceCertificate,
+        Organization, ApiKey, DeviceCertificate, MLModel,
     )
     from app.aegis.models import Remediation, RuleConfig  # noqa: F401
     _ = (Device, Firmware, OtaDeployment, V2gSchedule, Alert, UserSession,
          Telemetry, Geofence, GeofenceEvent, CommandQueue, AuditLog,
          DeviceShadow, OtaSchedule, PredictedFailure, WebhookSubscription, EventLog,
-         Organization, ApiKey, DeviceCertificate)
+         Organization, ApiKey, DeviceCertificate, MLModel)
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     await _bootstrap_tenancy()
     await _bootstrap_telemetry_v2()
+    await _bootstrap_prediction_model_version()
     await _seed_default_org()

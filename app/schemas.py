@@ -380,6 +380,7 @@ class PredictedFailureResponse(BaseModel):
     recommendation: Optional[str] = None
     resolved: bool = False
     created_at: datetime
+    model_version: Optional[str] = "legacy"
 
     model_config = {"from_attributes": True}
 

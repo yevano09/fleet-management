@@ -85,6 +85,20 @@ predicted_failures_total = Counter(
 )
 predicted_failures_active = Gauge("fleet_predicted_failures_active", "Active unresolved failure predictions")
 
+# ── MVP ML-01: model inference metrics ─────────────────────────────────────────
+ml_inference_latency_seconds = Histogram(
+    "fleet_ml_inference_latency_seconds",
+    "ML scoring latency per device window",
+    buckets=(0.005, 0.01, 0.05, 0.1, 0.5, 1.0, 5.0),
+)
+ml_predictions_total = Counter(
+    "fleet_ml_predictions_total", "Predictions produced by registry models",
+    ["risk_type", "model_version"],
+)
+ml_fallback_total = Counter(
+    "fleet_ml_fallback_total", "Times explicit ML scoring fell back to legacy heuristics"
+)
+
 # ── Feature 7: Device shadow metrics ──────────────────────────────────────────
 shadow_updates_total = Counter(
     "fleet_shadow_updates_total", "Total device shadow updates", ["state"]

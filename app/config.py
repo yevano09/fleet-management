@@ -116,6 +116,9 @@ class Settings(BaseSettings):
     firmware_signing_public_key: str = ""
     firmware_require_signature: bool = False
 
+    # MVP ML-01: model registry artifact directory
+    model_storage_path: str = "./data/models"
+
     # Feature 10: Real spot prices (provider: "mock", "iex", "entsoe")
     spot_price_provider: str = "mock"
 

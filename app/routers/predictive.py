@@ -39,9 +39,15 @@ async def list_predictions(
 
 
 @router.post("/scan")
-async def run_predictive_scan(principal: dict = Depends(require_role("operator")), db: AsyncSession = Depends(get_db)):
+async def run_predictive_scan(
+    model: str = Query("auto", description="Scorer: auto (registry model when available, else legacy) | ml (explicit, counts fallback) | legacy"),
+    principal: dict = Depends(require_role("operator")),
+    db: AsyncSession = Depends(get_db),
+):
     """Trigger a predictive maintenance analysis cycle across all online devices."""
-    predictions = await run_prediction_cycle(db)
+    if model not in ("auto", "ml", "legacy"):
+        raise HTTPException(status_code=422, detail="model must be auto, ml or legacy")
+    predictions = await run_prediction_cycle(db, model=model)
     return {
         "message": f"Predictive scan completed. {len(predictions)} predictions generated.",
         "predictions_count": len(predictions),
@@ -51,6 +57,7 @@ async def run_predictive_scan(principal: dict = Depends(require_role("operator")
                 "risk_type": p.risk_type,
                 "risk_score": p.risk_score,
                 "recommendation": p.recommendation,
+                "model_version": p.model_version,
             }
             for p in predictions
         ],
