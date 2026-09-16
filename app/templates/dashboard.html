@@ -937,10 +937,11 @@ async function loadAlerts() {
             <div style="font-size:0.7rem;color:#64748b;">x${a.count}</div>
           </div>
           <div style="font-size:0.85rem;">${a.message}</div>
-          <div style="font-size:0.7rem;color:#64748b;">Type: ${a.type} | Status: ${a.status}</div>
+          <div style="font-size:0.7rem;color:#64748b;">Type: ${a.type} | Status: ${a.status}${a.work_order_id ? ` | WO: <span style="color:var(--teal);font-family:monospace;">${a.work_order_id.substring(0,8)}…</span>` : ''}</div>
           <div style="display:flex;gap:0.5rem;margin-top:0.25rem;">
             <button class="btn btn-outline" style="padding:0.25rem 0.5rem;font-size:0.7rem;" onclick="ackAlert('${a.id}')">Acknowledge</button>
             <button class="btn btn-outline" style="padding:0.25rem 0.5rem;font-size:0.7rem;" onclick="resolveAlert('${a.id}')">Resolve</button>
+            ${a.work_order_id ? '' : `<button class="btn btn-outline" style="padding:0.25rem 0.5rem;font-size:0.7rem;" onclick="createWorkOrder('${a.id}')">Work order</button>`}
           </div>
         </div>`;
       }).join('');
@@ -969,6 +970,19 @@ async function resolveAlert(id) {
     const data = await res.json();
     if (data.error) { showToast(data.error, 'error'); }
     else { showToast('Alert resolved', 'success'); loadAlerts(); }
+  } catch { showToast('Network error', 'error'); }
+}
+
+async function createWorkOrder(alertId) {
+  try {
+    const res = await fetch('/workorders', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ alert_id: alertId })
+    });
+    const data = await res.json();
+    if (!res.ok) { showToast(data.detail || 'Work order failed', 'error'); }
+    else { showToast(`Work order opened (${(data.id || '').substring(0, 8)}…)`, 'success'); loadAlerts(); }
   } catch { showToast('Network error', 'error'); }
 }
 
@@ -1441,7 +1455,7 @@ async function loadPredictions() {
             <span style="font-size:0.7rem;color:var(--text-muted);">${(p.device_id||'').substring(0,8)}...</span>
           </div>
           <div style="font-size:0.85rem;margin-top:0.25rem;">${p.recommendation || ''}</div>
-          <div style="font-size:0.75rem;color:var(--text-muted);margin-top:0.25rem;">Risk: ${(p.risk_score*100).toFixed(0)}% | Confidence: ${(p.confidence*100).toFixed(0)}%${p.predicted_hours_to_failure ? ` | ETA: ${p.predicted_hours_to_failure.toFixed(0)}h` : ''}</div>
+          <div style="font-size:0.75rem;color:var(--text-muted);margin-top:0.25rem;">Risk: ${(p.risk_score*100).toFixed(0)}% | Confidence: ${(p.confidence*100).toFixed(0)}%${p.predicted_hours_to_failure ? ` | ETA: ${p.predicted_hours_to_failure.toFixed(0)}h` : ''} <span style="font-family:monospace;color:var(--teal);">[${p.model_version || 'legacy'}]</span></div>
           <div class="risk-meter"><div class="risk-meter-fill ${riskClass}" style="width:${p.risk_score*100}%;"></div></div>
         </div>`;
       }).join('');

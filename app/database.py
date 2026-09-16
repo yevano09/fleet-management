@@ -141,21 +141,36 @@ async def _bootstrap_prediction_model_version() -> None:
         ))
 
 
+async def _bootstrap_alert_work_order() -> None:
+    """Add Alert.work_order_id to pre-existing databases (MVP WO-01)."""
+    async with engine.begin() as conn:
+        def _existing(sync_conn) -> set:
+            insp = sa_inspect(sync_conn)
+            if "alerts" not in insp.get_table_names():
+                return set()
+            return {c["name"] for c in insp.get_columns("alerts")}
+
+        cols = await conn.run_sync(_existing)
+        if "work_order_id" not in cols:
+            await conn.execute(text("ALTER TABLE alerts ADD COLUMN work_order_id VARCHAR"))
+
+
 async def init_db():
     from app.models import (
         Device, Firmware, OtaDeployment, V2gSchedule, Alert, UserSession,
         Telemetry, Geofence, GeofenceEvent, CommandQueue, AuditLog,
         DeviceShadow, OtaSchedule, PredictedFailure, WebhookSubscription, EventLog,
-        Organization, ApiKey, DeviceCertificate, MLModel,
+        Organization, ApiKey, DeviceCertificate, MLModel, WorkOrder,
     )
     from app.aegis.models import Remediation, RuleConfig  # noqa: F401
     _ = (Device, Firmware, OtaDeployment, V2gSchedule, Alert, UserSession,
          Telemetry, Geofence, GeofenceEvent, CommandQueue, AuditLog,
          DeviceShadow, OtaSchedule, PredictedFailure, WebhookSubscription, EventLog,
-         Organization, ApiKey, DeviceCertificate, MLModel)
+         Organization, ApiKey, DeviceCertificate, MLModel, WorkOrder)
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     await _bootstrap_tenancy()
     await _bootstrap_telemetry_v2()
     await _bootstrap_prediction_model_version()
+    await _bootstrap_alert_work_order()
     await _seed_default_org()

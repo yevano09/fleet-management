@@ -163,6 +163,7 @@ class AlertResponse(BaseModel):
     resolved_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
+    work_order_id: Optional[str] = None
 
     model_config = {"from_attributes": True}
 
@@ -174,6 +175,48 @@ class AlertListResponse(BaseModel):
 
 class AcknowledgeRequest(BaseModel):
     user: str
+
+
+# ── MVP WO-01: work order schemas ─────────────────────────────────────────────
+
+class WorkOrderCreateRequest(BaseModel):
+    alert_id: Optional[str] = None
+    device_ids: Optional[List[str]] = None
+    title: Optional[str] = None
+    detail: str = ""
+    severity: str = "warning"
+    assignee: Optional[str] = None
+    cost_estimate: Optional[float] = None
+
+
+class WorkOrderCloseRequest(BaseModel):
+    resolution: str = ""
+    parts_used: Optional[List[str]] = None
+    cost: Optional[float] = None
+
+
+class WorkOrderResponse(BaseModel):
+    id: str
+    alert_id: Optional[str] = None
+    device_ids: str = ""
+    title: str
+    detail: str = ""
+    severity: str = "warning"
+    status: str
+    assignee: Optional[str] = None
+    due_at: Optional[datetime] = None
+    parts_json: str = "[]"
+    cost_estimate: Optional[float] = None
+    resolution: Optional[str] = None
+    created_at: datetime
+    closed_at: Optional[datetime] = None
+
+    model_config = {"from_attributes": True}
+
+
+class WorkOrderListResponse(BaseModel):
+    work_orders: List[WorkOrderResponse]
+    total: int
 
 
 # ── Feature 1: Telemetry schemas ──────────────────────────────────────────────

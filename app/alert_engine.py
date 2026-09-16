@@ -21,12 +21,51 @@ from datetime import datetime, timezone
 from sqlalchemy import select, update, delete, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Alert, AlertStatus
+from app.models import Alert, AlertStatus, WorkOrder, WorkOrderStatus
 from app.utils import utcnow
 from app.config import settings
-from app.metrics import alerts_total, alerts_active, alert_notifications_total
+from app.metrics import (
+    alerts_total,
+    alerts_active,
+    alert_notifications_total,
+    workorders_total,
+)
 
 logger = logging.getLogger(__name__)
+
+# MVP WO-01: per-alert-type work-order templates used for auto-creation on
+# escalation (count hits ESCALATION_THRESHOLD) and as defaults for manual
+# POST /workorders. Keep titles short — they render on dashboard cards.
+WORKORDER_TEMPLATES = {
+    "stuck_ota": {
+        "title": "Recover stuck OTA deployment",
+        "detail": "OTA has been non-terminal beyond timeout. Verify device reachability, retry once, then roll back to previous firmware if still stuck.",
+    },
+    "ota_failure_spike": {
+        "title": "Investigate OTA failure spike",
+        "detail": "Failure rate crossed the spike threshold. Pause scheduled campaigns, inspect the firmware artifact, then resume canary.",
+    },
+    "device_offline": {
+        "title": "Restore offline device",
+        "detail": "No heartbeat beyond the offline threshold. Check power, network and MQTT credentials on site or via remote hands.",
+    },
+    "mass_offline": {
+        "title": "Investigate mass-offline event",
+        "detail": "Fleet-wide offline wave. Check broker, network uplink and power before touching devices.",
+    },
+    "weak_signal": {
+        "title": "Remediate weak-signal device",
+        "detail": "Signal below usable threshold. Inspect antenna placement, orientation and interference sources.",
+    },
+    "v2g_revenue_drop": {
+        "title": "Review V2G dispatch economics",
+        "detail": "Projected revenue turned negative. Re-run dispatch against current tariffs before further discharges.",
+    },
+}
+DEFAULT_WO_TEMPLATE = {
+    "title": "Investigate fleet alert",
+    "detail": "Auto-created from an escalated alert. Triage, resolve the root cause, then close with a resolution note.",
+}
 
 
 class AlertChannel:
@@ -209,6 +248,35 @@ class AlertEngine:
             alert.message = f"[ESCALATED] {alert.message}"
         await self.db.commit()
         await self.db.refresh(alert)
+        # MVP WO-01: first escalation opens a work order (once per alert).
+        if alert.count >= self.ESCALATION_THRESHOLD and not alert.work_order_id:
+            await self._auto_create_work_order(alert)
+
+    async def _auto_create_work_order(self, alert: Alert) -> None:
+        """Open a templated work order from an escalated alert (idempotent)."""
+        try:
+            if alert.work_order_id:
+                return
+            tpl = WORKORDER_TEMPLATES.get(alert.type, DEFAULT_WO_TEMPLATE)
+            wo = WorkOrder(
+                alert_id=alert.id,
+                device_ids=alert.device_ids or "",
+                title=tpl["title"],
+                detail=f"{tpl['detail']}\n\nSource alert: {alert.message}",
+                severity=alert.severity,
+                status=WorkOrderStatus.open,
+                org_id=alert.org_id,
+            )
+            self.db.add(wo)
+            await self.db.commit()
+            await self.db.refresh(wo)
+            alert.work_order_id = wo.id
+            await self.db.commit()
+            await self.db.refresh(alert)
+            workorders_total.labels(status="open").inc()
+            logger.info("Auto-created work order %s from escalated alert %s", wo.id, alert.id)
+        except Exception:
+            logger.exception("Auto work-order creation failed for alert %s", alert.id)
 
     async def _create_alert(self, anomaly: dict) -> Alert:
         """Create a new alert row from anomaly data."""

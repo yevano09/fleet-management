@@ -99,6 +99,16 @@ ml_fallback_total = Counter(
     "fleet_ml_fallback_total", "Times explicit ML scoring fell back to legacy heuristics"
 )
 
+# ── MVP WO-01: work order metrics ─────────────────────────────────────────────
+workorders_total = Counter(
+    "fleet_workorders_total", "Work orders opened", ["status"]
+)
+workorder_close_latency_seconds = Histogram(
+    "fleet_workorder_close_latency_seconds",
+    "Time from work-order creation to close (MTTR proxy)",
+    buckets=(60, 600, 3600, 21600, 86400, 604800),
+)
+
 # ── Feature 7: Device shadow metrics ──────────────────────────────────────────
 shadow_updates_total = Counter(
     "fleet_shadow_updates_total", "Total device shadow updates", ["state"]

@@ -221,6 +221,13 @@ class AlertStatus(str, enum.Enum):
     resolved = "resolved"
 
 
+class WorkOrderStatus(str, enum.Enum):
+    open = "open"
+    in_progress = "in_progress"
+    done = "done"
+    cancelled = "cancelled"
+
+
 class Alert(Base):
     __tablename__ = "alerts"
 
@@ -238,6 +245,32 @@ class Alert(Base):
     resolved_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=utcnow)
     updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
+    org_id = Column(String, ForeignKey("organizations.id"), default=DEFAULT_ORG_ID, index=True)
+    # MVP WO-01: link to the auto/manual work order opened from this alert.
+    # Plain string (no FK): avoids a circular alerts<->work_orders FK pair that
+    # Postgres rejects at CREATE TABLE time. Integrity is enforced in code.
+    work_order_id = Column(String, nullable=True)
+
+
+# ── MVP WO-01: maintenance work orders ─────────────────────────────────────────
+
+class WorkOrder(Base):
+    __tablename__ = "work_orders"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    alert_id = Column(String, ForeignKey("alerts.id"), nullable=True, index=True)
+    device_ids = Column(Text, default="")
+    title = Column(String, nullable=False)
+    detail = Column(Text, default="")
+    severity = Column(String, default="warning")
+    status = Column(SAEnum(WorkOrderStatus), default=WorkOrderStatus.open)
+    assignee = Column(String, nullable=True)
+    due_at = Column(DateTime, nullable=True)
+    parts_json = Column(Text, default="[]")
+    cost_estimate = Column(Float, nullable=True)
+    resolution = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=utcnow, index=True)
+    closed_at = Column(DateTime, nullable=True)
     org_id = Column(String, ForeignKey("organizations.id"), default=DEFAULT_ORG_ID, index=True)
 
 

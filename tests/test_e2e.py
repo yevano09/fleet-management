@@ -636,3 +636,56 @@ class TestE2E:
         # Cancel again should fail (it's now cancelled)
         r = requests.post(f"{BASE_URL}/ota/schedules/{sched_id}/cancel", timeout=10)
         assert r.status_code == 409
+
+    def test_40_work_order_lifecycle(self):
+        """MVP WO-01: manual work order open -> get -> close (+MTTR metric)."""
+        dev_id = self.created_device_ids[0]
+        r = requests.post(f"{BASE_URL}/workorders", json={
+            "device_ids": [dev_id], "title": "E2E test work order", "severity": "warning",
+        }, timeout=10)
+        assert r.status_code == 201, f"WO create failed: {r.text}"
+        wo_id = r.json()["id"]
+        assert r.json()["status"] == "open"
+
+        r = requests.get(f"{BASE_URL}/workorders/{wo_id}", timeout=10)
+        assert r.status_code == 200
+
+        r = requests.post(f"{BASE_URL}/workorders/{wo_id}/close", json={
+            "resolution": "E2E resolved", "parts_used": ["antenna"], "cost": 12.5,
+        }, timeout=10)
+        assert r.status_code == 200
+        assert r.json()["status"] == "done"
+
+        # Idempotent re-close
+        r = requests.post(f"{BASE_URL}/workorders/{wo_id}/close", json={"resolution": "x"}, timeout=10)
+        assert r.status_code == 200
+
+        r = requests.get(f"{BASE_URL}/metrics", timeout=10)
+        assert "fleet_workorders_total" in r.text
+        assert "fleet_workorder_close_latency_seconds" in r.text
+
+    def test_41_obd_telemetry_and_ml_scan(self):
+        """MVP DATA-01/ML-01: OBD heartbeat fields persist; scan ?model= works."""
+        dev_id = self.created_device_ids[0]
+        r = requests.post(f"{BASE_URL}/devices/{dev_id}/heartbeat", json={
+            "uptime_percentage": 99.5, "signal_strength": -60,
+            "source": "obd", "dtc_codes": ["P0128"], "fuel_level_pct": 61.2,
+            "odometer_km": 45210.5,
+            "tire_pressures": {"fl": 32.1, "fr": 31.9, "rl": 32.0, "rr": 30.5},
+        }, timeout=10)
+        assert r.status_code == 200, f"OBD heartbeat failed: {r.text}"
+
+        r = requests.get(f"{BASE_URL}/telemetry/{dev_id}?hours=1&limit=5", timeout=10)
+        assert r.status_code == 200
+        pts = r.json()["points"]
+        assert pts, "expected telemetry points"
+        latest = pts[-1]
+        assert latest["source"] == "obd"
+        assert latest["fuel_level_pct"] == 61.2
+        assert "P0128" in (latest["dtc_codes"] or "")
+
+        for mode in ("legacy", "auto"):
+            r = requests.post(f"{BASE_URL}/predictive/scan?model={mode}", timeout=30)
+            assert r.status_code == 200, f"scan?model={mode} failed: {r.text}"
+        r = requests.post(f"{BASE_URL}/predictive/scan?model=bogus", timeout=10)
+        assert r.status_code == 422
