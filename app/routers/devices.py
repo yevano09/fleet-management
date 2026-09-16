@@ -1,3 +1,4 @@
+import json
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -6,13 +7,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.deps import require_role, require_user, allowed_orgs, scope_devices
-from app.models import Device, DeviceStatus
+from app.models import Device, DeviceStatus, Telemetry
 from app.schemas import (
     DeviceRegisterRequest, DeviceRegisterResponse,
     HeartbeatRequest, DeviceResponse, DeviceListResponse,
 )
 from pydantic import BaseModel
-from app.metrics import active_devices, total_devices
+from app.metrics import active_devices, total_devices, telemetry_points_total
 from app.mqtt_client import mqtt_client
 from app.utils import utcnow
 from app.config import DEFAULT_ORG_ID
@@ -135,7 +136,30 @@ async def device_heartbeat(
     if req.latitude is not None and req.longitude is not None:
         device.latitude = req.latitude
         device.longitude = req.longitude
+    # MVP DATA-01: REST heartbeats persist telemetry too, so eval/demo tooling
+    # can seed labeled series over HTTP without an MQTT broker.
+    db.add(Telemetry(
+        device_id=device.id,
+        timestamp=utcnow(),
+        signal_strength=req.signal_strength,
+        uptime_percentage=req.uptime_percentage,
+        soc=req.soc,
+        soh=req.soh,
+        battery_temp=req.battery_temp,
+        plug_status=req.plug_status,
+        latitude=req.latitude,
+        longitude=req.longitude,
+        cpu_usage=req.cpu_usage,
+        memory_usage=req.memory_usage,
+        temperature=req.temperature,
+        source=req.source or "sim",
+        dtc_codes=json.dumps(req.dtc_codes) if req.dtc_codes is not None else None,
+        fuel_level_pct=req.fuel_level_pct,
+        odometer_km=req.odometer_km,
+        tire_pressures=json.dumps(req.tire_pressures) if req.tire_pressures is not None else None,
+    ))
     await db.commit()
+    telemetry_points_total.labels(device=device.name).inc()
 
     return {"status": "ok", "last_seen": device.last_seen.isoformat()}
 

@@ -274,6 +274,15 @@ class Telemetry(Base):
     cpu_usage = Column(Float, nullable=True)
     memory_usage = Column(Float, nullable=True)
     temperature = Column(Float, nullable=True)
+    # ── MVP DATA-01: OBD-II/edge-grade signal fields ──
+    # source: sim | obd | oem | edge — which pipeline produced this point
+    source = Column(String, default="sim")
+    # dtc_codes: JSON list of diagnostic trouble codes, e.g. '["P0128"]'
+    dtc_codes = Column(Text, nullable=True)
+    fuel_level_pct = Column(Float, nullable=True)
+    odometer_km = Column(Float, nullable=True)
+    # tire_pressures: JSON dict, e.g. '{"fl": 32.1, "fr": 31.8, "rl": 32.0, "rr": 31.9}'
+    tire_pressures = Column(Text, nullable=True)
 
     device = relationship("Device", back_populates="telemetry")
 

@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import Optional, List
+from typing import Optional, List, Dict
 from datetime import datetime
 
 
@@ -35,6 +35,12 @@ class HeartbeatRequest(BaseModel):
     cpu_usage: Optional[float] = None
     memory_usage: Optional[float] = None
     temperature: Optional[float] = None
+    # ── MVP DATA-01: OBD-grade fields ──
+    source: Optional[str] = "sim"
+    dtc_codes: Optional[List[str]] = None
+    fuel_level_pct: Optional[float] = None
+    odometer_km: Optional[float] = None
+    tire_pressures: Optional[Dict[str, float]] = None
 
 
 class DeviceResponse(BaseModel):
@@ -187,6 +193,11 @@ class TelemetryPoint(BaseModel):
     cpu_usage: Optional[float] = None
     memory_usage: Optional[float] = None
     temperature: Optional[float] = None
+    source: Optional[str] = None
+    dtc_codes: Optional[str] = None
+    fuel_level_pct: Optional[float] = None
+    odometer_km: Optional[float] = None
+    tire_pressures: Optional[str] = None
 
     model_config = {"from_attributes": True}
 

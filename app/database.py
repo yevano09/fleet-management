@@ -95,6 +95,33 @@ async def _seed_default_org() -> None:
             await db.commit()
 
 
+# MVP DATA-01: OBD-grade telemetry columns added after the initial schema.
+# {column: ddl-fragment} — applied to pre-existing DB files (SQLite + Postgres).
+_TELEMETRY_V2_COLUMNS = {
+    "source": "VARCHAR DEFAULT 'sim'",
+    "dtc_codes": "TEXT",
+    "fuel_level_pct": "FLOAT",
+    "odometer_km": "FLOAT",
+    "tire_pressures": "TEXT",
+}
+
+
+async def _bootstrap_telemetry_v2() -> None:
+    """Add MVP telemetry columns to pre-existing databases (same pattern as tenancy)."""
+    async with engine.begin() as conn:
+        def _existing(sync_conn) -> set:
+            insp = sa_inspect(sync_conn)
+            if "telemetry" not in insp.get_table_names():
+                return set()
+            return {c["name"] for c in insp.get_columns("telemetry")}
+
+        cols = await conn.run_sync(_existing)
+        for col, ddl in _TELEMETRY_V2_COLUMNS.items():
+            if col not in cols:
+                await conn.execute(text(f"ALTER TABLE telemetry ADD COLUMN {col} {ddl}"))
+        await conn.execute(text("UPDATE telemetry SET source = 'sim' WHERE source IS NULL"))
+
+
 async def init_db():
     from app.models import (
         Device, Firmware, OtaDeployment, V2gSchedule, Alert, UserSession,
@@ -110,4 +137,5 @@ async def init_db():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     await _bootstrap_tenancy()
+    await _bootstrap_telemetry_v2()
     await _seed_default_org()

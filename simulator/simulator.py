@@ -51,6 +51,18 @@ SIMULATOR_DEVICE_IDS = [d.strip() for d in os.environ.get("SIMULATOR_DEVICE_IDS"
 V2G_POWER_KW = 7.2
 BATTERY_CAPACITY_KWH = 60.0
 
+# ── MVP DATA-01: OBD-grade telemetry + fault injection ───────────────────────
+# SIMULATOR_OBD=1 adds source/fuel/odometer/tire/DTC fields to every heartbeat.
+# SIMULATOR_SCENARIO=drift|thermal|tpms arms a fault progression on the device
+# at SIMULATOR_FAULT_DEVICE_INDEX (0-based). The progression is the eval
+# harness's ground truth (see tests/test_ml_eval.py + tests/eval_thresholds.yml).
+SIMULATOR_OBD = os.environ.get("SIMULATOR_OBD", "1").lower() in ("1", "true", "yes")
+SIMULATOR_SCENARIO = os.environ.get("SIMULATOR_SCENARIO", "none").lower()
+SIMULATOR_FAULT_DEVICE_INDEX = int(os.environ.get("SIMULATOR_FAULT_DEVICE_INDEX", "0"))
+# Fault DTCs asserted once the progression crosses its threshold.
+SCENARIO_DTC = {"drift": ["U0100"], "thermal": ["P0128"], "tpms": ["C0745"]}
+NOMINAL_TIRE_PSI = 32.0
+
 CITY_COORDS = {
     "Bangalore": (12.9716, 77.5946),
     "Mumbai": (19.0760, 72.8777),
@@ -95,6 +107,14 @@ class SimulatedDevice:
         self.cpu_usage = random.uniform(5, 25)
         self.memory_usage = random.uniform(30, 55)
         self.temperature = random.uniform(35, 55)
+
+        # MVP DATA-01: OBD-grade state
+        self.fuel_level_pct = random.uniform(40, 90)
+        self.odometer_km = random.uniform(5000, 80000)
+        self.tire_pressures = {k: round(random.uniform(31.0, 33.0), 1) for k in ("fl", "fr", "rl", "rr")}
+        self.dtc_codes: list = []
+        self.scenario = "none"
+        self._fault_step = 0
 
         self._client = mqtt.Client(
             client_id=f"sim-{device_id[:8]}",
@@ -282,6 +302,40 @@ class SimulatedDevice:
         # SOH slowly degrades over time
         self.soh = max(70.0, self.soh - 0.001)
 
+    def _update_fault(self):
+        """MVP DATA-01: advance the armed fault scenario one heartbeat step.
+
+        Each scenario starts nominal and degrades monotonically so the eval
+        harness can measure detection + lead time against a known onset
+        (fault step 0 == first degraded heartbeat).
+        """
+        if self.scenario == "none":
+            self.dtc_codes = []
+            return
+        self._fault_step += 1
+        if self.scenario == "drift":
+            # Antenna degradation: signal falls ~1.5 dBm/beat into the noise floor.
+            self.signal_strength = max(-100, self.signal_strength - random.uniform(1.0, 2.0))
+            if self.signal_strength < -85:
+                self.dtc_codes = list(SCENARIO_DTC["drift"])
+        elif self.scenario == "thermal":
+            # Cooling failure: temperature climbs ~0.9 C/beat past safe limits.
+            self.temperature = min(96.0, self.temperature + random.uniform(0.7, 1.1))
+            if self.is_ev:
+                self.battery_temp = min(70.0, self.battery_temp + random.uniform(0.4, 0.7))
+            if self.temperature > 75:
+                self.dtc_codes = list(SCENARIO_DTC["thermal"])
+        elif self.scenario == "tpms":
+            # Slow puncture on rear-right tire.
+            self.tire_pressures["rr"] = round(max(20.0, self.tire_pressures["rr"] - 0.15), 1)
+            if self.tire_pressures["rr"] < 28.0:
+                self.dtc_codes = list(SCENARIO_DTC["tpms"])
+
+    def _update_obd(self):
+        """MVP DATA-01: nominal OBD-grade drift (fuel burn, mileage)."""
+        self.fuel_level_pct = max(0.0, self.fuel_level_pct - 0.02)
+        self.odometer_km += 0.05
+
     def _update_resources(self):
         """Simulate CPU/memory/temperature drift for telemetry (Feature 1)."""
         self.cpu_usage = max(1.0, min(95.0, self.cpu_usage + random.uniform(-2, 2)))
@@ -328,6 +382,8 @@ class SimulatedDevice:
         self._update_battery()
         self._update_gps()
         self._update_resources()
+        self._update_obd()
+        self._update_fault()
 
         payload = {
             "uptime_percentage": round(self.uptime, 1),
@@ -338,6 +394,13 @@ class SimulatedDevice:
             "memory_usage": round(self.memory_usage, 1),
             "temperature": round(self.temperature, 1),
         }
+        if SIMULATOR_OBD:
+            payload["source"] = "obd"
+            payload["fuel_level_pct"] = round(self.fuel_level_pct, 1)
+            payload["odometer_km"] = round(self.odometer_km, 1)
+            payload["tire_pressures"] = dict(self.tire_pressures)
+            if self.dtc_codes:
+                payload["dtc_codes"] = list(self.dtc_codes)
         if self.is_ev:
             payload["soc"] = round(self.soc, 1)
             payload["soh"] = round(self.soh, 1)
@@ -410,6 +473,10 @@ async def main():
         name = f"Device-{i+1:03d}"
         city = city_list[i % len(city_list)]
         device = SimulatedDevice(device_id, name, city=city, is_ev=is_ev)
+        # MVP DATA-01: arm the fault scenario on one device (eval ground truth).
+        if SIMULATOR_SCENARIO in ("drift", "thermal", "tpms") and i == SIMULATOR_FAULT_DEVICE_INDEX:
+            device.scenario = SIMULATOR_SCENARIO
+            logger.info(f"Fault scenario '{SIMULATOR_SCENARIO}' armed on {name}")
         devices.append(device)
         asyncio.create_task(device.run())
         logger.info(f"Created simulated device: {name} ({device_id}) city={city} is_ev={is_ev}")

@@ -90,6 +90,12 @@ async def _record_telemetry(device: Device, payload: dict):
             cpu_usage=payload.get("cpu_usage"),
             memory_usage=payload.get("memory_usage"),
             temperature=payload.get("temperature"),
+            # ── MVP DATA-01: OBD-grade fields (lists/dicts stored as JSON text) ──
+            source=payload.get("source", "sim"),
+            dtc_codes=json.dumps(payload["dtc_codes"]) if payload.get("dtc_codes") is not None else None,
+            fuel_level_pct=payload.get("fuel_level_pct"),
+            odometer_km=payload.get("odometer_km"),
+            tire_pressures=json.dumps(payload["tire_pressures"]) if payload.get("tire_pressures") is not None else None,
         )
         async with async_session_factory() as db:
             db.add(point)
