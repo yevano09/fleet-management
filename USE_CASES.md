@@ -12,6 +12,42 @@ Each use case below follows a fixed framework:
 2. **Technical Execution Flow** — entry points, key components, data flow & dependencies, error handling & edge cases
 3. **Sequence & Flow Diagram** — Mermaid.js end-to-end flow
 
+## Current status map (verified 2026-09-16)
+
+Legend: **Done** = implemented + e2e-covered · **Done\*** = implemented with noted limits (heuristic/opt-in/mock-default) · **Partial** = wired but not default/complete. Cross-ref: AIoT gaps in `docs/aiot-gap-analysis.md`.
+
+| UC | Title | Status | Evidence / note |
+|---|---|---|---|
+| UC-01 | Register Devices into the Fleet | Done | `POST /devices/register`, MQTT auto-register; e2e test_01 |
+| UC-02 | Process Device Heartbeats & Telemetry | Done | `POST /devices/{id}/heartbeat`; e2e test_02/03 |
+| UC-03 | Upload Firmware Artifact | Done | `POST /ota/upload` SHA256; e2e test_04/04b |
+| UC-04 | Trigger OTA Deployment | Done | `POST /ota/trigger`; e2e test_05/08 |
+| UC-05 | Execute OTA State Machine with Auto-Rollback | Done | `app/ota_manager.py`, timeout watcher + 3 retries |
+| UC-06 | Schedule OTA Campaigns (Maintenance Windows + Canary) | Done | `POST /ota/schedules`; e2e test_23 |
+| UC-07 | Monitor Fleet Health & Fire Alerts | Done | AlertEngine dedup/cooldown/escalation; e2e test_17/18/19 |
+| UC-08 | Suggest Device Groups | Done\* | Heuristic (firmware + signal buckets); no learned clustering |
+| UC-09 | Optimize V2G Arbitrage Dispatch | Done\* | Greedy heuristic + **mock prices by default**; see G-08 |
+| UC-10 | Query Telemetry Time-Series | Done | `GET /telemetry/{id}` + stats; e2e test_20/38 |
+| UC-11 | Manage Geofences & Geo-Alerts | Done | Haversine/ray-cast; e2e test_21/37 |
+| UC-12 | Manage Device Lifecycle (Maintenance / Decommission / QR-Claim) | Done | e2e test_27/34 |
+| UC-13 | Queue Commands for Offline Devices | Done | TTL queue + flush; e2e test_24 |
+| UC-14 | Record & Query Audit Trail | Done | e2e test_25 |
+| UC-15 | Synchronize Device Shadow (Digital Twin) | Done\* | Desired/reported equality check only — not a versioned twin; see G-06 |
+| UC-16 | Predict Failures from Telemetry Trends | Done\* | **Heuristic slopes, not ML** (≥5 pts, ≤24h, max-risk-only); see G-07 |
+| UC-17 | Sign Firmware Cryptographically (Ed25519) | Done\* | Opt-in; bypassed unless key provisioned + require flag |
+| UC-18 | Integrate Real Spot Prices | Partial | Provider path wired; default `mock`; prices not persisted; see G-08 |
+| UC-19 | Stream Events to Webhook Subscribers | Done | e2e test_29 |
+| UC-20 | Bulk Provision Devices (CSV Import + Pre-registration) | Done | e2e test_28 |
+| UC-21 | Onboard a Device with AI Assistance | Done\* | Deterministic recommender; CrewAI/LLM opt-in only |
+| UC-22 | Self-Heal Fleet via Aegis Auto-Remediation | Done\* | Threshold rules + 8 fixed actions; not planning/reasoning |
+| UC-23 | Enforce REST Authentication, RBAC & Audited Automation | Done | `scripts/verify-p0.sh` exit 0 |
+| UC-24 | Lock the Broker with mTLS Identity & Topic ACLs | Done | Production profile; `verify-p0.sh` exit 0 |
+| UC-25 | Manage Device Certificate Lifecycle with JITP | Done | Issue/rotate/revoke + CRL |
+| UC-26 | Isolate Fleets per Organization | Done | `org_id` tenancy + backfill |
+| UC-27 | Run Production on PostgreSQL with Honest HA | Done | Postgres profile + leader/api roles |
+
+Not yet a UC (AIoT roadmap, see `docs/aiot-gap-analysis.md` §4–§5): edge inference + offline tier, model registry/OTA-canary, eval harness, work orders, driver scoring/coaching, fuel-fraud, video events, BI/MCP export.
+
 ---
 
 ### Use Case [UC-01]: Register Devices into the Fleet
@@ -882,7 +918,7 @@ sequenceDiagram
 
 ---
 
-### Use Case [UC-22): Self-Heal Fleet via Aegis Auto-Remediation
+### Use Case [UC-22]: Self-Heal Fleet via Aegis Auto-Remediation
 
 #### 1. Overview
 * **Description:** Closed-loop controller scraping own `/metrics` every 15 s: parses gauges/histogram families (`fleet_active_devices`, `fleet_ota_in_progress`, latency histograms), classifies threshold breaches into severity-tagged `RemediationSignal`s, matches registry rules (R001–R008: throttle OTA, QoS downgrade, soft restart, heartbeat scale-up, batch rollback, migration, artifact cleanup, human escalation), executes with timeout+retry+DLQ semantics, journals full input/output snapshots, and escalates unmatched signals through the alert engine.
