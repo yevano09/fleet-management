@@ -62,3 +62,17 @@
    stylesheet until their Phase 1 conversion — Tailwind cannot generate them.
    Only utilities below are emitted on demand. */
 @source inline("text-teal text-amber text-green text-red text-purple text-ink text-body text-muted border-teal border-line bg-abyss bg-surface bg-raised");
+
+/* Component: responsive stat grid. Plain CSS (not a utility) because the v4
+   scanner AND @source inline() both drop variant-prefixed arbitrary
+   properties (md:[…]) — verified by experiment. */
+.stat-grid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+@media (min-width: 768px) {
+  .stat-grid {
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  }
+}
