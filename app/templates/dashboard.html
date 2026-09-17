@@ -21,7 +21,7 @@
   --amber: #F59E0B;
   --text-title: #EAEEF5;
   --text-body: #B8C5D4;
-  --text-muted: #636E85;
+  --text-muted: #8B95AB;
   --border: #1E2740;
   --green: #22C55E;
   --red: #EF4444;
@@ -63,8 +63,20 @@ td { padding:0.65rem 1rem; border-bottom:1px solid var(--border); font-size:0.85
 tr:last-child td { border-bottom:none; }
 tr:hover td { background:rgba(45,212,191,0.02); }
 tr.device-row { cursor:pointer; }
-.btn-map { background:transparent; border:1px solid var(--border); border-radius:0.375rem; cursor:pointer; font-size:1rem; padding:0.15rem 0.4rem; transition:all 0.15s; line-height:1; }
+tr.device-row:focus-visible { outline:2px solid var(--teal); outline-offset:-2px; }
+.btn-map { background:transparent; border:1px solid var(--border); border-radius:0.375rem; cursor:pointer; padding:0.35rem 0.5rem; transition:all 0.15s; line-height:1; color:var(--teal); display:inline-flex; align-items:center; }
 .btn-map:hover { background:var(--teal-glow); border-color:var(--teal); transform:scale(1.15); }
+.btn-map:focus-visible { outline:2px solid var(--teal); outline-offset:2px; }
+.btn-map svg { width:14px; height:14px; }
+.table-scroll { overflow-x:auto; border-radius:0.625rem; border:1px solid var(--border); }
+.table-scroll table { border:none; border-radius:0; }
+.detail-tab:focus-visible { outline:2px solid var(--teal); outline-offset:-2px; }
+@media (prefers-reduced-motion: reduce) {
+  .aegis-timeline-dot.in_progress { animation:none; }
+  .btn-map:hover { transform:none; }
+  .stat-card, .btn, .city-filter { transition:none; }
+  .toast { transition:none; }
+}
 .marker-highlight { color:var(--teal) !important; fillColor:var(--teal) !important; fillOpacity:0.9 !important; weight:4 !important; }
 .badge { display:inline-flex; align-items:center; gap:0.3rem; padding:0.2rem 0.55rem; border-radius:9999px; font-size:0.72rem; font-weight:500; font-family:var(--font-mono); }
 .badge-online { background:rgba(34,197,94,0.1); color:var(--green); border:1px solid rgba(34,197,94,0.15); }
@@ -246,7 +258,7 @@ td code { font-family:var(--font-mono); font-size:0.78em; background:rgba(45,212
 <button class="btn btn-outline" onclick="loadAlerts()" style="font-size:0.75rem;">Refresh Alerts</button>
 </div>
 <div id="alerts-panel" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:0.75rem;margin-bottom:1.5rem;">
-<div class="stat-card" style="padding:1rem;"><div class="label" style="color:#64748b;">Loading alerts...</div></div>
+<div class="stat-card" style="padding:1rem;"><div class="label" style="color:#8B95AB;">Loading alerts...</div></div>
 </div>
 
 <div class="ota-section" id="aegis-section">
@@ -256,7 +268,7 @@ td code { font-family:var(--font-mono); font-size:0.78em; background:rgba(45,212
 </h2>
 <div id="aegis-panel" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:0.75rem;margin-bottom:1.5rem;">
   <div class="stat-card" style="padding:1rem;grid-column:1/-1;">
-    <div class="label" style="color:#64748b;">Loading Aegis status...</div>
+    <div class="label" style="color:#8B95AB;">Loading Aegis status...</div>
   </div>
 </div>
 </div>
@@ -270,7 +282,7 @@ td code { font-family:var(--font-mono); font-size:0.78em; background:rgba(45,212
 </div>
 </div>
 <div id="predictive-panel" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:0.75rem;margin-bottom:1.5rem;">
-<div class="stat-card" style="padding:1rem;"><div class="label" style="color:#64748b;">No predictions yet. Run a scan to analyze telemetry trends.</div></div>
+<div class="stat-card" style="padding:1rem;"><div class="label" style="color:#8B95AB;">No predictions yet. Run a scan to analyze telemetry trends.</div></div>
 </div>
 </div>
 
@@ -283,7 +295,7 @@ td code { font-family:var(--font-mono); font-size:0.78em; background:rgba(45,212
 </div>
 </div>
  <div id="schedules-panel" style="margin-bottom:1.5rem;">
- <div class="stat-card" style="padding:1rem;"><div class="label" style="color:#64748b;">No scheduled campaigns.</div></div>
+ <div class="stat-card" style="padding:1rem;"><div class="label" style="color:#8B95AB;">No scheduled campaigns.</div></div>
  </div>
  </div>
 
@@ -295,7 +307,7 @@ td code { font-family:var(--font-mono); font-size:0.78em; background:rgba(45,212
  </div>
  </div>
  <div id="workorders-panel" style="margin-bottom:1.5rem;">
- <div class="stat-card" style="padding:1rem;"><div class="label" style="color:#64748b;">No open work orders.</div></div>
+ <div class="stat-card" style="padding:1rem;"><div class="label" style="color:#8B95AB;">No open work orders.</div></div>
  </div>
  </div>
 
@@ -308,7 +320,7 @@ td code { font-family:var(--font-mono); font-size:0.78em; background:rgba(45,212
 </div>
 </div>
 <div id="geofences-panel" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:0.75rem;margin-bottom:1.5rem;">
-<div class="stat-card" style="padding:1rem;"><div class="label" style="color:#64748b;">No geofences defined.</div></div>
+<div class="stat-card" style="padding:1rem;"><div class="label" style="color:#8B95AB;">No geofences defined.</div></div>
 </div>
 </div>
 
@@ -320,43 +332,47 @@ td code { font-family:var(--font-mono); font-size:0.78em; background:rgba(45,212
 </div>
 </div>
 
-<table id="device-table">
-<thead>
-<tr>
-<th style="width:2rem"><input type="checkbox" id="select-all" onchange="toggleSelectAll()"></th>
-<th>Device Name</th>
-<th>Firmware</th>
-<th>Status</th>
-<th>Signal</th>
-<th>Uptime</th>
-<th>Last Seen</th>
-<th>OTA Status</th>
-<th style="width:4rem;">Map</th>
-</tr>
-</thead>
-<tbody id="device-tbody">
-<tr><td colspan="9" style="text-align:center;padding:2rem;color:#64748b;">Loading devices...</td></tr>
-</tbody>
-</table>
+ <div class="table-scroll">
+ <table id="device-table">
+ <thead>
+ <tr>
+ <th scope="col" style="width:2rem"><input type="checkbox" id="select-all" aria-label="Select all devices" onchange="toggleSelectAll()"></th>
+ <th scope="col">Device Name</th>
+ <th scope="col">Firmware</th>
+ <th scope="col">Status</th>
+ <th scope="col">Signal</th>
+ <th scope="col">Uptime</th>
+ <th scope="col">Last Seen</th>
+ <th scope="col">OTA Status</th>
+ <th scope="col" style="width:4rem;">Map</th>
+ </tr>
+ </thead>
+ <tbody id="device-tbody">
+ <tr><td colspan="9" style="text-align:center;padding:2rem;color:#8B95AB;">Loading devices...</td></tr>
+ </tbody>
+ </table>
+ </div>
 
-<div class="ota-section">
-<h3>Recent OTA Deployments</h3>
-<table id="ota-table">
-<thead>
-<tr>
-<th>Deployment ID</th>
-<th>Device</th>
-<th>Status</th>
-<th>Retries</th>
-<th>Error</th>
-<th>Updated</th>
-</tr>
-</thead>
-<tbody id="ota-tbody">
-<tr><td colspan="6" style="text-align:center;padding:2rem;color:#64748b;">Loading OTA status...</td></tr>
-</tbody>
-</table>
-</div>
+ <div class="ota-section">
+ <h3>Recent OTA Deployments</h3>
+ <div class="table-scroll">
+ <table id="ota-table">
+ <thead>
+ <tr>
+ <th scope="col">Deployment ID</th>
+ <th scope="col">Device</th>
+ <th scope="col">Status</th>
+ <th scope="col">Retries</th>
+ <th scope="col">Error</th>
+ <th scope="col">Updated</th>
+ </tr>
+ </thead>
+  <tbody id="ota-tbody">
+  <tr><td colspan="6" style="text-align:center;padding:2rem;color:#8B95AB;">Loading OTA status...</td></tr>
+  </tbody>
+ </table>
+ </div>
+ </div>
 
 <div class="ota-section">
 <h3>Agent Recommendations</h3>
@@ -378,26 +394,26 @@ td code { font-family:var(--font-mono); font-size:0.78em; background:rgba(45,212
 <div class="stat-card" style="padding:1.25rem;">
 <div class="label" style="margin-bottom:0.75rem;">Available Firmware</div>
 <div id="firmware-list" style="max-height:300px;overflow-y:auto;">
-<div style="color:#64748b;font-size:0.875rem;">Loading...</div>
+<div style="color:#8B95AB;font-size:0.875rem;">Loading...</div>
 </div>
 </div>
 </div>
 </div>
 </main>
 
-<div class="modal-overlay" id="ota-modal">
-<div class="modal">
-<h3>Trigger OTA Update</h3>
-<form id="ota-form">
-<div>
-<label>Firmware Version</label>
+ <div class="modal-overlay" id="ota-modal">
+ <div class="modal" role="dialog" aria-modal="true" aria-labelledby="ota-modal-title">
+ <h3 id="ota-modal-title">Trigger OTA Update</h3>
+ <form id="ota-form">
+ <div>
+ <label for="firmware-select">Firmware Version</label>
 <select id="firmware-select" required>
 <option value="">Select firmware...</option>
 </select>
 </div>
-<div>
-<label>Target Devices</label>
-<label style="display:flex;align-items:center;gap:0.5rem;margin-top:0.25rem;">
+ <div>
+ <span id="ota-target-label" style="font-size:0.8rem;color:var(--text-muted);">Target Devices</span>
+ <label style="display:flex;align-items:center;gap:0.5rem;margin-top:0.25rem;">
 <input type="checkbox" id="ota-all-devices" checked onchange="toggleOtaTargetMode()">
 All online devices
 </label>
@@ -411,26 +427,26 @@ All online devices
 </div>
 </div>
 
-<div class="modal-overlay" id="onboard-modal">
-<div class="modal">
-<h3>Onboard New Device</h3>
-<form id="onboard-form">
-<div>
-<label>Device Name *</label>
-<input type="text" id="onboard-name" placeholder="e.g. Sensor-042" required>
-</div>
-<div>
-<label>Firmware Version</label>
-<input type="text" id="onboard-firmware" placeholder="Leave empty for latest">
-</div>
-<div>
-<label>IP Address</label>
-<input type="text" id="onboard-ip" placeholder="e.g. 10.0.0.100">
-</div>
-<div>
-<label>MQTT Client ID</label>
-<input type="text" id="onboard-mqtt-id" placeholder="e.g. esp32-abc123">
-</div>
+ <div class="modal-overlay" id="onboard-modal">
+ <div class="modal" role="dialog" aria-modal="true" aria-labelledby="onboard-modal-title">
+ <h3 id="onboard-modal-title">Onboard New Device</h3>
+ <form id="onboard-form">
+ <div>
+ <label for="onboard-name">Device Name *</label>
+ <input type="text" id="onboard-name" placeholder="e.g. Sensor-042" required>
+ </div>
+ <div>
+ <label for="onboard-firmware">Firmware Version</label>
+ <input type="text" id="onboard-firmware" placeholder="Leave empty for latest">
+ </div>
+ <div>
+ <label for="onboard-ip">IP Address</label>
+ <input type="text" id="onboard-ip" placeholder="e.g. 10.0.0.100">
+ </div>
+ <div>
+ <label for="onboard-mqtt-id">MQTT Client ID</label>
+ <input type="text" id="onboard-mqtt-id" placeholder="e.g. esp32-abc123">
+ </div>
 <label style="display:flex;align-items:center;gap:0.5rem;margin-top:0.5rem;">
 <input type="checkbox" id="onboard-auto">
 Auto-register (skip review)
@@ -444,15 +460,15 @@ Auto-register (skip review)
 </div>
 </div>
 
-<div class="modal-overlay" id="device-detail-modal">
-<div class="modal modal-large">
-<h3 id="detail-title">Device Details</h3>
- <div class="detail-tabs">
- <div class="detail-tab active" onclick="switchDetailTab('telemetry')">Telemetry</div>
- <div class="detail-tab" onclick="switchDetailTab('twin')">Twin</div>
- <div class="detail-tab" onclick="switchDetailTab('shadow')">Shadow</div>
- <div class="detail-tab" onclick="switchDetailTab('lifecycle')">Lifecycle</div>
- <div class="detail-tab" onclick="switchDetailTab('commands')">Commands</div>
+ <div class="modal-overlay" id="device-detail-modal">
+ <div class="modal modal-large" role="dialog" aria-modal="true" aria-labelledby="detail-title">
+ <h3 id="detail-title">Device Details</h3>
+  <div class="detail-tabs" role="tablist" aria-label="Device detail views">
+  <div class="detail-tab active" role="tab" aria-selected="true" tabindex="0" data-tab="telemetry" onclick="switchDetailTab('telemetry')" onkeydown="tabKey(event,'telemetry')">Telemetry</div>
+  <div class="detail-tab" role="tab" aria-selected="false" tabindex="0" data-tab="twin" onclick="switchDetailTab('twin')" onkeydown="tabKey(event,'twin')">Twin</div>
+  <div class="detail-tab" role="tab" aria-selected="false" tabindex="0" data-tab="shadow" onclick="switchDetailTab('shadow')" onkeydown="tabKey(event,'shadow')">Shadow</div>
+  <div class="detail-tab" role="tab" aria-selected="false" tabindex="0" data-tab="lifecycle" onclick="switchDetailTab('lifecycle')" onkeydown="tabKey(event,'lifecycle')">Lifecycle</div>
+  <div class="detail-tab" role="tab" aria-selected="false" tabindex="0" data-tab="commands" onclick="switchDetailTab('commands')" onkeydown="tabKey(event,'commands')">Commands</div>
  </div>
 <div class="detail-tab-content active" id="detail-tab-telemetry">
 <div class="chart-container"><canvas id="chart-signal"></canvas></div>
@@ -478,16 +494,16 @@ Auto-register (skip review)
 </div>
 </div>
 
-<div class="modal-overlay" id="geofence-modal">
-<div class="modal">
-<h3>Create Geofence</h3>
-<form id="geofence-form">
-<div><label>Name *</label><input type="text" id="gf-name" placeholder="e.g. Bangalore Depot" required></div>
-<div><label>Shape</label><select id="gf-shape" onchange="toggleGeofenceShape()"><option value="circle">Circle</option><option value="polygon">Polygon</option></select></div>
-<div id="gf-circle-fields"><label>Center Latitude</label><input type="number" id="gf-lat" step="0.0001" placeholder="12.9716"><label>Center Longitude</label><input type="number" id="gf-lng" step="0.0001" placeholder="77.5946"><label>Radius (meters)</label><input type="number" id="gf-radius" step="100" placeholder="5000"></div>
-<div id="gf-polygon-fields" style="display:none;"><label>Polygon Coords (JSON: [[lat,lng],...])</label><input type="text" id="gf-polygon" placeholder="[[12.97,77.59],[12.98,77.60],[12.96,77.58]]"></div>
-<div><label>Device IDs (comma-sep, empty=all)</label><input type="text" id="gf-devices" placeholder="Leave empty for fleet-wide"></div>
-<div><label>Color</label><input type="text" id="gf-color" value="#2DD4BF"></div>
+ <div class="modal-overlay" id="geofence-modal">
+ <div class="modal" role="dialog" aria-modal="true" aria-labelledby="geofence-modal-title">
+ <h3 id="geofence-modal-title">Create Geofence</h3>
+ <form id="geofence-form">
+ <div><label for="gf-name">Name *</label><input type="text" id="gf-name" placeholder="e.g. Bangalore Depot" required></div>
+ <div><label for="gf-shape">Shape</label><select id="gf-shape" onchange="toggleGeofenceShape()"><option value="circle">Circle</option><option value="polygon">Polygon</option></select></div>
+ <div id="gf-circle-fields"><label for="gf-lat">Center Latitude</label><input type="number" id="gf-lat" step="0.0001" placeholder="12.9716"><label for="gf-lng">Center Longitude</label><input type="number" id="gf-lng" step="0.0001" placeholder="77.5946"><label for="gf-radius">Radius (meters)</label><input type="number" id="gf-radius" step="100" placeholder="5000"></div>
+ <div id="gf-polygon-fields" style="display:none;"><label for="gf-polygon">Polygon Coords (JSON: [[lat,lng],...])</label><input type="text" id="gf-polygon" placeholder="[[12.97,77.59],[12.98,77.60],[12.96,77.58]]"></div>
+ <div><label for="gf-devices">Device IDs (comma-sep, empty=all)</label><input type="text" id="gf-devices" placeholder="Leave empty for fleet-wide"></div>
+ <div><label for="gf-color">Color</label><input type="text" id="gf-color" value="#2DD4BF"></div>
 <label style="display:flex;align-items:center;gap:0.5rem;"><input type="checkbox" id="gf-enter" checked> Alert on enter</label>
 <label style="display:flex;align-items:center;gap:0.5rem;"><input type="checkbox" id="gf-exit" checked> Alert on exit</label>
 <div class="modal-actions"><button type="button" class="btn btn-outline" onclick="closeGeofenceModal()">Cancel</button><button type="submit" class="btn btn-primary">Create</button></div>
@@ -495,23 +511,23 @@ Auto-register (skip review)
 </div>
 </div>
 
-<div class="modal-overlay" id="schedule-modal">
-<div class="modal">
-<h3>Schedule OTA Campaign</h3>
-<form id="schedule-form">
-<div><label>Campaign Name *</label><input type="text" id="sched-name" placeholder="e.g. Nightly v2.1 update" required></div>
-<div><label>Firmware</label><select id="sched-firmware" required></select></div>
-<div><label>Schedule For (datetime) *</label><input type="datetime-local" id="sched-time" required></div>
-<div><label>Canary Percent</label><input type="number" id="sched-canary" value="10" min="0" max="100" step="5"></div>
-<div><label>Blackout Start Hour (0-23)</label><input type="number" id="sched-blackout-start" min="0" max="23" placeholder="e.g. 9"></div>
-<div><label>Blackout End Hour (0-23)</label><input type="number" id="sched-blackout-end" min="0" max="23" placeholder="e.g. 17"></div>
+ <div class="modal-overlay" id="schedule-modal">
+ <div class="modal" role="dialog" aria-modal="true" aria-labelledby="schedule-modal-title">
+ <h3 id="schedule-modal-title">Schedule OTA Campaign</h3>
+ <form id="schedule-form">
+ <div><label for="sched-name">Campaign Name *</label><input type="text" id="sched-name" placeholder="e.g. Nightly v2.1 update" required></div>
+ <div><label for="sched-firmware">Firmware</label><select id="sched-firmware" required></select></div>
+ <div><label for="sched-time">Schedule For (datetime) *</label><input type="datetime-local" id="sched-time" required></div>
+ <div><label for="sched-canary">Canary Percent</label><input type="number" id="sched-canary" value="10" min="0" max="100" step="5"></div>
+ <div><label for="sched-blackout-start">Blackout Start Hour (0-23)</label><input type="number" id="sched-blackout-start" min="0" max="23" placeholder="e.g. 9"></div>
+ <div><label for="sched-blackout-end">Blackout End Hour (0-23)</label><input type="number" id="sched-blackout-end" min="0" max="23" placeholder="e.g. 17"></div>
 <label style="display:flex;align-items:center;gap:0.5rem;"><input type="checkbox" id="sched-all-devices" checked> All online devices</label>
 <div class="modal-actions"><button type="button" class="btn btn-outline" onclick="closeScheduleModal()">Cancel</button><button type="submit" class="btn btn-primary">Schedule</button></div>
 </form>
 </div>
 </div>
 
-<div class="toast" id="toast"></div>
+ <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
 <script>
 function toggleAegisDetail(id) {
@@ -525,7 +541,7 @@ async function loadAegisPanel() {
     const panel = document.getElementById('aegis-panel');
     const bar = document.getElementById('aegis-summary-bar');
     if (!data || !data.remediations) {
-      panel.innerHTML = '<div class="stat-card" style="padding:1rem;grid-column:1/-1;"><div class="label" style="color:#64748b;">Aegis data unavailable</div></div>';
+      panel.innerHTML = '<div class="stat-card" style="padding:1rem;grid-column:1/-1;"><div class="label" style="color:#8B95AB;">Aegis data unavailable</div></div>';
       bar.textContent = '';
       return;
     }
@@ -681,7 +697,7 @@ function updateMapMarkers(devices) {
           <div>Firmware: ${escapeHtml(d.firmware_version)}</div>
           <div>Signal: ${d.signal_strength != null ? d.signal_strength + ' dBm' : 'N/A'}</div>
           <div>Lat: ${d.latitude.toFixed(4)}, Lng: ${d.longitude.toFixed(4)}</div>
-          <div style="color:#64748b;font-size:0.75rem;margin-top:0.25rem;">Last seen: ${d.last_seen ? new Date(d.last_seen + 'Z').toLocaleString() : 'N/A'}</div>
+          <div style="color:#8B95AB;font-size:0.75rem;margin-top:0.25rem;">Last seen: ${d.last_seen ? new Date(d.last_seen + 'Z').toLocaleString() : 'N/A'}</div>
         </div>
       `);
       mapMarkers[d.id] = marker;
@@ -768,6 +784,31 @@ function showToast(message, type = 'info') {
   setTimeout(() => t.classList.remove('show'), 4000);
 }
 
+// ── Modal a11y: focus in on open, focus back on close, ESC dismisses ──
+let lastFocusedBeforeModal = null;
+function openModal(id, focusSel) {
+  lastFocusedBeforeModal = document.activeElement;
+  document.getElementById(id).classList.add('active');
+  if (focusSel) {
+    const el = document.querySelector('#' + id + ' ' + focusSel);
+    if (el) setTimeout(() => el.focus(), 0);
+  }
+}
+function closeModal(id) {
+  document.getElementById(id).classList.remove('active');
+  if (lastFocusedBeforeModal && document.contains(lastFocusedBeforeModal) && lastFocusedBeforeModal.focus) {
+    lastFocusedBeforeModal.focus();
+  }
+}
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    ['device-detail-modal', 'ota-modal', 'onboard-modal', 'geofence-modal', 'schedule-modal'].forEach(closeModal);
+  }
+});
+function tabKey(e, tab) {
+  if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); switchDetailTab(tab); }
+}
+
 async function loadDashboard() {
   try {
     const [devicesData, otaData] = await Promise.all([
@@ -779,7 +820,7 @@ async function loadDashboard() {
     const devices = devicesData.devices || [];
 
     if (devices.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:2rem;color:#64748b;">No devices registered. Wait for simulators to connect.</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:2rem;color:#8B95AB;">No devices registered. Wait for simulators to connect.</td></tr>';
     } else {
       tbody.innerHTML = devices.map(d => {
         const statusClass = d.status === 'online' ? 'badge-online' : 'badge-offline';
@@ -791,16 +832,16 @@ async function loadDashboard() {
         const lifecycle = d.lifecycle_status || 'active';
         const lifecycleBadge = lifecycle !== 'active' ? ` <span class="badge badge-${lifecycle}" style="font-size:0.6rem;">${lifecycle}</span>` : '';
         const cityStr = d.city ? ` <span style="color:var(--text-muted);font-size:0.7rem;">${escapeHtml(d.city)}</span>` : '';
-        return `<tr class="device-row" data-id="${d.id}" data-hasgps="${hasGps}" onclick="openDeviceDetail('${d.id}')">
-          <td><input type="checkbox" class="device-check" value="${d.id}" onclick="event.stopPropagation()"></td>
+        return `<tr class="device-row" data-id="${d.id}" data-hasgps="${hasGps}" tabindex="0" onclick="openDeviceDetail('${d.id}')" onkeydown="if(event.key==='Enter'){openDeviceDetail('${d.id}')}">
+          <td><input type="checkbox" class="device-check" value="${d.id}" aria-label="Select ${d.name}" onclick="event.stopPropagation()"></td>
           <td><strong>${d.name}</strong>${lifecycleBadge}${cityStr}</td>
           <td>${d.firmware_version}</td>
-          <td><span class="badge ${statusClass}">${statusDot} ${d.status}</span></td>
+          <td><span class="badge ${statusClass}"><span aria-hidden="true">${statusDot}</span> ${d.status}</span></td>
           <td>${signal} dBm</td>
           <td>${uptime}</td>
           <td>${lastSeen}</td>
           <td id="ota-cell-${d.id}">-</td>
-          <td>${hasGps ? '<button class="btn-map" onclick="event.stopPropagation(); focusDeviceOnMap(\'' + d.id + '\')" title="View on map">📍</button>' : '<span style="color:var(--text-muted);font-size:0.7rem;">-</span>'}</td>
+          <td>${hasGps ? '<button class="btn-map" onclick="event.stopPropagation(); focusDeviceOnMap(\'' + d.id + '\')" title="View on map" aria-label="View ' + d.name.replace(/["']/g, '') + ' on map"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg></button>' : '<span style="color:var(--text-muted);font-size:0.7rem;">-</span>'}</td>
         </tr>`;
       }).join('');
     }
@@ -819,7 +860,7 @@ async function loadDashboard() {
       const otaBody = document.getElementById('ota-tbody');
       const deployments = otaData.deployments || [];
       if (deployments.length === 0) {
-        otaBody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:2rem;color:#64748b;">No OTA deployments yet.</td></tr>';
+        otaBody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:2rem;color:#8B95AB;">No OTA deployments yet.</td></tr>';
       } else {
         otaBody.innerHTML = deployments.slice(0, 20).map(d => {
           const cls = `badge-${d.status}`;
@@ -904,7 +945,7 @@ async function loadOtaDeviceList(selectedIds) {
 }
 
 function openOtaModal() {
-  document.getElementById('ota-modal').classList.add('active');
+  openModal('ota-modal', '#firmware-select');
 
   // Check if user selected specific devices in the main table
   const mainChecked = Array.from(document.querySelectorAll('.device-check:checked')).map(cb => cb.value);
@@ -939,7 +980,7 @@ async function loadAlerts() {
     const warningCount = alerts.filter(a => a.severity === 'warning').length;
 
     if (alerts.length === 0) {
-      panel.innerHTML = '<div class="stat-card" style="padding:1rem;"><div class="label" style="color:#64748b;">No active alerts</div></div>';
+      panel.innerHTML = '<div class="stat-card" style="padding:1rem;"><div class="label" style="color:#8B95AB;">No active alerts</div></div>';
       badge.style.display = 'none';
     } else {
       badge.style.display = 'inline';
@@ -950,10 +991,10 @@ async function loadAlerts() {
         return `<div class="stat-card" style="padding:1rem;border-left:3px solid ${borderColor};display:flex;flex-direction:column;gap:0.5rem;">
           <div style="display:flex;justify-content:space-between;align-items:center;">
             <div style="font-size:0.75rem;font-weight:600;color:${borderColor};text-transform:uppercase;letter-spacing:0.05em;">${icon} ${a.severity}</div>
-            <div style="font-size:0.7rem;color:#64748b;">x${a.count}</div>
+            <div style="font-size:0.7rem;color:#8B95AB;">x${a.count}</div>
           </div>
           <div style="font-size:0.85rem;">${a.message}</div>
-          <div style="font-size:0.7rem;color:#64748b;">Type: ${a.type} | Status: ${a.status}${a.work_order_id ? ` | WO: <span style="color:var(--teal);font-family:monospace;">${a.work_order_id.substring(0,8)}…</span>` : ''}</div>
+          <div style="font-size:0.7rem;color:#8B95AB;">Type: ${a.type} | Status: ${a.status}${a.work_order_id ? ` | WO: <span style="color:var(--teal);font-family:monospace;">${a.work_order_id.substring(0,8)}…</span>` : ''}</div>
           <div style="display:flex;gap:0.5rem;margin-top:0.25rem;">
             <button class="btn btn-outline" style="padding:0.25rem 0.5rem;font-size:0.7rem;" onclick="ackAlert('${a.id}')">Acknowledge</button>
             <button class="btn btn-outline" style="padding:0.25rem 0.5rem;font-size:0.7rem;" onclick="resolveAlert('${a.id}')">Resolve</button>
@@ -1139,7 +1180,7 @@ async function loadFirmwareList() {
     const data = await fetchJson('/ota/firmware');
     const container = document.getElementById('firmware-list');
     if (data.length === 0) {
-      container.innerHTML = '<div style="color:#64748b;font-size:0.875rem;">No firmware uploaded yet.</div>';
+      container.innerHTML = '<div style="color:#8B95AB;font-size:0.875rem;">No firmware uploaded yet.</div>';
       return;
     }
     container.innerHTML = data.map(f => `
@@ -1147,7 +1188,7 @@ async function loadFirmwareList() {
         <div>
           <div style="font-weight:600;">${f.version} ${f.signature ? '<span class="badge badge-signed" style="font-size:0.6rem;">signed</span>' : ''}</div>
           <div style="color:#94a3b8;font-size:0.75rem;">${f.filename} (${(f.file_size / 1024).toFixed(1)} KB)</div>
-          <div style="color:#64748b;font-size:0.7rem;">${new Date(f.created_at + 'Z').toLocaleString()}</div>
+          <div style="color:#8B95AB;font-size:0.7rem;">${new Date(f.created_at + 'Z').toLocaleString()}</div>
         </div>
         <button class="btn btn-danger" style="padding:0.25rem 0.5rem;font-size:0.75rem;" onclick="deleteFirmware('${f.id}', '${f.version}')">Delete</button>
       </div>
@@ -1202,16 +1243,16 @@ document.getElementById('firmware-upload-form').addEventListener('submit', async
 });
 
 function closeOtaModal() {
-  document.getElementById('ota-modal').classList.remove('active');
+  closeModal('ota-modal');
 }
 
 function openOnboardModal() {
-  document.getElementById('onboard-modal').classList.add('active');
+  openModal('onboard-modal', '#onboard-name');
   document.getElementById('onboard-result').style.display = 'none';
 }
 
 function closeOnboardModal() {
-  document.getElementById('onboard-modal').classList.remove('active');
+  closeModal('onboard-modal');
 }
 
 // ═══ Feature 1: Device detail with telemetry charts ═══════════════════════
@@ -1221,7 +1262,7 @@ let detailCharts = {};
 
 async function openDeviceDetail(deviceId) {
   detailDeviceId = deviceId;
-  document.getElementById('device-detail-modal').classList.add('active');
+  openModal('device-detail-modal', '.detail-tab[data-tab="telemetry"]');
   document.getElementById('detail-title').textContent = 'Loading...';
   switchDetailTab('telemetry');
   try {
@@ -1245,15 +1286,24 @@ async function openDeviceDetail(deviceId) {
 }
 
 function closeDetailModal() {
-  document.getElementById('device-detail-modal').classList.remove('active');
+  closeModal('device-detail-modal');
   Object.values(detailCharts).forEach(c => { if (c) c.destroy(); });
   detailCharts = {};
 }
 
 function switchDetailTab(tab) {
-  document.querySelectorAll('.detail-tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.detail-tab').forEach(t => {
+    t.classList.remove('active');
+    t.setAttribute('aria-selected', 'false');
+    t.setAttribute('tabindex', '-1');
+  });
   document.querySelectorAll('.detail-tab-content').forEach(c => c.classList.remove('active'));
-  document.querySelector(`.detail-tab[onclick="switchDetailTab('${tab}')"]`).classList.add('active');
+  const active = document.querySelector(`.detail-tab[data-tab="${tab}"]`);
+  if (active) {
+    active.classList.add('active');
+    active.setAttribute('aria-selected', 'true');
+    active.setAttribute('tabindex', '0');
+  }
   document.getElementById(`detail-tab-${tab}`).classList.add('active');
 }
 
@@ -1262,7 +1312,7 @@ function renderTelemetryCharts(points, device) {
   const chartOpts = (label, color) => ({
     type: 'line',
     data: { labels, datasets: [{ label, data: [], borderColor: color, backgroundColor: color+'20', fill: true, tension: 0.3, pointRadius: 0 }] },
-    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { display: false }, y: { ticks: { color: '#64748b', font: { size: 9 } }, grid: { color: '#1E2740' } } } }
+    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { display: false }, y: { ticks: { color: '#8B95AB', font: { size: 9 } }, grid: { color: '#1E2740' } } } }
   });
 
   // Signal chart
@@ -1406,7 +1456,7 @@ async function loadGeofences() {
     const gfs = data.geofences || [];
     document.getElementById('stat-geofences').textContent = gfs.filter(g => g.enabled).length;
     if (gfs.length === 0) {
-      panel.innerHTML = '<div class="stat-card" style="padding:1rem;"><div class="label" style="color:#64748b;">No geofences defined.</div></div>';
+      panel.innerHTML = '<div class="stat-card" style="padding:1rem;"><div class="label" style="color:#8B95AB;">No geofences defined.</div></div>';
     } else {
       panel.innerHTML = gfs.map(g => `
         <div class="geofence-item">
@@ -1441,8 +1491,8 @@ function drawGeofencesOnMap(gfs) {
   });
 }
 
-function openGeofenceModal() { document.getElementById('geofence-modal').classList.add('active'); }
-function closeGeofenceModal() { document.getElementById('geofence-modal').classList.remove('active'); }
+function openGeofenceModal() { openModal('geofence-modal', '#gf-name'); }
+function closeGeofenceModal() { closeModal('geofence-modal'); }
 function toggleGeofenceShape() {
   const shape = document.getElementById('gf-shape').value;
   document.getElementById('gf-circle-fields').style.display = shape === 'circle' ? 'block' : 'none';
@@ -1495,7 +1545,7 @@ async function loadPredictions() {
     if (preds.length > 0) { badge.style.display = 'inline'; badge.textContent = `${preds.length} risks`; }
     else { badge.style.display = 'none'; }
     if (preds.length === 0) {
-      panel.innerHTML = '<div class="stat-card" style="padding:1rem;"><div class="label" style="color:#64748b;">No active predictions. Run a scan to analyze telemetry trends.</div></div>';
+      panel.innerHTML = '<div class="stat-card" style="padding:1rem;"><div class="label" style="color:#8B95AB;">No active predictions. Run a scan to analyze telemetry trends.</div></div>';
     } else {
       panel.innerHTML = preds.map(p => {
         const riskClass = p.risk_score >= 0.7 ? 'risk-high' : p.risk_score >= 0.4 ? 'risk-medium' : 'risk-low';
@@ -1534,9 +1584,9 @@ async function loadSchedules() {
     const panel = document.getElementById('schedules-panel');
     const schedules = data.schedules || [];
     if (schedules.length === 0) {
-      panel.innerHTML = '<div class="stat-card" style="padding:1rem;"><div class="label" style="color:#64748b;">No scheduled campaigns.</div></div>';
+      panel.innerHTML = '<div class="stat-card" style="padding:1rem;"><div class="label" style="color:#8B95AB;">No scheduled campaigns.</div></div>';
     } else {
-      const statusColors = { scheduled: '#38bdf8', running: '#2DD4BF', completed: '#22C55E', cancelled: '#64748b', failed: '#EF4444', paused: '#F59E0B' };
+      const statusColors = { scheduled: '#38bdf8', running: '#2DD4BF', completed: '#22C55E', cancelled: '#8B95AB', failed: '#EF4444', paused: '#F59E0B' };
       panel.innerHTML = schedules.map(s => `
         <div class="schedule-item">
           <div>
@@ -1548,7 +1598,7 @@ async function loadSchedules() {
             </div>
           </div>
           <div style="display:flex;gap:0.5rem;align-items:center;">
-            <span class="schedule-status" style="background:${statusColors[s.status]||'#64748b'}20;color:${statusColors[s.status]||'#64748b'};">${s.status}</span>
+            <span class="schedule-status" style="background:${statusColors[s.status]||'#8B95AB'}20;color:${statusColors[s.status]||'#8B95AB'};">${s.status}</span>
             ${s.status === 'scheduled' ? `<button class="btn btn-danger" style="font-size:0.65rem;padding:0.2rem 0.5rem;" onclick="cancelSchedule('${s.id}')">Cancel</button>` : ''}
           </div>
         </div>`).join('');
@@ -1557,14 +1607,14 @@ async function loadSchedules() {
 }
 
 function openScheduleModal() {
-  document.getElementById('schedule-modal').classList.add('active');
+  openModal('schedule-modal', '#sched-name');
   loadFirmware().then(() => {
     const select = document.getElementById('sched-firmware');
     const fwSelect = document.getElementById('firmware-select');
     select.innerHTML = fwSelect.innerHTML;
   });
 }
-function closeScheduleModal() { document.getElementById('schedule-modal').classList.remove('active'); }
+function closeScheduleModal() { closeModal('schedule-modal'); }
 
 document.getElementById('schedule-form').addEventListener('submit', async (e) => {
   e.preventDefault();
@@ -1748,7 +1798,7 @@ async function loadWorkOrders() {
     if (open.length > 0) { badge.style.display = 'inline'; badge.textContent = `${open.length} open`; }
     else { badge.style.display = 'none'; }
     if ((data.work_orders || []).length === 0) {
-      panel.innerHTML = '<div class="stat-card" style="padding:1rem;"><div class="label" style="color:#64748b;">No open work orders.</div></div>';
+      panel.innerHTML = '<div class="stat-card" style="padding:1rem;"><div class="label" style="color:#8B95AB;">No open work orders.</div></div>';
     } else {
       const sevColor = { critical: '#f87171', warning: '#f59f00', info: '#38bdf8' };
       panel.innerHTML = data.work_orders.slice(0, 10).map(w => `
