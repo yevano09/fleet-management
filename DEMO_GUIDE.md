@@ -25,7 +25,7 @@ Three presentation styles for showcasing the Fleet Commander IoT device manageme
 
 2. **Open the Fleet Dashboard** at http://localhost:8181
 
-3. **Point out** the device table showing 5 online devices (Device-001 through Device-005) with firmware version `1.0.0`, green status badges, and varying signal strength.
+3. **Point out** the device table showing 15 online devices (Device-001 through Device-015) with firmware version `1.0.0`, green status badges, and varying signal strength.
 
 4. **Trigger a bulk OTA:**
    - Click **"Trigger OTA Update"**
@@ -106,7 +106,7 @@ Demo on the dashboard:
 
 ### 4. Grafana Observability (3 min)
 
-Open Grafana at http://localhost:3000 (admin/admin).
+Open Grafana at http://localhost:3050 (admin/admin; host port via `GRAFANA_PORT`, default 3000).
 
 Point out each panel:
 - **Active / Total Devices** — gauge showing online count
@@ -153,6 +153,22 @@ curl -X POST http://localhost:8181/devices/{DEVICE_ID}/heartbeat \
 ```
 
 The dashboard updates the uptime % and signal strength columns.
+
+OBD-grade fields ride on the same heartbeat (source, DTCs, fuel, odometer, tire pressures) and persist to telemetry:
+
+```bash
+curl -X POST http://localhost:8181/devices/{DEVICE_ID}/heartbeat \
+  -H "Content-Type: application/json" \
+  -d '{"uptime_percentage": 99.5, "signal_strength": -60, "source": "obd",
+       "dtc_codes": ["P0128"], "fuel_level_pct": 61.2, "odometer_km": 45210.5,
+       "tire_pressures": {"fl": 32.1, "fr": 31.9, "rl": 32.0, "rr": 30.5}}'
+```
+
+Verify they round-trip:
+
+```bash
+curl -s 'http://localhost:8181/telemetry/{DEVICE_ID}?hours=1&limit=1' | python -m json.tool
+```
 
 ### 3. Remote Config Push (via MQTT)
 
@@ -222,7 +238,7 @@ fleet_ota_deployments_total{status="triggered"} 5.0
 
 ### 8. Grafana Dashboard
 
-Navigate to http://localhost:3000 (admin/admin). Open the "Fleet Commander Overview" dashboard. Run multiple OTA triggers and watch:
+Navigate to http://localhost:3050 (admin/admin). Open the "Fleet Commander Overview" dashboard. Run multiple OTA triggers and watch:
 - The **Active Devices** stat update
 - **OTA Deployments by Status** pie chart reflect successes vs failures
 - **API Latency** show request duration histograms
@@ -266,7 +282,7 @@ After OTA failures, the anomaly panel will show failure rate spikes.
 #### Device Group Manager
 
 The Device Groups panel shows:
-- **Firmware version cohorts** (e.g., "Firmware 1.0.0 Cohort" — 5 devices)
+- **Firmware version cohorts** (e.g., "Firmware 1.0.0 Cohort" — 15 devices)
 - **Signal strength buckets** (Good / Moderate / Poor)
 - Each group includes device count, device IDs, and rationale
 
@@ -395,7 +411,7 @@ Heartbeats now include EV battery fields:
    ```bash
    curl -s http://localhost:8181/agents/v2g-dispatch | python -m json.tool
    ```
-4. Check Grafana at http://localhost:3000 — new V2G panels show:
+4. Check Grafana at http://localhost:3050 — new V2G panels show:
    - **V2G Active Discharges** — count of discharging devices
    - **Projected V2G Revenue** — total arbitrage revenue
    - **Battery Degradation Cost** — accumulated wear cost
@@ -755,6 +771,96 @@ GPS data is available via standard `fleet_active_devices` and `fleet_total_devic
 
 All Phase 1 agents can access GPS data through `async_list_devices()`, which returns `latitude` and `longitude` per device. Future enhancements include geofence-based alerts and location-aware device grouping.
 
+### 14. MVP AIoT Loop — Fault Injection → ML Prediction → Work Order → Twin
+
+The end-to-end AIoT story: a seeded anomaly model (IsolationForest, `mvp-iforest-v1`)
+scores telemetry windows, predictions carry their model version, escalated alerts
+auto-open work orders, and the twin view merges it all per asset.
+
+#### 14a. Inject a fault (simulator scenario)
+
+Run a one-off simulator with a thermal fault armed on the first device:
+
+```bash
+SIMULATOR_DEVICE_COUNT=3 SIMULATOR_SCENARIO=thermal SIMULATOR_FAULT_DEVICE_INDEX=0 \
+  python -m simulator.simulator
+```
+
+(Or set the same env vars on the `simulator` service.) Heartbeats now carry
+`source: "obd"` plus fuel/odometer/tire/DTC fields. Scenarios: `drift` (signal
+decay → `U0100`), `thermal` (temperature climb → `P0128`), `tpms` (tire sag → `C0745`).
+
+#### 14b. Run the ML scan
+
+```bash
+# auto = registry model when available, else legacy slopes
+curl -X POST http://localhost:8181/predictive/scan?model=auto
+
+# force each scorer for comparison
+curl -X POST http://localhost:8181/predictive/scan?model=ml
+curl -X POST http://localhost:8181/predictive/scan?model=legacy
+```
+
+Predictions show a `[mvp-iforest-v1]` (or `[legacy]`) chip on the dashboard's
+Predictive Maintenance cards. Model metrics:
+
+```bash
+curl -s http://localhost:8181/metrics | grep -E "fleet_ml_|fleet_workorder"
+```
+
+#### 14c. Alert → work order
+
+Re-fire the same anomaly 3× (or click **Work order** on any alert card) — the
+3rd escalation auto-opens a templated work order linked from the alert:
+
+```bash
+curl -X POST http://localhost:8181/workorders \
+  -H "Content-Type: application/json" \
+  -d '{"alert_id": "<ALERT_ID>"}'
+
+curl -X POST http://localhost:8181/workorders/<WO_ID>/close \
+  -H "Content-Type: application/json" \
+  -d '{"resolution": "Replaced antenna", "parts_used": ["antenna"], "cost": 12.5}'
+```
+
+Closing feeds the MTTR histogram (`fleet_workorder_close_latency_seconds`) and —
+once LOOP-01 lands — the training labels.
+
+#### 14d. Twin view
+
+```bash
+curl -s http://localhost:8181/twin/<DEVICE_ID> | python -m json.tool
+```
+
+One asset page: health score (0–100, documented formula), versioned shadow
+(desired vN / reported vM + sync flag), open risks with model versions, active
+alerts with WO links, relevant OTA campaigns, recent V2G dispatches. On the
+dashboard, click any device row → **Twin** tab.
+
+Versioned writes reject clobbers — try a stale `base_version` and watch the 409:
+
+```bash
+curl -X PUT http://localhost:8181/shadow/<DEVICE_ID> \
+  -H "Content-Type: application/json" \
+  -d '{"state": "desired", "payload": {"interval": 5}, "base_version": 1}'
+# -> 409 {"message": "stale base_version...", "current": {...}}
+```
+
+#### 14e. Eval gates (the honesty slide)
+
+```bash
+# 5 seeded tests: detect / attribute / lead-time / FP-rate / legacy blind spot
+docker compose --profile testing run --rm backend \
+  python -m pytest tests/test_ml_eval.py -v -p no:cacheprovider
+
+# Backtest table + promotion gates
+docker compose --profile testing run --rm backend python scripts/backtest.py --seeds 10
+```
+
+Expected: drift/thermal/tpms 10/10 detected, lead ~22–28 steps (bar: 8/8/4),
+FP 0% (gate 5%), legacy 0/10 on tpms. Quote these numbers — never claim accuracy
+without them (see `tests/eval_thresholds.json`).
+
 ### Cleanup
 
 ```bash
@@ -782,7 +888,7 @@ docker compose --profile demo up --build -d && sleep 30 && ./demo_pitch.sh
 
 ### What the Script Does
 
-The script walks through 12 demo beats with color-coded narration:
+The script walks through 12 scripted demo beats with color-coded narration (beats 13–15 are manual for now, see §14):
 
 1. **Fleet Overview** — Lists all devices, shows online count and stats
 2. **Telemetry Trends** — Fetches telemetry for a device, shows trend data
@@ -790,12 +896,15 @@ The script walks through 12 demo beats with color-coded narration:
 4. **OTA Trigger + Rollback** — Triggers OTA, shows 20% failure/rollback
 5. **Scheduled OTA** — Creates a scheduled campaign with blackout window
 6. **Geofencing** — Creates a geofence, shows map overlays
-7. **Predictive Maintenance** — Runs a predictive scan, shows risk predictions
-8. **Device Shadow** — Updates desired state, shows desired vs reported
+7. **Predictive Maintenance** — Runs a predictive scan (`?model=auto`), shows risk predictions with model-version chips
+8. **Device Shadow** — Updates desired state, shows desired vs reported (try a stale `base_version` for the 409)
 9. **Offline Command Queue** — Queues a command for an offline device
 10. **Audit Log** — Shows recent audit trail
 11. **V2G Arbitrage** — Runs V2G dispatch with spot prices
 12. **Aegis Auto-Remediation** — Triggers an on-demand scan
+13. **MVP AIoT Loop** — Fault injection → ML prediction → work order → twin view (§14, manual — not yet scripted)
+14. **Work Orders** — Auto-created on 3rd escalation, manual open/close with MTTR (§14c, manual — not yet scripted)
+15. **Eval Gates** — Seeded backtest table with lead-time/FP numbers (§14e, manual — not yet scripted)
 
 Each beat includes:
 - A narrated header (what we're about to do)

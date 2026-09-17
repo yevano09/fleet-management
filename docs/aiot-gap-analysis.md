@@ -1,6 +1,8 @@
 # Fleet Commander — AIoT Gap Analysis, Implementation Plan & Target Design
 
 **Status:** Design document (build order after approval of phasing in §9).
+**Build status (2026-09-16):** MVP slice DONE — DATA-01 (UC-30), ML-01+EVAL-01 (UC-29),
+WO-01 (UC-28), TWIN-01 (UC-15). See `USE_CASES.md` status map for the verified record.
 **Scope:** Compare Fleet Commander against commercial fleet platforms (Samsara, Geotab, Intangles-style digital twin) and edge-AIoT practice; register every gap; specify exactly what to change in this repo, file by file, and how each change moves an AIoT metric.
 **Honesty boundary (read first):** this repo today contains **no trained ML models and no on-device inference**. “Predictive” = hand-coded linear slopes (`app/predictive_maintenance.py`), V2G = greedy heuristic + mock prices (`app/v2g_optimizer.py`, `app/spot_prices.py`), Aegis = threshold rules (`app/aegis/engine.py`), agents = deterministic recommenders. Nothing in this doc may be claimed as “AI” until the eval harness in §7 exists and passes. Default benchmark focus: all three commercial lenses briefly (Samsara = safety/video-led, Geotab = open data-led, Intangles = twin/predictive-led).
 

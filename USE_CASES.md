@@ -47,6 +47,7 @@ Legend: **Done** = implemented + e2e-covered · **Done\*** = implemented with no
 | UC-27 | Run Production on PostgreSQL with Honest HA | Done | Postgres profile + leader/api roles |
 | UC-28 | Open/Track/Close Work Orders from Alerts (MVP WO-01) | Done | `POST/GET /workorders`, auto-create on 3rd escalation, MTTR histogram |
 | UC-29 | Score Predictions with Registry Models + Eval Gates (MVP ML-01/EVAL-01) | Done | Seeded IsolationForest, `?model=auto\|ml\|legacy`, `tests/test_ml_eval.py` 5/5, `scripts/backtest.py` gates pass |
+| UC-30 | Ingest OBD-Grade Telemetry + Inject Fault Scenarios (MVP DATA-01) | Done | `source/dtc/fuel/odometer/tires` on heartbeat+telemetry; simulator `drift\|thermal\|tpms` progressions as eval ground truth |
 
 Not yet a UC (AIoT roadmap, see `docs/aiot-gap-analysis.md` §4–§5): edge inference + offline tier, model OTA-canary, driver scoring/coaching, fuel-fraud, video events, BI/MCP export.
 

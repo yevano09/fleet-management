@@ -190,7 +190,7 @@ docker compose ps</code></pre>
           <tr><td>Fleet Dashboard</td><td><code>http://localhost:8181</code></td><td>Admin login or Google OAuth</td></tr>
           <tr><td>API Docs (Swagger)</td><td><code>http://localhost:8181/docs</code></td><td>—</td></tr>
           <tr><td>Prometheus</td><td><code>http://localhost:9090</code></td><td>—</td></tr>
-          <tr><td>Grafana</td><td><code>http://localhost:3000</code></td><td><code>admin / admin</code></td></tr>
+          <tr><td>Grafana</td><td><code>http://localhost:3050</code> (<code>GRAFANA_PORT</code>)</td><td><code>admin / admin</code></td></tr>
           <tr><td>MQTT Broker</td><td><code>localhost:1883</code></td><td>—</td></tr>
         </tbody>
       </table>
@@ -227,7 +227,7 @@ docker compose ps</code></pre>
                                     │
                             <span class="node">┌───────┴───────┐</span>
                             │   Grafana     │
-                            │   :3000       │
+                            │   :3050       │
                             <span class="node">└───────────────┘</span></div>
 
       <h3>Technology Stack</h3>
@@ -757,7 +757,7 @@ docker compose --profile testing run --build --rm tests
 │   ├── phase1_crew.py        # Crew AI agent definitions + fallbacks
 │   └── routers.py            # FastAPI router (/agents/*)
 ├── simulator/
-│   └── simulator.py          # Virtual device simulator (5 devices, 20% failure)
+│   └── simulator.py          # Virtual device simulator (15 devices, 20% failure, OBD + fault scenarios)
 ├── tests/
 │   └── test_e2e.py           # 22 end-to-end integration tests
 ├── website/                  # This documentation site

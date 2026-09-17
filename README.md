@@ -24,7 +24,7 @@ graph TB
     end
     subgraph Monitoring["Monitoring"]
         PRO["Prometheus :9090"]
-        GRA["Grafana :3000"]
+        GRA["Grafana :3050 (GRAFANA_PORT)"]
     end
     SIM & ESP <-->|MQTT iot/fleet/*| MOS
     MOS <-->|HTTP REST| API
@@ -91,7 +91,7 @@ docker compose --profile demo up --build -d
 docker compose ps
 ```
 
-This spins up: backend (FastAPI :8000), Mosquitto (:1883), Prometheus (:9090), Grafana (:3000), and a device simulator (5 virtual devices with 20% OTA failure rate). The first 3 devices are EVs with battery simulation.
+This spins up: backend (FastAPI :8000), Mosquitto (:1883), Prometheus (:9090), Grafana (`GRAFANA_PORT`, default :3000), and a device simulator (15 virtual devices with 20% OTA failure rate; OBD fields + fault scenarios via `SIMULATOR_OBD`/`SIMULATOR_SCENARIO`). The first 3 devices are EVs with battery simulation.
 
 ### Access the Interfaces
 
@@ -100,14 +100,17 @@ This spins up: backend (FastAPI :8000), Mosquitto (:1883), Prometheus (:9090), G
 | Fleet Dashboard | http://localhost:8181 | Google OAuth or admin/adminadmin |
 | API Docs (Swagger) | http://localhost:8181/docs | — |
 | Prometheus | http://localhost:9090 | — |
-| Grafana | http://localhost:3000 | admin / admin |
+| Grafana | http://localhost:3050 (`GRAFANA_PORT`) | admin / admin |
 
 ## Running Tests
 
 ```bash
-# Run E2E tests (40 tests) against a clean stack
+# Run E2E tests (45 tests) against a clean stack
 docker compose down --volumes --remove-orphans
 docker compose --profile testing run --build --rm tests
+
+# Run the seeded ML eval harness (5 tests, needs sklearn — in backend image)
+docker compose run --rm backend python -m pytest tests/test_ml_eval.py -q -p no:cacheprovider
 
 # Run unit tests locally (91 tests)
 python -m pytest tests/test_aegis_unit.py tests/test_v2g.py tests/test_simulator_unit.py tests/test_config_unit.py tests/test_session5_unit.py -q
@@ -119,11 +122,11 @@ python -m pytest tests/test_aegis_unit.py tests/test_v2g.py tests/test_simulator
 |---|---|---|
 | 1 | Telemetry Time-Series | Every heartbeat recorded; trend charts (Chart.js) in device detail modal |
 | 2 | Geofencing & Geo-alerts | Circle/polygon geofences with enter/exit alerts on the Leaflet map |
-| 3 | Predictive Maintenance Agent | Linear-regression trend analysis predicts failures before they happen |
+| 3 | Predictive Maintenance (ML + legacy) | Registry IsolationForest (`?model=auto\|ml\|legacy`) with eval gates; slope heuristics as fallback |
 | 4 | Scheduled OTA / Maintenance Windows | Cron-style OTA scheduling with blackout hours and canary % |
 | 5 | Offline Command Queue | Commands buffered for offline devices; delivered on reconnect |
 | 6 | Audit Log | Every mutating action recorded with actor, target, details |
-| 7 | Device Shadow / Digital Twin | Desired vs reported state (AWS IoT pattern); MQTT sync on reconnect |
+| 7 | Device Shadow / Digital Twin | Versioned desired vs reported state (409 on stale base); merged `GET /twin/{id}` view with health score |
 | 8 | Firmware Cryptographic Signing | Ed25519 sign/verify on firmware uploads |
 | 9 | Device Decommissioning Lifecycle | active → maintenance → decommissioned; QR-claim provisioning |
 | 10 | Real Spot-Price Integration | Pluggable spot-price provider for V2G (mock/iex/entsoe/api) |
@@ -131,7 +134,7 @@ python -m pytest tests/test_aegis_unit.py tests/test_v2g.py tests/test_simulator
 | 12 | RBAC Roles | user, admin, operator, viewer, fleet_manager |
 | 13 | Bulk CSV Import + QR-Claim | Mass device provisioning via CSV; pre-register + claim token flow |
 
-**Plus:** Aegis Auto-Remediation (8 rules, DLQ, dry-run), Alerting Pipeline (dedup, cooldown, escalation, Slack/Email/Webhook), V2G Arbitrage Optimizer, 6 AI Agents (dual-mode: heuristic + CrewAI LLM), Live Fleet Map (Leaflet), Google OAuth + Admin auth, ESP32 sketch.
+**Plus:** Aegis Auto-Remediation (8 rules, DLQ, dry-run), Alerting Pipeline (dedup, cooldown, escalation, Slack/Email/Webhook), Alert→Work Orders (auto-create on escalation, MTTR), V2G Arbitrage Optimizer, OBD-grade telemetry + fault-injection scenarios, 6 AI Agents (dual-mode: heuristic + CrewAI LLM), Live Fleet Map (Leaflet), Google OAuth + Admin auth, ESP32 sketch.
 
 ## API Reference
 
