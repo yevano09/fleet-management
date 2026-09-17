@@ -734,3 +734,20 @@ class TestE2E:
 
         r = requests.get(f"{BASE_URL}/twin/nonexistent-id", timeout=10)
         assert r.status_code == 404
+
+    def test_43_obd_dtc_and_ingest_metrics(self):
+        """P0-A: DTC decode table + OBD ingest quality metrics exist."""
+        r = requests.get(f"{BASE_URL}/obd/dtc/P0128", timeout=10)
+        assert r.status_code == 200
+        assert "thermostat" in r.json()["meaning"]
+        r = requests.get(f"{BASE_URL}/obd/dtc/ZZZZ", timeout=10)
+        assert r.status_code == 200
+        assert "unrecognized" in r.json()["meaning"]
+        r = requests.get(f"{BASE_URL}/obd/dtc", timeout=10)
+        assert r.status_code == 200
+        assert any(d["code"] == "U0100" for d in r.json()["dtcs"])
+
+        r = requests.get(f"{BASE_URL}/metrics", timeout=10)
+        for name in ("fleet_telemetry_duplicates_total", "fleet_telemetry_rejected_total",
+                     "fleet_telemetry_queue_depth", "fleet_telemetry_batches_total"):
+            assert name in r.text, f"P0-A metric {name} missing"

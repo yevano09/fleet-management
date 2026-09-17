@@ -12,4 +12,7 @@ topic readwrite iot/fleet/#
 pattern write iot/fleet/%u/register
 pattern write iot/fleet/%u/heartbeat
 pattern write iot/fleet/%u/status/#
+pattern write iot/fleet/%u/obd
+pattern write iot/fleet/%u/bms
+pattern write iot/fleet/%u/edge
 pattern read  iot/fleet/%u/command/#

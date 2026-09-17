@@ -4,6 +4,7 @@ import hashlib
 import hmac
 import asyncio
 import logging
+from collections import OrderedDict
 from datetime import datetime, timedelta, timezone
 from contextlib import asynccontextmanager
 
@@ -29,6 +30,7 @@ from app.routers.shadow import router as shadow_router
 from app.routers.predictive import router as predictive_router
 from app.routers.workorders import router as workorders_router
 from app.routers.twin import router as twin_router
+from app.routers.obd import router as obd_router
 from app.routers.webhooks import router as webhooks_router
 from app.routers.provisioning import router as provisioning_router
 from app.routers.orgs import router as orgs_router
@@ -42,6 +44,8 @@ from app.metrics import (
     v2g_active_discharges, device_soc, telemetry_points_total, command_queue_depth,
     command_queue_delivered_total, command_queue_expired_total, device_lifecycle_transitions,
     shadow_updates_total, device_cert_rejected_total,
+    telemetry_duplicates_total, telemetry_rejected_total,
+    telemetry_queue_depth, telemetry_batches_total,
 )
 from app.models import (
     Device, DeviceStatus, DeviceLifecycle, Firmware, Telemetry, CommandQueue,
@@ -75,36 +79,108 @@ def verify_firmware_download_token(device_id: str, sha256_hash: str, exp: int, t
     return hmac.compare_digest(expected, token or "")
 
 
-async def _record_telemetry(device: Device, payload: dict):
-    """Persist a telemetry data point (Feature 1)."""
+def _build_telemetry_point(device_id: str, payload: dict, timestamp):
+    """Build (not persist) a Telemetry row — shared by inline + batch paths."""
+    return Telemetry(
+        device_id=device_id,
+        timestamp=timestamp or utcnow(),
+        signal_strength=payload.get("signal_strength"),
+        uptime_percentage=payload.get("uptime_percentage"),
+        soc=payload.get("soc"),
+        soh=payload.get("soh"),
+        battery_temp=payload.get("battery_temp"),
+        plug_status=payload.get("plug_status"),
+        latitude=payload.get("latitude"),
+        longitude=payload.get("longitude"),
+        cpu_usage=payload.get("cpu_usage"),
+        memory_usage=payload.get("memory_usage"),
+        temperature=payload.get("temperature"),
+        # ── MVP DATA-01: OBD-grade fields (lists/dicts stored as JSON text) ──
+        source=payload.get("source", "sim"),
+        dtc_codes=json.dumps(payload["dtc_codes"]) if payload.get("dtc_codes") is not None else None,
+        fuel_level_pct=payload.get("fuel_level_pct"),
+        odometer_km=payload.get("odometer_km"),
+        tire_pressures=json.dumps(payload["tire_pressures"]) if payload.get("tire_pressures") is not None else None,
+    )
+
+
+async def _record_telemetry(device: Device, payload: dict, timestamp=None):
+    """Persist a telemetry data point (Feature 1 + P0-A event-time).
+
+    timestamp: producer event-time when the feed carries it (OBD/BMS);
+    defaults to server time. Lists/dicts stored as JSON text.
+    Inline single-commit path — used by the REST heartbeat (tooling, low
+    volume, needs read-after-write). The MQTT hot path batches via
+    enqueue_telemetry() instead.
+    """
     try:
-        point = Telemetry(
-            device_id=device.id,
-            timestamp=utcnow(),
-            signal_strength=payload.get("signal_strength"),
-            uptime_percentage=payload.get("uptime_percentage"),
-            soc=payload.get("soc"),
-            soh=payload.get("soh"),
-            battery_temp=payload.get("battery_temp"),
-            plug_status=payload.get("plug_status"),
-            latitude=payload.get("latitude"),
-            longitude=payload.get("longitude"),
-            cpu_usage=payload.get("cpu_usage"),
-            memory_usage=payload.get("memory_usage"),
-            temperature=payload.get("temperature"),
-            # ── MVP DATA-01: OBD-grade fields (lists/dicts stored as JSON text) ──
-            source=payload.get("source", "sim"),
-            dtc_codes=json.dumps(payload["dtc_codes"]) if payload.get("dtc_codes") is not None else None,
-            fuel_level_pct=payload.get("fuel_level_pct"),
-            odometer_km=payload.get("odometer_km"),
-            tire_pressures=json.dumps(payload["tire_pressures"]) if payload.get("tire_pressures") is not None else None,
-        )
         async with async_session_factory() as db:
-            db.add(point)
+            db.add(_build_telemetry_point(device.id, payload, timestamp))
             await db.commit()
         telemetry_points_total.labels(device=device.name).inc()
     except Exception:
         logger.debug("Telemetry record failed", exc_info=True)
+
+
+# ── P0-A2: bounded batch ingest ───────────────────────────────────────────────
+# The MQTT hot path enqueues (device_id, name, payload, timestamp) instead of
+# one-commit-per-point. The leader flusher batches ≤200 rows or 1s windows
+# into a single commit. Full queue sheds oldest-first and counts every drop —
+# backpressure is visible, never silent.
+_TELEMETRY_QUEUE_MAX = 5000
+_TELEMETRY_BATCH_MAX = 200
+_telemetry_queue: "asyncio.Queue" = asyncio.Queue(maxsize=_TELEMETRY_QUEUE_MAX)
+
+
+def enqueue_telemetry(device_id: str, device_name: str, payload: dict, timestamp=None) -> bool:
+    """Non-blocking enqueue for the MQTT hot path. Returns False when shed."""
+    try:
+        _telemetry_queue.put_nowait((device_id, device_name, dict(payload), timestamp))
+        telemetry_queue_depth.set(_telemetry_queue.qsize())
+        return True
+    except asyncio.QueueFull:
+        try:
+            _telemetry_queue.get_nowait()  # shed oldest
+        except asyncio.QueueEmpty:
+            pass
+        telemetry_rejected_total.labels(reason="queue_full").inc()
+        try:
+            _telemetry_queue.put_nowait((device_id, device_name, dict(payload), timestamp))
+        except asyncio.QueueFull:
+            return False
+        return True
+
+
+async def _telemetry_flusher():
+    """Leader-only batch commit loop (started in lifespan)."""
+    while True:
+        batch = []
+        try:
+            first = await asyncio.wait_for(_telemetry_queue.get(), timeout=1.0)
+            batch.append(first)
+            while len(batch) < _TELEMETRY_BATCH_MAX:
+                try:
+                    batch.append(_telemetry_queue.get_nowait())
+                except asyncio.QueueEmpty:
+                    break
+        except asyncio.TimeoutError:
+            continue
+        try:
+            async with async_session_factory() as db:
+                for device_id, _name, payload, timestamp in batch:
+                    db.add(_build_telemetry_point(device_id, payload, timestamp))
+                await db.commit()
+            for _device_id, name, _p, _t in batch:
+                telemetry_points_total.labels(device=name).inc()
+            for _ in batch:
+                _telemetry_queue.task_done()
+            telemetry_queue_depth.set(_telemetry_queue.qsize())
+            telemetry_batches_total.inc()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Telemetry batch commit failed (%d rows dropped)", len(batch))
+            telemetry_rejected_total.labels(reason="batch_commit_failed").inc(len(batch))
 
 
 async def _check_geofences(device_id: str):
@@ -342,6 +418,96 @@ async def handle_mqtt_register(payload: dict, verified_id: str | None = None):
     mqtt_messages_received.labels(topic="register").inc()
 
 
+# ── P0-A: OBD/BMS ingest guards ───────────────────────────────────────────────
+# Dedup key (device_id, event_time_iso, source) kills QoS1 redelivery dupes.
+# Odo guard rejects odometer rollbacks (sensor/parse faults, not time travel).
+_OBD_DEDUP_CAP = 20000
+_obd_seen: "OrderedDict[tuple, None]" = OrderedDict()
+_obd_last_odo: dict = {}
+
+
+def _obd_event_time(payload: dict):
+    """Producer event-time when the feed carries it, else server time."""
+    raw = payload.get("event_time")
+    if raw:
+        try:
+            ts = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+            return ts if ts.tzinfo else ts.replace(tzinfo=timezone.utc)
+        except Exception:
+            logger.debug("Bad event_time %r, using server time", raw)
+    return utcnow()
+
+
+def _obd_dedup_hit(device_id: str, event_iso: str, source: str) -> bool:
+    key = (device_id, event_iso, source)
+    if key in _obd_seen:
+        _obd_seen.move_to_end(key)
+        return True
+    _obd_seen[key] = None
+    while len(_obd_seen) > _OBD_DEDUP_CAP:
+        _obd_seen.popitem(last=False)
+    return False
+
+
+async def handle_mqtt_obd(device_id: str, payload: dict):
+    """P0-A: OBD-II gateway feed → telemetry with event-time + guards."""
+    source = payload.get("source", "obd")
+    event_time = _obd_event_time(payload)
+    event_iso = event_time.isoformat()
+    if _obd_dedup_hit(device_id, event_iso, source):
+        telemetry_duplicates_total.labels(source=source).inc()
+        return
+    odo = payload.get("odometer_km")
+    if odo is not None:
+        try:
+            odo = float(odo)
+            last = _obd_last_odo.get(device_id)
+            if last is not None and odo < last - 1.0:
+                telemetry_rejected_total.labels(reason="odo_rollback").inc()
+                logger.warning("Odo rollback rejected: %s %.1f < %.1f", device_id, odo, last)
+                return
+            _obd_last_odo[device_id] = odo
+        except (TypeError, ValueError):
+            pass
+    async with async_session_factory() as db:
+        result = await db.execute(select(Device).where(Device.id == device_id))
+        device = result.scalar_one_or_none()
+        if not device:
+            telemetry_rejected_total.labels(reason="unknown_device").inc()
+            return
+        was_offline = device.status == DeviceStatus.offline
+        device.last_seen = utcnow()
+        device.status = DeviceStatus.online
+        if payload.get("city"):
+            device.city = payload["city"]
+        await db.commit()
+        if was_offline:
+            active_devices.inc()
+        record = dict(payload)
+        record["source"] = source
+        enqueue_telemetry(device.id, device.name, record, timestamp=event_time)
+    mqtt_messages_received.labels(topic="obd").inc()
+
+
+async def handle_mqtt_bms(device_id: str, payload: dict):
+    """P0-A: BMS cell-data feed → battery telemetry.
+
+    Cell-voltage arrays have no dedicated column yet (lands in P0-B feature
+    views); known scalar battery fields are recorded now, arrays are logged.
+    """
+    cells = payload.get("cell_voltages")
+    if cells:
+        logger.debug("BMS cells from %s: %d cells (array storage lands in P0-B)", device_id, len(cells))
+    record = {
+        "soc": payload.get("soc"),
+        "soh": payload.get("soh"),
+        "battery_temp": payload.get("battery_temp") or payload.get("pack_temp"),
+        "plug_status": payload.get("plug_status"),
+        "source": payload.get("source", "bms"),
+    }
+    await handle_mqtt_obd(device_id, {**payload, **{k: v for k, v in record.items() if v is not None}})
+
+
 async def handle_mqtt_heartbeat(device_id: str, payload: dict):
     # P0 UC-25 defense-in-depth: ignore heartbeats from revoked identities.
     if settings.auth_mode == "strict" and device_id in await _revoked_device_ids():
@@ -382,8 +548,8 @@ async def handle_mqtt_heartbeat(device_id: str, payload: dict):
                 active_devices.inc()
                 asyncio.create_task(_flush_command_queue(device_id))
                 asyncio.create_task(_sync_shadow_to_device(device_id))
-            # Feature 1: record telemetry
-            asyncio.create_task(_record_telemetry(device, payload))
+            # Feature 1: record telemetry via the batch queue (P0-A2)
+            enqueue_telemetry(device.id, device.name, payload)
             # Feature 2: geofence check
             if "latitude" in payload and "longitude" in payload:
                 asyncio.create_task(_check_geofences(device_id))
@@ -554,6 +720,8 @@ async def lifespan(app: FastAPI):
     mqtt_client.on_heartbeat(handle_mqtt_heartbeat)
     mqtt_client.on_register(handle_mqtt_register)
     mqtt_client.on_v2g_status(handle_mqtt_v2g_status)  # Bug 1 fix: wire V2G status handler
+    mqtt_client.on_obd(handle_mqtt_obd)  # P0-A OBD-II gateway feed
+    mqtt_client.on_bms(handle_mqtt_bms)  # P0-A BMS cell-data feed
     mqtt_client.connect()
 
     from app.aegis.engine import AegisEngine, set_engine
@@ -585,6 +753,9 @@ async def lifespan(app: FastAPI):
     # Feature 5: start command queue flusher loop
     cmd_queue_task = asyncio.create_task(_command_queue_flusher_loop())
 
+    # P0-A2: start telemetry batch-commit worker (leader only)
+    telemetry_task = asyncio.create_task(_telemetry_flusher())
+
     # Auto-create GPS demo firmware record if it doesn't exist
     try:
         async with async_session_factory() as db:
@@ -614,7 +785,8 @@ async def lifespan(app: FastAPI):
     aegis_task.cancel()
     ota_scheduler_task.cancel()
     cmd_queue_task.cancel()
-    for task in [aegis_task, ota_scheduler_task, cmd_queue_task]:
+    telemetry_task.cancel()
+    for task in [aegis_task, ota_scheduler_task, cmd_queue_task, telemetry_task]:
         try:
             await task
         except asyncio.CancelledError:
@@ -656,6 +828,7 @@ app.include_router(shadow_router)
 app.include_router(predictive_router)
 app.include_router(workorders_router)
 app.include_router(twin_router)
+app.include_router(obd_router)
 app.include_router(webhooks_router)
 app.include_router(provisioning_router)
 app.include_router(orgs_router)      # P0 UC-26

@@ -54,6 +54,20 @@ telemetry_points_total = Counter(
     "fleet_telemetry_points_total", "Total telemetry data points recorded", ["device"]
 )
 
+# ── P0-A: ingest quality metrics ──────────────────────────────────────────────
+telemetry_duplicates_total = Counter(
+    "fleet_telemetry_duplicates_total", "QoS redeliveries suppressed by dedup key", ["source"]
+)
+telemetry_rejected_total = Counter(
+    "fleet_telemetry_rejected_total", "Telemetry points rejected before insert", ["reason"]
+)
+telemetry_queue_depth = Gauge(
+    "fleet_telemetry_queue_depth", "Pending telemetry rows in the batch queue"
+)
+telemetry_batches_total = Counter(
+    "fleet_telemetry_batches_total", "Batch commits flushed by the ingest worker"
+)
+
 # ── Feature 2: Geofence metrics ───────────────────────────────────────────────
 geofence_events_total = Counter(
     "fleet_geofence_events_total", "Total geofence enter/exit events", ["event_type"]
