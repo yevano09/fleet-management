@@ -11,6 +11,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import RedirectResponse
 from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.staticfiles import StaticFiles
 from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
 from fastapi.responses import Response
 from sqlalchemy import select, update, delete, text
@@ -809,6 +810,10 @@ app = FastAPI(
 )
 
 app.middleware("http")(metrics_middleware)
+
+# Phase 0 Tailwind: compiled stylesheet served alongside the legacy inline
+# <style> block (removed in Phase 3). Local dev: `npm run dev:css`.
+app.mount("/static", StaticFiles(directory="app/static"), name="static")
 
 app.include_router(auth.router)
 app.include_router(admin.router)

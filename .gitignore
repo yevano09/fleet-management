@@ -28,3 +28,6 @@ certs/*
 
 # Generated production verification secrets
 .env.p0
+# Tailwind build output (built in Docker; `npm run dev:css` locally)
+app/static/app.css
+node_modules/

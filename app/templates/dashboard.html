@@ -8,6 +8,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Sora:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<link rel="stylesheet" href="/static/app.css" />
 <script src="https://unpkg.com/htmx.org@2.0.3"></script>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
@@ -212,36 +213,36 @@ td code { font-family:var(--font-mono); font-size:0.78em; background:rgba(45,212
 </div>
 </header>
 
-<section class="stats">
-<div class="stat-card online">
-<div class="label">Online Devices</div>
-<div class="value" id="stat-online">0</div>
-</div>
-<div class="stat-card offline">
-<div class="label">Offline Devices</div>
-<div class="value" id="stat-offline">0</div>
-</div>
-<div class="stat-card ota">
-<div class="label">OTA In Progress</div>
-<div class="value" id="stat-ota-progress">0</div>
-</div>
-<div class="stat-card">
-<div class="label">OTA Success Rate</div>
-<div class="value" id="stat-ota-rate">0%</div>
-</div>
-<div class="stat-card">
-<div class="label">Active Geofences</div>
-<div class="value" id="stat-geofences" style="color:var(--purple);">0</div>
-</div>
-<div class="stat-card">
-<div class="label">Failure Predictions</div>
-<div class="value" id="stat-predictions" style="color:var(--amber);">0</div>
-</div>
-<div class="stat-card">
-<div class="label">Queued Commands</div>
-<div class="value" id="stat-queue" style="color:var(--teal);">0</div>
-</div>
-</section>
+ <section class="grid gap-4 px-8 py-6 [grid-template-columns:repeat(auto-fit,minmax(200px,1fr))]">
+ <div class="rounded-[0.625rem] border border-line bg-surface p-5 transition-colors hover:border-teal/20">
+ <div class="text-[0.7rem] uppercase tracking-[0.08em] text-muted">Online Devices</div>
+ <div class="mt-1 font-display text-3xl font-semibold tracking-[-0.02em] text-green" id="stat-online">0</div>
+ </div>
+ <div class="rounded-[0.625rem] border border-line bg-surface p-5 transition-colors hover:border-teal/20">
+ <div class="text-[0.7rem] uppercase tracking-[0.08em] text-muted">Offline Devices</div>
+ <div class="mt-1 font-display text-3xl font-semibold tracking-[-0.02em] text-red" id="stat-offline">0</div>
+ </div>
+ <div class="rounded-[0.625rem] border border-line bg-surface p-5 transition-colors hover:border-teal/20">
+ <div class="text-[0.7rem] uppercase tracking-[0.08em] text-muted">OTA In Progress</div>
+ <div class="mt-1 font-display text-3xl font-semibold tracking-[-0.02em] text-teal" id="stat-ota-progress">0</div>
+ </div>
+ <div class="rounded-[0.625rem] border border-line bg-surface p-5 transition-colors hover:border-teal/20">
+ <div class="text-[0.7rem] uppercase tracking-[0.08em] text-muted">OTA Success Rate</div>
+ <div class="mt-1 font-display text-3xl font-semibold tracking-[-0.02em] text-ink" id="stat-ota-rate">0%</div>
+ </div>
+ <div class="rounded-[0.625rem] border border-line bg-surface p-5 transition-colors hover:border-teal/20">
+ <div class="text-[0.7rem] uppercase tracking-[0.08em] text-muted">Active Geofences</div>
+ <div class="mt-1 font-display text-3xl font-semibold tracking-[-0.02em] text-purple" id="stat-geofences">0</div>
+ </div>
+ <div class="rounded-[0.625rem] border border-line bg-surface p-5 transition-colors hover:border-teal/20">
+ <div class="text-[0.7rem] uppercase tracking-[0.08em] text-muted">Failure Predictions</div>
+ <div class="mt-1 font-display text-3xl font-semibold tracking-[-0.02em] text-amber" id="stat-predictions">0</div>
+ </div>
+ <div class="rounded-[0.625rem] border border-line bg-surface p-5 transition-colors hover:border-teal/20">
+ <div class="text-[0.7rem] uppercase tracking-[0.08em] text-muted">Queued Commands</div>
+ <div class="mt-1 font-display text-3xl font-semibold tracking-[-0.02em] text-teal" id="stat-queue">0</div>
+ </div>
+ </section>
 
 <div class="map-section">
 <div class="toolbar">
@@ -301,17 +302,17 @@ td code { font-family:var(--font-mono); font-size:0.78em; background:rgba(45,212
  </div>
  </div>
 
- <div class="ota-section">
- <div class="toolbar">
- <h2>Maintenance <span id="wo-badge" style="font-size:0.75rem;padding:0.125rem 0.5rem;border-radius:9999px;background:rgba(45,212,191,0.15);color:var(--teal);vertical-align:middle;display:none;">0 open</span></h2>
- <div class="actions">
- <button class="btn btn-outline" onclick="loadWorkOrders()" style="font-size:0.75rem;">Refresh</button>
- </div>
- </div>
- <div id="workorders-panel" style="margin-bottom:1.5rem;">
- <div class="stat-card" style="padding:1rem;"><div class="label" style="color:#8B95AB;">No open work orders.</div></div>
- </div>
- </div>
+  <div class="mt-8">
+  <div class="mb-4 flex items-center justify-between">
+  <h2 class="font-display text-[1.15rem] tracking-[-0.01em] text-ink">Maintenance <span id="wo-badge" class="hidden rounded-full bg-teal/15 px-2 py-0.5 align-middle text-xs text-teal">0 open</span></h2>
+  <div class="flex gap-2">
+  <button class="rounded-lg border border-line bg-transparent px-4 py-1.5 text-xs font-medium text-body transition-colors hover:border-teal hover:bg-surface" onclick="loadWorkOrders()">Refresh</button>
+  </div>
+  </div>
+  <div id="workorders-panel" class="mb-6">
+  <div class="rounded-[0.625rem] border border-line bg-surface p-4"><div class="text-[0.7rem] uppercase tracking-[0.08em] text-muted">No open work orders.</div></div>
+  </div>
+  </div>
 
 <div class="ota-section">
 <div class="toolbar">
@@ -1073,19 +1074,21 @@ async function loadAlerts() {
       badge.style.display = 'inline';
       badge.textContent = criticalCount > 0 ? `${criticalCount} critical` : `${warningCount} warning`;
       panel.innerHTML = alerts.map(a => {
-        const borderColor = a.severity === 'critical' ? '#f87171' : a.severity === 'warning' ? '#f59f00' : '#38bdf8';
+        const border = a.severity === 'critical' ? 'border-l-red-400' : a.severity === 'warning' ? 'border-l-amber-500' : 'border-l-sky-400';
+        const sevText = a.severity === 'critical' ? 'text-red-400' : a.severity === 'warning' ? 'text-amber-500' : 'text-sky-400';
         const icon = a.severity === 'critical' ? '!' : a.severity === 'warning' ? '!' : 'i';
-        return `<div class="stat-card" style="padding:1rem;border-left:3px solid ${borderColor};display:flex;flex-direction:column;gap:0.5rem;">
-          <div style="display:flex;justify-content:space-between;align-items:center;">
-            <div style="font-size:0.75rem;font-weight:600;color:${borderColor};text-transform:uppercase;letter-spacing:0.05em;">${icon} ${a.severity}</div>
-            <div style="font-size:0.7rem;color:#8B95AB;">x${a.count}</div>
+        const miniBtn = 'rounded border border-line bg-transparent px-2 py-1 text-[0.7rem] font-medium text-body transition-colors hover:border-teal hover:bg-surface';
+        return `<div class="rounded-[0.625rem] border border-line border-l-2 ${border} bg-surface p-4 flex flex-col gap-2">
+          <div class="flex items-center justify-between">
+            <div class="text-xs font-semibold uppercase tracking-[0.05em] ${sevText}"><span aria-hidden="true">${icon}</span> ${a.severity}</div>
+            <div class="text-[0.7rem] text-muted">x${a.count}</div>
           </div>
-          <div style="font-size:0.85rem;">${a.message}</div>
-          <div style="font-size:0.7rem;color:#8B95AB;">Type: ${a.type} | Status: ${a.status}${a.work_order_id ? ` | WO: <span style="color:var(--teal);font-family:monospace;">${a.work_order_id.substring(0,8)}…</span>` : ''}</div>
-          <div style="display:flex;gap:0.5rem;margin-top:0.25rem;">
-            <button class="btn btn-outline" style="padding:0.25rem 0.5rem;font-size:0.7rem;" onclick="ackAlert('${a.id}')">Acknowledge</button>
-            <button class="btn btn-outline" style="padding:0.25rem 0.5rem;font-size:0.7rem;" onclick="resolveAlert('${a.id}')">Resolve</button>
-            ${a.work_order_id ? '' : `<button class="btn btn-outline" style="padding:0.25rem 0.5rem;font-size:0.7rem;" onclick="createWorkOrder('${a.id}')">Work order</button>`}
+          <div class="text-[0.85rem]">${a.message}</div>
+          <div class="text-[0.7rem] text-muted">Type: ${a.type} | Status: ${a.status}${a.work_order_id ? ` | WO: <span class="font-mono text-teal">${a.work_order_id.substring(0,8)}…</span>` : ''}</div>
+          <div class="mt-1 flex gap-2">
+            <button class="${miniBtn}" onclick="ackAlert('${a.id}')">Acknowledge</button>
+            <button class="${miniBtn}" onclick="resolveAlert('${a.id}')">Resolve</button>
+            ${a.work_order_id ? '' : `<button class="${miniBtn}" onclick="createWorkOrder('${a.id}')">Work order</button>`}
           </div>
         </div>`;
       }).join('');
@@ -1429,32 +1432,32 @@ function renderTelemetryCharts(points, device) {
 
 async function loadTwinForDevice(deviceId) {
   const display = document.getElementById('twin-display');
-  display.innerHTML = '<div style="color:var(--text-muted);">Loading twin…</div>';
+  display.innerHTML = '<div class="text-muted">Loading twin…</div>';
   try {
     const t = await fetchJson(`/twin/${deviceId}`);
     const score = t.health_score ?? 0;
-    const scoreColor = score >= 80 ? 'var(--green)' : score >= 50 ? 'var(--amber)' : 'var(--red)';
+    const scoreText = score >= 80 ? 'text-green' : score >= 50 ? 'text-amber' : 'text-red';
     const risks = (t.open_risks || []).map(r => `
-      <div style="display:flex;justify-content:space-between;padding:0.3rem 0;border-bottom:1px solid var(--border);font-size:0.78rem;">
-        <span><strong>${escapeHtml(r.risk_type)}</strong> <span style="color:var(--text-muted);">[${escapeHtml(r.model_version || 'legacy')}]</span></span>
-        <span style="color:${r.risk_score >= 0.7 ? 'var(--red)' : 'var(--amber)'};">${(r.risk_score * 100).toFixed(0)}%</span>
-      </div>`).join('') || '<div style="color:var(--text-muted);font-size:0.78rem;">No open risks</div>';
+      <div class="flex justify-between border-b border-line py-1.5 text-[0.78rem]">
+        <span><strong>${escapeHtml(r.risk_type)}</strong> <span class="text-muted">[${escapeHtml(r.model_version || 'legacy')}]</span></span>
+        <span class="${r.risk_score >= 0.7 ? 'text-red' : 'text-amber'}">${(r.risk_score * 100).toFixed(0)}%</span>
+      </div>`).join('') || '<div class="text-muted text-[0.78rem]">No open risks</div>';
     const alerts = (t.active_alerts || []).map(a => `
-      <div style="font-size:0.78rem;padding:0.2rem 0;">⚠ ${escapeHtml(a.type)} — ${escapeHtml(a.severity)}${a.work_order_id ? ' (WO open)' : ''}</div>`).join('');
+      <div class="py-1 text-[0.78rem]"><span aria-hidden="true">⚠</span> ${escapeHtml(a.type)} — ${escapeHtml(a.severity)}${a.work_order_id ? ' (WO open)' : ''}</div>`).join('');
     const sh = t.shadow || {};
     display.innerHTML = `
-      <div style="display:flex;align-items:center;gap:0.75rem;margin-bottom:0.75rem;">
-        <div style="font-family:var(--font-display);font-size:1.6rem;font-weight:700;color:${scoreColor};">${score}</div>
-        <div style="font-size:0.75rem;color:var(--text-muted);">twin health<br>${escapeHtml(t.status || '')} · ${escapeHtml(t.lifecycle_status || 'active')}</div>
+      <div class="mb-3 flex items-center gap-3">
+        <div class="font-display text-[1.6rem] font-bold ${scoreText}">${score}</div>
+        <div class="text-xs text-muted">twin health<br>${escapeHtml(t.status || '')} · ${escapeHtml(t.lifecycle_status || 'active')}</div>
       </div>
-      <div style="margin-bottom:0.75rem;"><strong>Shadow:</strong>
-        <span style="font-size:0.75rem;color:var(--text-muted);">desired v${sh.desired ? sh.desired.version : '–'} (${escapeHtml((sh.desired || {}).source || '–')}) / reported v${sh.reported ? sh.reported.version : '–'} (${escapeHtml((sh.reported || {}).source || '–')}) — ${t.shadow && t.shadow.in_sync ? '<span style="color:var(--green);">in sync</span>' : '<span style="color:var(--amber);">drifted</span>'}</span>
+      <div class="mb-3"><strong>Shadow:</strong>
+        <span class="text-xs text-muted">desired v${sh.desired ? sh.desired.version : '–'} (${escapeHtml((sh.desired || {}).source || '–')}) / reported v${sh.reported ? sh.reported.version : '–'} (${escapeHtml((sh.reported || {}).source || '–')}) — ${t.shadow && t.shadow.in_sync ? '<span class="text-green">in sync</span>' : '<span class="text-amber">drifted</span>'}</span>
       </div>
-      <div style="margin-bottom:0.5rem;"><strong>Open risks (${(t.open_risks || []).length})</strong></div>
-      <div style="margin-bottom:0.75rem;">${risks}</div>
-      ${alerts ? `<div style="margin-bottom:0.5rem;"><strong>Alerts</strong></div><div style="margin-bottom:0.5rem;">${alerts}</div>` : ''}
-      <div style="font-size:0.72rem;color:var(--text-muted);">Last sync: ${t.last_sync ? new Date(t.last_sync + 'Z').toLocaleString() : 'N/A'}${(t.relevant_schedules || []).length ? ` · ${t.relevant_schedules.length} campaign(s) relevant` : ''}</div>`;
-  } catch { display.innerHTML = '<div style="color:var(--text-muted);">No twin data</div>'; }
+      <div class="mb-2"><strong>Open risks (${(t.open_risks || []).length})</strong></div>
+      <div class="mb-3">${risks}</div>
+      ${alerts ? `<div class="mb-2"><strong>Alerts</strong></div><div class="mb-2">${alerts}</div>` : ''}
+      <div class="text-[0.72rem] text-muted">Last sync: ${t.last_sync ? new Date(t.last_sync + 'Z').toLocaleString() : 'N/A'}${(t.relevant_schedules || []).length ? ` · ${t.relevant_schedules.length} campaign(s) relevant` : ''}</div>`;
+  } catch { display.innerHTML = '<div class="text-muted">No twin data</div>'; }
 }
 
 async function loadShadowForDevice(deviceId) {
@@ -1635,16 +1638,17 @@ async function loadPredictions() {
       panel.innerHTML = '<div class="stat-card" style="padding:1rem;"><div class="label" style="color:#8B95AB;">No active predictions. Run a scan to analyze telemetry trends.</div></div>';
     } else {
       panel.innerHTML = preds.map(p => {
-        const riskClass = p.risk_score >= 0.7 ? 'risk-high' : p.risk_score >= 0.4 ? 'risk-medium' : 'risk-low';
-        const riskColor = p.risk_score >= 0.7 ? 'var(--red)' : p.risk_score >= 0.4 ? 'var(--amber)' : 'var(--green)';
-        return `<div class="stat-card" style="padding:1rem;border-left:3px solid ${riskColor};">
-          <div style="display:flex;justify-content:space-between;align-items:center;">
-            <strong style="color:${riskColor};">${p.risk_type.replace(/_/g,' ').titleCase()}</strong>
-            <span style="font-size:0.7rem;color:var(--text-muted);">${(p.device_id||'').substring(0,8)}...</span>
+        const bar = p.risk_score >= 0.7 ? 'bg-red' : p.risk_score >= 0.4 ? 'bg-amber' : 'bg-green';
+        const edge = p.risk_score >= 0.7 ? 'border-l-red-400' : p.risk_score >= 0.4 ? 'border-l-amber-500' : 'border-l-green-500';
+        const title = p.risk_score >= 0.7 ? 'text-red' : p.risk_score >= 0.4 ? 'text-amber' : 'text-green';
+        return `<div class="rounded-[0.625rem] border border-line border-l-2 ${edge} bg-surface p-4">
+          <div class="flex items-center justify-between">
+            <strong class="${title}">${p.risk_type.replace(/_/g,' ').titleCase()}</strong>
+            <span class="text-[0.7rem] text-muted">${(p.device_id||'').substring(0,8)}...</span>
           </div>
-          <div style="font-size:0.85rem;margin-top:0.25rem;">${p.recommendation || ''}</div>
-          <div style="font-size:0.75rem;color:var(--text-muted);margin-top:0.25rem;">Risk: ${(p.risk_score*100).toFixed(0)}% | Confidence: ${(p.confidence*100).toFixed(0)}%${p.predicted_hours_to_failure ? ` | ETA: ${p.predicted_hours_to_failure.toFixed(0)}h` : ''} <span style="font-family:monospace;color:var(--teal);">[${p.model_version || 'legacy'}]</span></div>
-          <div class="risk-meter"><div class="risk-meter-fill ${riskClass}" style="width:${p.risk_score*100}%;"></div></div>
+          <div class="mt-1 text-[0.85rem]">${p.recommendation || ''}</div>
+          <div class="mt-1 text-xs text-muted">Risk: ${(p.risk_score*100).toFixed(0)}% | Confidence: ${(p.confidence*100).toFixed(0)}%${p.predicted_hours_to_failure ? ` | ETA: ${p.predicted_hours_to_failure.toFixed(0)}h` : ''} <span class="font-mono text-teal">[${p.model_version || 'legacy'}]</span></div>
+          <div class="mt-1 h-1.5 overflow-hidden rounded bg-abyss"><div class="h-full rounded transition-all ${bar}" style="width:${p.risk_score*100}%;"></div></div>
         </div>`;
       }).join('');
     }
@@ -1890,20 +1894,20 @@ async function loadWorkOrders() {
     if (open.length > 0) { badge.style.display = 'inline'; badge.textContent = `${open.length} open`; }
     else { badge.style.display = 'none'; }
     if ((data.work_orders || []).length === 0) {
-      panel.innerHTML = '<div class="stat-card" style="padding:1rem;"><div class="label" style="color:#8B95AB;">No open work orders.</div></div>';
+      panel.innerHTML = '<div class="rounded-[0.625rem] border border-line bg-surface p-4"><div class="text-[0.7rem] uppercase tracking-[0.08em] text-muted">No open work orders.</div></div>';
     } else {
-      const sevColor = { critical: '#f87171', warning: '#f59f00', info: '#38bdf8' };
+      const sevText = { critical: 'text-red-400', warning: 'text-amber-500', info: 'text-sky-400' };
       panel.innerHTML = data.work_orders.slice(0, 10).map(w => `
-        <div class="schedule-item">
+        <div class="mb-2 flex items-center justify-between rounded-lg border border-line p-3">
           <div>
             <strong>${escapeHtml(w.title)}</strong>
-            <div style="font-size:0.75rem;color:var(--text-muted);margin-top:0.25rem;">
-              <span style="color:${sevColor[w.severity] || '#94a3b8'};">${escapeHtml(w.severity)}</span>
-              · ${escapeHtml(w.status)}${w.assignee ? ` · ${escapeHtml(w.assignee)}` : ''}${w.alert_id ? ` · from alert <span style="font-family:monospace;">${w.alert_id.substring(0, 8)}…</span>` : ''}
+            <div class="mt-1 text-xs text-muted">
+              <span class="${sevText[w.severity] || 'text-slate-400'}">${escapeHtml(w.severity)}</span>
+              · ${escapeHtml(w.status)}${w.assignee ? ` · ${escapeHtml(w.assignee)}` : ''}${w.alert_id ? ` · from alert <span class="font-mono">${w.alert_id.substring(0, 8)}…</span>` : ''}
             </div>
           </div>
-          <div style="display:flex;gap:0.5rem;align-items:center;">
-            ${w.status !== 'done' && w.status !== 'cancelled' ? `<button class="btn btn-success" style="font-size:0.65rem;padding:0.2rem 0.5rem;" onclick="closeWorkOrder('${w.id}')">Close</button>` : '<span style="font-size:0.7rem;color:var(--text-muted);">closed</span>'}
+          <div class="flex items-center gap-2">
+            ${w.status !== 'done' && w.status !== 'cancelled' ? `<button class="rounded border border-green/20 bg-green/10 px-2 py-0.5 text-[0.65rem] font-medium text-green hover:bg-green/20" onclick="closeWorkOrder('${w.id}')">Close</button>` : '<span class="text-xs text-muted">closed</span>'}
           </div>
         </div>`).join('');
     }

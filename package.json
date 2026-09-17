@@ -1,0 +1,14 @@
+{
+  "name": "fleet-commander-ui",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Tailwind CSS build for the Fleet Commander dashboard (Jinja + vanilla JS)",
+  "scripts": {
+    "build:css": "npx @tailwindcss/cli -i ./assets/app.css -o ./app/static/app.css --minify",
+    "dev:css": "npx @tailwindcss/cli -i ./assets/app.css -o ./app/static/app.css --watch"
+  },
+  "devDependencies": {
+    "@tailwindcss/cli": "^4.1.0",
+    "tailwindcss": "^4.1.0"
+  }
+}

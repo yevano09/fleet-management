@@ -1,0 +1,64 @@
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css" layer(utilities);
+
+/* NOTE: preflight deliberately excluded — the legacy inline stylesheet owns
+   all resets until the Phase 3 cleanup. Import it only after legacy removal. */
+
+/* Fleet Commander design tokens (mirror the legacy :root block in
+   app/templates/dashboard.html until Phase 3 removes it). */
+@theme {
+  --color-abyss: #0a0d1a;
+  --color-surface: #111629;
+  --color-raised: #1a2040;
+  --color-teal: #2dd4bf;
+  --color-amber: #f59e0b;
+  --color-ink: #eaeef5;
+  --color-body: #b8c5d4;
+  --color-muted: #8b95ab;
+  --color-line: #1e2740;
+  --color-green: #22c55e;
+  --color-red: #ef4444;
+  --color-purple: #a78bfa;
+
+  --font-display: "Sora", system-ui, sans-serif;
+  --font-body: "Inter", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", "Fira Code", monospace;
+}
+
+/* Base layer: global element defaults. Utilities always win over these. */
+@layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+  body {
+    font-family: var(--font-body);
+    background: var(--color-abyss);
+    color: var(--color-body);
+  }
+  ::selection {
+    background: var(--color-teal);
+    color: var(--color-abyss);
+  }
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: var(--color-abyss);
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--color-line);
+    border-radius: 3px;
+  }
+  :focus-visible {
+    outline: 2px solid var(--color-teal);
+    outline-offset: 2px;
+  }
+}
+
+/* Dynamic utilities: real Tailwind utilities composed at runtime in JS.
+   NOTE: legacy component classes (badge-*, mqtt-badge, aegis-*, risk-*,
+   stat-card, modal, toast, …) are custom CSS and stay in the inline legacy
+   stylesheet until their Phase 1 conversion — Tailwind cannot generate them.
+   Only utilities below are emitted on demand. */
+@source inline("text-teal text-amber text-green text-red text-purple text-ink text-body text-muted border-teal border-line bg-abyss bg-surface bg-raised");
