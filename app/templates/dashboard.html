@@ -206,6 +206,8 @@ td code { font-family:var(--font-mono); font-size:0.78em; background:rgba(45,212
   <a href="/auth/login" class="btn btn-primary" style="text-decoration:none;font-size:0.875rem;">Sign in with Google</a>
   {% endif %}
   <span id="mqtt-status" class="mqtt-badge disconnected">MQTT: Disconnected</span>
+  <span id="live-badge" class="mqtt-badge connected" role="status">Live</span>
+  <button class="btn btn-outline" onclick="toggleLive()" id="live-toggle" aria-pressed="true" style="font-size:0.75rem;">Pause live</button>
   <button class="btn btn-outline" onclick="refreshAll()">Refresh</button>
 </div>
 </header>
@@ -351,6 +353,13 @@ td code { font-family:var(--font-mono); font-size:0.78em; background:rgba(45,212
  <tr><td colspan="9" style="text-align:center;padding:2rem;color:#8B95AB;">Loading devices...</td></tr>
  </tbody>
  </table>
+ </div>
+ <div id="device-pager" style="display:flex;justify-content:space-between;align-items:center;margin-top:0.5rem;font-size:0.78rem;color:var(--text-muted);">
+ <span id="device-page-info" role="status">–</span>
+ <div style="display:flex;gap:0.5rem;">
+ <button class="btn btn-outline" style="font-size:0.72rem;padding:0.25rem 0.75rem;" onclick="changeDevicePage(-1)" id="device-prev">← Prev</button>
+ <button class="btn btn-outline" style="font-size:0.72rem;padding:0.25rem 0.75rem;" onclick="changeDevicePage(1)" id="device-next">Next →</button>
+ </div>
  </div>
 
  <div class="ota-section">
@@ -809,7 +818,66 @@ function tabKey(e, tab) {
   if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); switchDetailTab(tab); }
 }
 
+// ── Device table: pagination + selection/focus preservation ──
+// Re-renders every 5s must not lose checkbox selection or keyboard focus.
+const DEVICE_PAGE_SIZE = 10;
+let devicePage = 0;
+const selectedDevices = new Set();
+
+function syncSelection(cb) {
+  if (cb.checked) selectedDevices.add(cb.value);
+  else selectedDevices.delete(cb.value);
+  updateDevicePagerSelection();
+}
+
+function updateDevicePagerSelection() {
+  const info = document.getElementById('device-page-info');
+  if (info && info.dataset.total) {
+    info.textContent = `${info.dataset.label} · ${selectedDevices.size} selected`;
+  }
+}
+
+function changeDevicePage(delta) {
+  devicePage = Math.max(0, devicePage + delta);
+  loadDashboard();
+}
+
+function selectedOrCheckedIds() {
+  // Union of persisted selection + anything currently ticked on-page.
+  const ids = new Set(selectedDevices);
+  document.querySelectorAll('.device-check:checked').forEach(cb => ids.add(cb.value));
+  return Array.from(ids);
+}
+
+function isAnyModalOpen() {
+  return ['device-detail-modal', 'ota-modal', 'onboard-modal', 'geofence-modal', 'schedule-modal']
+    .some(id => document.getElementById(id).classList.contains('active'));
+}
+
+// ── Live/pause: auto-pause table refresh while a dialog is open ──
+let livePaused = false;
+function toggleLive() {
+  livePaused = !livePaused;
+  const btn = document.getElementById('live-toggle');
+  const badge = document.getElementById('live-badge');
+  btn.textContent = livePaused ? 'Resume live' : 'Pause live';
+  btn.setAttribute('aria-pressed', String(!livePaused));
+  badge.textContent = livePaused ? 'Paused' : 'Live';
+  badge.className = livePaused ? 'mqtt-badge disconnected' : 'mqtt-badge connected';
+  if (!livePaused) refreshAll();
+}
+
 async function loadDashboard() {
+  const badge = document.getElementById('live-badge');
+  const autoPaused = !livePaused && isAnyModalOpen();
+  if (badge) {
+    const label = livePaused ? 'Paused' : (autoPaused ? 'Paused (dialog)' : 'Live');
+    if (badge.textContent !== label) {
+      badge.textContent = label;
+      badge.className = label === 'Live' ? 'mqtt-badge connected' : 'mqtt-badge disconnected';
+    }
+  }
+  if (livePaused || autoPaused) return; // never yank context mid-dialog
   try {
     const [devicesData, otaData] = await Promise.all([
       fetchJson('/devices'),
@@ -818,11 +886,19 @@ async function loadDashboard() {
 
     const tbody = document.getElementById('device-tbody');
     const devices = devicesData.devices || [];
+    // Remember keyboard focus so the re-render can restore it.
+    const activeRow = document.activeElement && document.activeElement.closest
+      ? document.activeElement.closest('tr.device-row') : null;
+    const focusedId = activeRow ? activeRow.dataset.id : null;
 
     if (devices.length === 0) {
       tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:2rem;color:#8B95AB;">No devices registered. Wait for simulators to connect.</td></tr>';
+      devicePage = 0;
     } else {
-      tbody.innerHTML = devices.map(d => {
+      const pageCount = Math.max(1, Math.ceil(devices.length / DEVICE_PAGE_SIZE));
+      devicePage = Math.min(devicePage, pageCount - 1);
+      const page = devices.slice(devicePage * DEVICE_PAGE_SIZE, (devicePage + 1) * DEVICE_PAGE_SIZE);
+      tbody.innerHTML = page.map(d => {
         const statusClass = d.status === 'online' ? 'badge-online' : 'badge-offline';
         const statusDot = d.status === 'online' ? '●' : '○';
         const signal = d.signal_strength != null ? d.signal_strength : 'N/A';
@@ -833,7 +909,7 @@ async function loadDashboard() {
         const lifecycleBadge = lifecycle !== 'active' ? ` <span class="badge badge-${lifecycle}" style="font-size:0.6rem;">${lifecycle}</span>` : '';
         const cityStr = d.city ? ` <span style="color:var(--text-muted);font-size:0.7rem;">${escapeHtml(d.city)}</span>` : '';
         return `<tr class="device-row" data-id="${d.id}" data-hasgps="${hasGps}" tabindex="0" onclick="openDeviceDetail('${d.id}')" onkeydown="if(event.key==='Enter'){openDeviceDetail('${d.id}')}">
-          <td><input type="checkbox" class="device-check" value="${d.id}" aria-label="Select ${d.name}" onclick="event.stopPropagation()"></td>
+          <td><input type="checkbox" class="device-check" value="${d.id}" ${selectedDevices.has(d.id) ? 'checked' : ''} aria-label="Select ${d.name}" onclick="event.stopPropagation()" onchange="event.stopPropagation(); syncSelection(this)"></td>
           <td><strong>${d.name}</strong>${lifecycleBadge}${cityStr}</td>
           <td>${d.firmware_version}</td>
           <td><span class="badge ${statusClass}"><span aria-hidden="true">${statusDot}</span> ${d.status}</span></td>
@@ -844,6 +920,17 @@ async function loadDashboard() {
           <td>${hasGps ? '<button class="btn-map" onclick="event.stopPropagation(); focusDeviceOnMap(\'' + d.id + '\')" title="View on map" aria-label="View ' + d.name.replace(/["']/g, '') + ' on map"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg></button>' : '<span style="color:var(--text-muted);font-size:0.7rem;">-</span>'}</td>
         </tr>`;
       }).join('');
+      const info = document.getElementById('device-page-info');
+      info.dataset.total = devices.length;
+      info.dataset.label = `Page ${devicePage + 1} of ${pageCount} · ${devices.length} devices`;
+      info.textContent = `${info.dataset.label} · ${selectedDevices.size} selected`;
+      document.getElementById('device-prev').disabled = devicePage === 0;
+      document.getElementById('device-next').disabled = devicePage >= pageCount - 1;
+      document.getElementById('select-all').checked = false;
+      if (focusedId) {
+        const restore = tbody.querySelector(`tr.device-row[data-id="${focusedId}"]`);
+        if (restore) restore.focus();
+      }
     }
 
     const online = devices.filter(d => d.status === 'online').length;
@@ -913,7 +1000,7 @@ async function loadFirmware() {
 
 function toggleSelectAll() {
   const checked = document.getElementById('select-all').checked;
-  document.querySelectorAll('.device-check').forEach(cb => cb.checked = checked);
+  document.querySelectorAll('.device-check').forEach(cb => { cb.checked = checked; syncSelection(cb); });
 }
 
 function toggleOtaTargetMode() {
@@ -947,8 +1034,8 @@ async function loadOtaDeviceList(selectedIds) {
 function openOtaModal() {
   openModal('ota-modal', '#firmware-select');
 
-  // Check if user selected specific devices in the main table
-  const mainChecked = Array.from(document.querySelectorAll('.device-check:checked')).map(cb => cb.value);
+  // Check if user selected specific devices in the main table (persisted across pages)
+  const mainChecked = selectedOrCheckedIds();
 
   if (mainChecked.length > 0) {
     // Carry main-table selections into the modal
@@ -1172,7 +1259,7 @@ async function checkMqttStatus() {
 
 function toggleSelectAll() {
   const checked = document.getElementById('select-all').checked;
-  document.querySelectorAll('.device-check').forEach(cb => cb.checked = checked);
+  document.querySelectorAll('.device-check').forEach(cb => { cb.checked = checked; syncSelection(cb); });
 }
 
 async function loadFirmwareList() {
@@ -1654,8 +1741,13 @@ async function loadQueueStat() {
 }
 
 function refreshAll() {
+  // Manual refresh bypasses the live-pause toggle (explicit user intent),
+  // but never a dialog guard.
+  const was = livePaused;
+  livePaused = false;
   loadDashboard();
   checkMqttStatus();
+  livePaused = was;
 }
 
 document.getElementById('ota-form').addEventListener('submit', async (e) => {
