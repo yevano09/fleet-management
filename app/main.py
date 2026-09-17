@@ -813,6 +813,19 @@ app.middleware("http")(metrics_middleware)
 
 # Phase 0 Tailwind: compiled stylesheet served alongside the legacy inline
 # <style> block (removed in Phase 3). Local dev: `npm run dev:css`.
+# Versioned URL (?v=content-hash) busts CDN/edge caches on every rebuild.
+def _css_version() -> str:
+    try:
+        import hashlib
+
+        with open("app/static/app.css", "rb") as f:
+            return hashlib.sha256(f.read()).hexdigest()[:10]
+    except Exception:
+        return "dev"
+
+
+app.state.css_version = _css_version()
+# Versioned URLs (?v=hash) bust CDN/edge caches on every rebuild.
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 
 app.include_router(auth.router)

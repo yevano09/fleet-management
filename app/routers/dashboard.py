@@ -25,5 +25,5 @@ async def dashboard(request: Request):
     return templates.TemplateResponse(
         request,
         "dashboard.html",
-        {"request": request, "user": user},
+        {"request": request, "user": user, "css_version": request.app.state.css_version},
     )
