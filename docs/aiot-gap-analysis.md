@@ -1,10 +1,13 @@
 # Fleet Commander — AIoT Gap Analysis, Implementation Plan & Target Design
 
 **Status:** Design document (build order after approval of phasing in §9).
-**Build status (2026-09-16):** MVP slice DONE — DATA-01 (UC-30), ML-01+EVAL-01 (UC-29),
-WO-01 (UC-28), TWIN-01 (UC-15). See `USE_CASES.md` status map for the verified record.
+**Build status (2026-09-18):** MVP slice DONE — DATA-01 (UC-30), ML-01+EVAL-01 (UC-29),
+WO-01 (UC-28), TWIN-01 (UC-15), P0-A OBD/BMS ingest + batch worker (UC-31),
+P-ret-1 Alembic + reshape + 24h-hot retention (UC-32). See `USE_CASES.md` status map.
+Section 1's "verified survey" and the honesty boundary below describe the PRE-MVP
+codebase and are stale by design — current state is in §1-fixed + UC map.
 **Scope:** Compare Fleet Commander against commercial fleet platforms (Samsara, Geotab, Intangles-style digital twin) and edge-AIoT practice; register every gap; specify exactly what to change in this repo, file by file, and how each change moves an AIoT metric.
-**Honesty boundary (read first):** this repo today contains **no trained ML models and no on-device inference**. “Predictive” = hand-coded linear slopes (`app/predictive_maintenance.py`), V2G = greedy heuristic + mock prices (`app/v2g_optimizer.py`, `app/spot_prices.py`), Aegis = threshold rules (`app/aegis/engine.py`), agents = deterministic recommenders. Nothing in this doc may be claimed as “AI” until the eval harness in §7 exists and passes. Default benchmark focus: all three commercial lenses briefly (Samsara = safety/video-led, Geotab = open data-led, Intangles = twin/predictive-led).
+**Honesty boundary (read first — PRE-MVP snapshot, stale where UC-28…UC-32 landed):** this repo today contains **no trained ML models and no on-device inference**. “Predictive” = hand-coded linear slopes (`app/predictive_maintenance.py`), V2G = greedy heuristic + mock prices (`app/v2g_optimizer.py`, `app/spot_prices.py`), Aegis = threshold rules (`app/aegis/engine.py`), agents = deterministic recommenders. Nothing in this doc may be claimed as “AI” until the eval harness in §7 exists and passes. Default benchmark focus: all three commercial lenses briefly (Samsara = safety/video-led, Geotab = open data-led, Intangles = twin/predictive-led).
 
 ---
 

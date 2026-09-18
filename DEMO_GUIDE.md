@@ -25,7 +25,7 @@ Three presentation styles for showcasing the Fleet Commander IoT device manageme
 
 2. **Open the Fleet Dashboard** at http://localhost:8181
 
-3. **Point out** the device table showing 15 online devices (Device-001 through Device-015) with firmware version `1.0.0`, green status badges, and varying signal strength.
+3. **Point out** the device table showing 5 online devices (Device-001 through Device-005) with firmware version `1.0.0`, green status badges, and varying signal strength.
 
 4. **Trigger a bulk OTA:**
    - Click **"Trigger OTA Update"**
@@ -106,16 +106,19 @@ Demo on the dashboard:
 
 ### 4. Grafana Observability (3 min)
 
-Open Grafana at http://localhost:3050 (admin/admin; host port via `GRAFANA_PORT`, default 3000).
+Open Grafana at http://localhost:3000 (admin/admin; host port via `GRAFANA_PORT`, default 3000).
 
-Point out each panel:
-- **Active / Total Devices** — gauge showing online count
+Point out each panel (13 total):
+- **Active Devices / Total Devices** — online count gauges
 - **OTA In Progress** — current deployments
 - **OTA Success Rate** — `rate()` query showing success percentage
 - **API Request Latency (P95)** — histogram quantile as timeseries
 - **OTA Deployments by Status** — pie chart by deployment status
 - **MQTT Message Throughput** — rate of published/received messages
 - **Online Devices** — bar gauge of active percentage
+- **V2G Active Discharges / Projected V2G Revenue / Battery Degradation Cost** — EV economics stats
+- **Spot Price vs Degradation Cost** — timeseries comparison
+- **Fleet SOC over Time** — per-device state of charge
 
 Run an OTA trigger and watch the graphs update live.
 
@@ -238,7 +241,7 @@ fleet_ota_deployments_total{status="triggered"} 5.0
 
 ### 8. Grafana Dashboard
 
-Navigate to http://localhost:3050 (admin/admin). Open the "Fleet Commander Overview" dashboard. Run multiple OTA triggers and watch:
+Navigate to http://localhost:3000 (admin/admin). Open the "Fleet Commander Overview" dashboard (13 panels). Run multiple OTA triggers and watch:
 - The **Active Devices** stat update
 - **OTA Deployments by Status** pie chart reflect successes vs failures
 - **API Latency** show request duration histograms
@@ -246,7 +249,7 @@ Navigate to http://localhost:3050 (admin/admin). Open the "Fleet Commander Overv
 
 ### 9. Agent Recommendations (Phase 1)
 
-The dashboard now includes three AI agent panels at the bottom, auto-refreshing every 30 seconds.
+The dashboard includes an "Agent Recommendations" section (OTA + anomaly + group agents, auto-refreshing every 30 seconds) above live sections for alerts (10s), Aegis (10s) and predictions (30s).
 
 #### OTA Campaign Agent
 
@@ -282,7 +285,7 @@ After OTA failures, the anomaly panel will show failure rate spikes.
 #### Device Group Manager
 
 The Device Groups panel shows:
-- **Firmware version cohorts** (e.g., "Firmware 1.0.0 Cohort" — 15 devices)
+- **Firmware version cohorts** (e.g., "Firmware 1.0.0 Cohort" — 5 devices)
 - **Signal strength buckets** (Good / Moderate / Poor)
 - Each group includes device count, device IDs, and rationale
 
@@ -411,7 +414,7 @@ Heartbeats now include EV battery fields:
    ```bash
    curl -s http://localhost:8181/agents/v2g-dispatch | python -m json.tool
    ```
-4. Check Grafana at http://localhost:3050 — new V2G panels show:
+4. Check Grafana at http://localhost:3000 — new V2G panels show:
    - **V2G Active Discharges** — count of discharging devices
    - **Projected V2G Revenue** — total arbitrage revenue
    - **Battery Degradation Cost** — accumulated wear cost
@@ -508,8 +511,8 @@ curl -X POST http://localhost:8181/aegis/ingest \
   -H "Content-Type: application/json" \
   -d '{"metric_name": "fleet_active_devices", "value": 1.0, "severity": "critical"}'
 
-# Re-run a remediation
-curl -X POST http://localhost:8181/aegis/rerun/{id}
+# Re-run a remediation (agents router)
+curl -X POST http://localhost:8181/agents/aegis/rerun/{id}
 ```
 
 #### Demoing Aegis
@@ -862,9 +865,10 @@ docker compose --profile testing run --rm backend \
 docker compose --profile testing run --rm backend python scripts/backtest.py --seeds 10
 ```
 
-Expected: drift/thermal/tpms 10/10 detected, lead ~22–28 steps (bar: 8/8/4),
-FP 0% (gate 5%), legacy 0/10 on tpms. Quote these numbers — never claim accuracy
-without them (see `tests/eval_thresholds.json`).
+Expected on the seeded backtest (`scripts/backtest.py --seeds 10`): drift/thermal/tpms
+10/10 detected, lead typically ~22–28 steps (bar: 8/8/4), FP typically 0% (gate 5%),
+legacy 0/10 on tpms. Re-run to quote fresh numbers — measured, never claimed without
+them (see `tests/eval_thresholds.json`).
 
 ### Cleanup
 

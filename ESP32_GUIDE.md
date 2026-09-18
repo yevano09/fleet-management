@@ -10,11 +10,19 @@ All communication uses JSON payloads over MQTT v5 with **QoS 1** (at-least-once 
 
 | Topic | Direction | Payload | Frequency |
 |---|---|---|---|
-| `iot/fleet/register` | Device → Backend | `{device_id, name, firmware_version, ip_address}` | On boot + reconnection |
-| `iot/fleet/{device_id}/heartbeat` | Device → Backend | `{uptime_percentage, signal_strength}` | Every 10–60s |
+| `iot/fleet/register` | Device → Backend | `{device_id, name, firmware_version, ip_address}` | On boot + reconnection (demo only; rejected in strict mode) |
+| `iot/fleet/{device_id}/register` | Device → Backend | Same as above | On boot + reconnection (strict/JITP, CN-bound) |
+| `iot/fleet/{device_id}/heartbeat` | Device → Backend | `{uptime_percentage, signal_strength, ...telemetry}` | Every 10–60s |
+| `iot/fleet/{device_id}/obd` | Device → Backend | `{event_time, odometer_km, fuel, dtc_codes, ...}` | With heartbeat (OBD-capable) |
+| `iot/fleet/{device_id}/bms` | Device → Backend | `{soc, soh, cell_voltages[], ...}` | With heartbeat (EVs) |
 | `iot/fleet/{device_id}/status/ota` | Device → Backend | `{status, deployment_id, device_id, timestamp, error?}` | During OTA lifecycle |
 | `iot/fleet/{device_id}/command/ota` | Backend → Device | `{firmware_url, sha256_hash, timestamp}` | On OTA trigger |
 | `iot/fleet/{device_id}/command/config` | Backend → Device | `{config: {...}, timestamp}` | On config push |
+| `iot/fleet/{device_id}/command/v2g` | Backend → Device | `{action, power_kw, ...}` | On V2G dispatch |
+| `iot/fleet/{device_id}/command/restart` | Backend → Device | `{reason, ...}` | On restart (incl. Aegis) |
+| `iot/fleet/{device_id}/command/rollback` | Backend → Device | `{previous_firmware, ...}` | On rollback |
+| `iot/fleet/{device_id}/command/shadow` | Backend → Device | `{state, version, ...}` | On desired-state push |
+| `iot/fleet/{device_id}/command/maintenance` | Backend → Device | `{command, ...}` | On lifecycle change |
 
 ### OTA Status States
 
@@ -27,6 +35,8 @@ downloading → applying → verifying → success
 ## ESP32 Arduino Sketch
 
 Below is a complete sketch. It uses the ESP32's native `Update` class for real OTA flashing.
+(A flashed, field-ready variant also lives at `ESp32-FleetManagement/ESp32-FleetManagement.ino`
+— note the `ESp32-` capitalisation.)
 
 ### Requirements
 
@@ -360,20 +370,21 @@ Set `MQTT_BROKER` in the sketch to that IP.
 
 ### 2. Mosquitto Configuration
 
-The default `docker/mosquitto/mosquitto.conf` allows anonymous access on port 1883. This is fine for a local LAN. For production, add credentials:
+The default `docker/mosquitto/mosquitto.conf` allows anonymous access on port 1883. This is fine for a local LAN. For production, use the TLS profile instead of passwords:
 
 ```conf
-listener 1883 0.0.0.0
-allow_anonymous false
-password_file /mosquitto/config/passwords
+# docker/mosquitto/mosquitto.ssl.conf (shipped): port 8883 only,
+# require_certificate true, use_identity_as_username true, ACL enforced.
+# Port 1883 is NOT published in production.
 ```
 
-Generate the password file:
+Generate device credentials:
 ```bash
-docker compose exec mosquitto mosquitto_passwd -c /mosquitto/config/passwords esp32-device
+bash scripts/gen-mqtt-pki.sh 5   # CA + broker certs + sim-001..sim-005 client certs
 ```
 
-Then update the sketch with `MQTT_USER` and `MQTT_PASS`.
+Then flash the client cert/key (CN = device id) and connect to port **8883** with
+`WiFiClientSecure` (see "Production Devices" above — no `MQTT_USER`/`MQTT_PASS` scheme exists).
 
 ### 3. Assign a Persistent Device ID
 
@@ -398,7 +409,7 @@ The `DEVICE_NAME` field in the registration payload is what appears in the Fleet
    ```
 4. Check the backend API:
    ```bash
-   curl http://localhost:8000/devices
+   curl http://localhost:8181/devices
    ```
    Your ESP32 should appear in the device list.
 
@@ -406,7 +417,7 @@ The `DEVICE_NAME` field in the registration payload is what appears in the Fleet
 
 1. Upload a new firmware binary via the dashboard or API:
    ```bash
-   curl -X POST http://localhost:8000/ota/upload \
+   curl -X POST http://localhost:8181/ota/upload \
      -F "version=2.0.0" \
      -F "file=@firmware.esp32.bin"
    ```
@@ -414,7 +425,7 @@ The `DEVICE_NAME` field in the registration payload is what appears in the Fleet
 
 2. Trigger the OTA for your ESP32:
    ```bash
-   curl -X POST http://localhost:8000/ota/trigger \
+   curl -X POST http://localhost:8181/ota/trigger \
      -H "Content-Type: application/json" \
      -d '{"firmware_id": "<FW_ID>", "device_ids": ["<DEVICE_ID>"]}'
    ```
@@ -426,4 +437,4 @@ The `DEVICE_NAME` field in the registration payload is what appears in the Fleet
 - **SHA256 verification**: The backend sends `sha256_hash` in the OTA command. The example sketch skips verification for brevity. For production, compute the SHA256 of the downloaded binary and compare before calling `Update.end()`.
 - **MQTT broker address**: When running in Docker, the broker is on the Docker host's IP. Your ESP32 connects to that IP, not `localhost`.
 - **QoS**: All topics use QoS 1. Ensure your MQTT library supports QoS 1 for both publish and subscribe.
-- **Backend health check**: After a backend restart, the ESP32 will reconnect to MQTT and re-subscribe. It should re-register via `iot/fleet/register` on reconnect to update `active_devices` and `total_devices` gauges in Prometheus.
+- **Backend health check**: After a backend restart, the ESP32 will reconnect to MQTT and re-subscribe. It should re-register on reconnect to update `active_devices` and `total_devices` gauges in Prometheus — demo profile via `iot/fleet/register`, strict mode via its CN-bound `iot/fleet/{id}/register` (the shared topic is rejected there).

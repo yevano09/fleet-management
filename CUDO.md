@@ -136,7 +136,7 @@ graph TB
 | Templates | Jinja2 | 3.1.6 |
 | Frontend Charts | Chart.js | 4.4.1 |
 | Frontend Maps | Leaflet | 1.9.4 |
-| Crypto Signing | cryptography (Ed25519) | 45.0.13 |
+| Crypto Signing | cryptography (Ed25519) | 49.0.0 |
 | Auth | PyJWT + Google OAuth | 2.13.0 |
 
 ---
@@ -163,8 +163,8 @@ The following services start:
 
 | Service | URL | Purpose |
 |---|---|---|
-| Fleet Dashboard | http://localhost:8000 | HTMX web UI |
-| API Docs (Swagger) | http://localhost:8000/docs | REST API documentation |
+| Fleet Dashboard | http://localhost:8181 | HTMX web UI |
+| API Docs (Swagger) | http://localhost:8181/docs | REST API documentation |
 | Prometheus | http://localhost:9090 | Metrics collection |
 | Grafana | http://localhost:3000 | Dashboards (admin/admin) |
 | Mosquitto | localhost:1883 | MQTT broker |
@@ -183,7 +183,7 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 | Profile | Services | Command |
 |---|---|---|
 | `demo` | Backend + Mosquitto + Simulator + Prometheus + Grafana | `--profile demo` |
-| `production` | Adds PostgreSQL | `--profile production` |
+| `production` | Adds PostgreSQL + Mosquitto TLS (8883, mTLS) + backend-api HA replicas | `--profile production` |
 | `testing` | E2E test runner | `--profile testing` |
 
 ### 3.5 Stopping & Cleaning
@@ -200,7 +200,7 @@ docker compose down -v
 
 ## 4. Web Dashboard Usage
 
-Access the dashboard at **http://localhost:8000**.
+Access the dashboard at **http://localhost:8181**.
 
 ### 4.1 Header
 
@@ -309,7 +309,7 @@ Devices can register in two ways:
 **Manual (REST API)** — POST to `/devices/register`:
 
 ```bash
-curl -X POST http://localhost:8000/devices/register \
+curl -X POST http://localhost:8181/devices/register \
   -H "Content-Type: application/json" \
   -d '{"name": "Demo-Device-001", "firmware_version": "1.0.0", "ip_address": "10.0.0.42"}'
 ```
@@ -363,11 +363,11 @@ Publish to `iot/fleet/{device_id}/command/config`:
 
 ```bash
 # All devices
-curl http://localhost:8000/devices
+curl http://localhost:8181/devices
 
 # Filter by status
-curl http://localhost:8000/devices?status=online
-curl http://localhost:8000/devices?status=offline
+curl http://localhost:8181/devices?status=online
+curl http://localhost:8181/devices?status=offline
 ```
 
 ---
@@ -395,7 +395,7 @@ stateDiagram-v2
 Via Swagger UI (`/docs`) or REST API:
 
 ```bash
-curl -X POST http://localhost:8000/ota/upload \
+curl -X POST http://localhost:8181/ota/upload \
   -F "version=2.0.0" \
   -F "file=@/path/to/firmware.bin"
 ```
@@ -412,7 +412,7 @@ The system calculates the **SHA256 hash** of the uploaded binary and stores it f
 **Target all online devices:**
 
 ```bash
-curl -X POST http://localhost:8000/ota/trigger \
+curl -X POST http://localhost:8181/ota/trigger \
   -H "Content-Type: application/json" \
   -d '{"firmware_id": "<FW_ID>", "all_devices": true}'
 ```
@@ -420,7 +420,7 @@ curl -X POST http://localhost:8000/ota/trigger \
 **Target specific devices:**
 
 ```bash
-curl -X POST http://localhost:8000/ota/trigger \
+curl -X POST http://localhost:8181/ota/trigger \
   -H "Content-Type: application/json" \
   -d '{"firmware_id": "<FW_ID>", "device_ids": ["<DEVICE_ID_1>", "<DEVICE_ID_2>"]}'
 ```
@@ -466,10 +466,10 @@ When a device reports `hash_mismatch`:
 
 ```bash
 # View all OTA deployments with counts
-curl http://localhost:8000/ota/status
+curl http://localhost:8181/ota/status
 
 # List uploaded firmware versions (includes signature fields)
-curl http://localhost:8000/ota/firmware
+curl http://localhost:8181/ota/firmware
 ```
 
 ### 6.8 Firmware Cryptographic Signing (Feature 8)
@@ -501,7 +501,7 @@ Schedule OTA campaigns for specific times with blackout windows (e.g., skip peak
 ### 7.2 Creating a Schedule
 
 ```bash
-curl -X POST http://localhost:8000/ota/schedules \
+curl -X POST http://localhost:8181/ota/schedules \
   -H "Content-Type: application/json" \
   -d '{
     "name": "Nightly v2.1 update",
@@ -540,16 +540,16 @@ Every heartbeat is recorded as a telemetry data point with signal strength, upti
 
 ```bash
 # Fetch telemetry for a device (last 24 hours)
-curl http://localhost:8000/telemetry/{device_id}?hours=24&limit=500
+curl http://localhost:8181/telemetry/{device_id}?hours=24&limit=500
 
 # Latest telemetry point
-curl http://localhost:8000/telemetry/{device_id}/latest
+curl http://localhost:8181/telemetry/{device_id}/latest
 
 # Summary statistics
-curl http://localhost:8000/telemetry/{device_id}/stats?hours=24
+curl http://localhost:8181/telemetry/{device_id}/stats?hours=24
 
 # Prune old telemetry
-curl -X DELETE http://localhost:8000/telemetry/{device_id}?days=30
+curl -X DELETE http://localhost:8181/telemetry/{device_id}?days=30
 ```
 
 ### 8.3 Dashboard Charts
@@ -571,7 +571,7 @@ Define geofences (circle or polygon) and receive alerts when devices enter or ex
 
 ```bash
 # Circle geofence
-curl -X POST http://localhost:8000/geofences \
+curl -X POST http://localhost:8181/geofences \
   -H "Content-Type: application/json" \
   -d '{
     "name": "Bangalore Depot",
@@ -591,7 +591,7 @@ When a device's GPS position crosses a geofence boundary, a `GeofenceEvent` is r
 
 ```bash
 # View geofence events
-curl http://localhost:8000/geofences/events/all?limit=50
+curl http://localhost:8181/geofences/events/all?limit=50
 ```
 
 ### 9.4 Dashboard
@@ -617,13 +617,13 @@ The Predictive Maintenance Agent analyzes telemetry trends using linear regressi
 
 ```bash
 # Run a predictive scan
-curl -X POST http://localhost:8000/predictive/scan
+curl -X POST http://localhost:8181/predictive/scan
 
 # List predictions (filter by minimum risk score)
-curl http://localhost:8000/predictive/predictions?min_risk=0.4
+curl http://localhost:8181/predictive/predictions?min_risk=0.4
 
 # Mark a prediction as resolved
-curl -X POST http://localhost:8000/predictive/predictions/{id}/resolve
+curl -X POST http://localhost:8181/predictive/predictions/{id}/resolve
 ```
 
 ### 10.3 Dashboard
@@ -649,7 +649,7 @@ When a device is offline, commands are queued and automatically delivered when i
 
 ```bash
 # Queue a command for a device
-curl -X POST http://localhost:8000/commands/queue \
+curl -X POST http://localhost:8181/commands/queue \
   -H "Content-Type: application/json" \
   -d '{
     "device_id": "<DEVICE_ID>",
@@ -659,13 +659,13 @@ curl -X POST http://localhost:8000/commands/queue \
   }'
 
 # List queued commands
-curl http://localhost:8000/commands?status=queued
+curl http://localhost:8181/commands?status=queued
 
 # Retry delivery
-curl -X POST http://localhost:8000/commands/{id}/retry
+curl -X POST http://localhost:8181/commands/{id}/retry
 
 # Pending commands for a device
-curl http://localhost:8000/commands/pending/{device_id}
+curl http://localhost:8181/commands/pending/{device_id}
 ```
 
 ### 11.3 Auto-delivery
@@ -684,15 +684,15 @@ Each device has a "shadow" with desired and reported state (AWS IoT pattern). Th
 
 ```bash
 # Get current shadow
-curl http://localhost:8000/shadow/{device_id}
+curl http://localhost:8181/shadow/{device_id}
 
 # Update desired state (pushed to device via MQTT)
-curl -X PUT http://localhost:8000/shadow/{device_id} \
+curl -X PUT http://localhost:8181/shadow/{device_id} \
   -H "Content-Type: application/json" \
   -d '{"state": "desired", "payload": {"heartbeat_interval": 15, "log_level": "DEBUG"}}'
 
 # Shadow history
-curl http://localhost:8000/shadow/{device_id}/history
+curl http://localhost:8181/shadow/{device_id}/history
 ```
 
 ### 12.3 Sync on Reconnect
@@ -715,21 +715,21 @@ When a device reconnects (registers after being offline), the backend automatica
 
 ```bash
 # Enter maintenance mode
-curl -X POST http://localhost:8000/lifecycle/{id}/maintenance?reason=scheduled
+curl -X POST http://localhost:8181/lifecycle/{id}/maintenance?reason=scheduled
 
 # Return to active
-curl -X POST http://localhost:8000/lifecycle/{id}/activate
+curl -X POST http://localhost:8181/lifecycle/{id}/activate
 
 # Decommission
-curl -X POST http://localhost:8000/lifecycle/{id}/decommission \
+curl -X POST http://localhost:8181/lifecycle/{id}/decommission \
   -H "Content-Type: application/json" \
   -d '{"reason": "retired", "factory_reset": true, "actor": "admin"}'
 
 # Generate claim token
-curl -X POST http://localhost:8000/lifecycle/{id}/claim-token
+curl -X POST http://localhost:8181/lifecycle/{id}/claim-token
 
 # Claim a device via token
-curl -X POST http://localhost:8000/lifecycle/claim \
+curl -X POST http://localhost:8181/lifecycle/claim \
   -H "Content-Type: application/json" \
   -d '{"name": "MyDevice", "claim_token": "<token>", "firmware_version": "2.0.0"}'
 ```
@@ -746,16 +746,16 @@ Every mutating action is recorded in the audit log with actor, action, target ty
 
 ```bash
 # List audit logs (filterable)
-curl http://localhost:8000/audit?limit=100&offset=0
+curl http://localhost:8181/audit?limit=100&offset=0
 
 # Filter by actor
-curl http://localhost:8000/audit?actor=admin
+curl http://localhost:8181/audit?actor=admin
 
 # Filter by action
-curl http://localhost:8000/audit?action=ota.trigger
+curl http://localhost:8181/audit?action=ota.trigger
 
 # Prune old logs
-curl -X DELETE http://localhost:8000/audit/old?days=90
+curl -X DELETE http://localhost:8181/audit/old?days=90
 ```
 
 ### 14.3 Logged Actions
@@ -774,18 +774,18 @@ Subscribe external systems to fleet events. Events are delivered via HTTP POST w
 
 ```bash
 # Create a webhook subscription
-curl -X POST http://localhost:8000/webhooks \
+curl -X POST http://localhost:8181/webhooks \
   -H "Content-Type: application/json" \
   -d '{"name": "My Integration", "url": "https://example.com/hook", "event_types": "*", "secret": "my-secret"}'
 
 # List webhooks
-curl http://localhost:8000/webhooks
+curl http://localhost:8181/webhooks
 
 # View emitted events
-curl http://localhost:8000/webhooks/events?limit=50
+curl http://localhost:8181/webhooks/events?limit=50
 
 # Test a webhook
-curl -X POST http://localhost:8000/webhooks/test/{id}
+curl -X POST http://localhost:8181/webhooks/test/{id}
 ```
 
 ### 15.3 Event Types
@@ -800,7 +800,7 @@ Events emitted include: `device.registered`, `device.reconnected`, `device.decom
 
 ```bash
 # Upload a CSV file with columns: name, firmware_version, ip_address, mqtt_client_id, city
-curl -X POST http://localhost:8000/provisioning/bulk-import \
+curl -X POST http://localhost:8181/provisioning/bulk-import \
   -F "file=@devices.csv"
 ```
 
@@ -810,13 +810,13 @@ Response includes imported count, skipped count, errors, and device IDs with cla
 
 ```bash
 # Pre-register a device (creates offline device with claim token)
-curl -X POST "http://localhost:8000/provisioning/pre-register?name=Device-100&firmware_version=1.0.0"
+curl -X POST "http://localhost:8181/provisioning/pre-register?name=Device-100&firmware_version=1.0.0"
 
 # Generate a claim token for an existing device
-curl -X POST http://localhost:8000/lifecycle/{id}/claim-token
+curl -X POST http://localhost:8181/lifecycle/{id}/claim-token
 
 # Device claims itself using the token
-curl -X POST http://localhost:8000/lifecycle/claim \
+curl -X POST http://localhost:8181/lifecycle/claim \
   -H "Content-Type: application/json" \
   -d '{"name": "Device-100", "claim_token": "<token>"}'
 ```
@@ -873,13 +873,13 @@ The optimizer evaluates each time slot and decides:
 
 ```bash
 # Get V2G dispatch schedule for all devices (uses real spot prices if configured)
-curl 'http://localhost:8000/agents/v2g-dispatch'
+curl 'http://localhost:8181/agents/v2g-dispatch'
 
 # Get V2G schedule for specific devices
-curl 'http://localhost:8000/agents/v2g-dispatch?device_ids=DEVICE_ID_1&device_ids=DEVICE_ID_2'
+curl 'http://localhost:8181/agents/v2g-dispatch?device_ids=DEVICE_ID_1&device_ids=DEVICE_ID_2'
 
 # With custom horizon
-curl 'http://localhost:8000/agents/v2g-dispatch?horizon_hours=12'
+curl 'http://localhost:8181/agents/v2g-dispatch?horizon_hours=12'
 ```
 
 **Response fields:**
@@ -932,7 +932,7 @@ Produces a rollout plan consisting of:
 - **Risk assessment:** Based on fleet size and online percentage
 
 ```bash
-curl 'http://localhost:8000/agents/ota-campaign?firmware_version=2.0.0'
+curl 'http://localhost:8181/agents/ota-campaign?firmware_version=2.0.0'
 ```
 
 ### 8.3 Anomaly Detection Agent
@@ -947,7 +947,7 @@ Checks for four anomaly types:
 | Mass offline | > 30% of devices offline | Critical |
 
 ```bash
-curl 'http://localhost:8000/agents/anomaly-check?notify=true'
+curl 'http://localhost:8181/agents/anomaly-check?notify=true'
 ```
 
 ### 8.4 Device Group Agent
@@ -960,7 +960,7 @@ Groups devices by two dimensions:
 | Signal strength | Good: > -60 dBm, Moderate: -60 to -80, Poor: < -80 | "Good Signal Group" |
 
 ```bash
-curl 'http://localhost:8000/agents/device-groups?min_group_size=3'
+curl 'http://localhost:8181/agents/device-groups?min_group_size=3'
 ```
 
 ### 8.5 CLI Runner
@@ -1304,8 +1304,8 @@ Changes are **not persisted** across container restarts unless you create a new 
 | `DATABASE_URL` | `sqlite+aiosqlite:///./data/fleet.db` | Database connection string | Must be a valid SQLAlchemy async DB URL |
 | `MQTT_BROKER_HOST` | `localhost` | MQTT broker hostname | Any resolvable hostname or IP |
 | `MQTT_BROKER_PORT` | `1883` | MQTT broker port | 1–65535 |
-| `MQTT_USERNAME` | — | MQTT authentication username | Optional; must be set with PASSWORD |
-| `MQTT_PASSWORD` | — | MQTT authentication password | Optional; must be set with USERNAME |
+| `MQTT_USERNAME` | — | MQTT authentication username | Not used — demo broker is anonymous; production uses mTLS client certs, not passwords |
+| `MQTT_PASSWORD` | — | MQTT authentication password | Not used — see above |
 | `HOST` | `0.0.0.0` | Backend bind address | Valid IP address |
 | `PORT` | `8000` | Backend HTTP port | 1–65535 |
 | `LOG_LEVEL` | `INFO` | Logging verbosity | `DEBUG`, `INFO`, `WARNING`, `ERROR` |
@@ -1391,7 +1391,7 @@ Set the default role for new OAuth users via `DEFAULT_USER_ROLE` (default: `view
 | V2G heuristic (not MILP) | Greedy algorithm may miss global optimum | Planned MILP upgrade in SCALING.md |
 | Mock spot prices | Not real market data | Set `SPOT_PRICE_URL` for real prices |
 | Simulator devices are virtual | For testing only | Replace with real ESP32 hardware |
-| Database migrations | No Alembic auto-migration | Manual schema sync required for version changes |
+| Database migrations | Alembic revisions (`alembic/`) + tenant/region stamping + 7-day retention worker |
 
 ### 14.3 Operational Boundaries
 
@@ -1408,11 +1408,11 @@ Set the default role for new OAuth users via `DEFAULT_USER_ROLE` (default: `view
 
 ### 14.4 Database Schema
 
-Five tables: `devices`, `firmware`, `ota_deployments`, `v2g_schedules`.
+24 tables (22 in `app/models.py` + `remediations`/`rule_configs` in `app/aegis/models.py`): `organizations`, `api_keys`, `device_certificates`, `devices`, `firmware`, `ota_deployments`, `v2g_schedules`, plus telemetry (`telemetry` + `telemetry_5m` rollups), OTA, alerts, shadows, predictions, `ml_models`, `work_orders`, geofences, queue, audit, webhooks, events.
 
 - Devices have a **one-to-many** relationship with OTA deployments and V2G schedules
 - Firmware records are independent (no FK to devices)
-- No cascade deletes configured (manual cleanup required)
+- Telemetry rows cascade-delete with their device; schema upgrades via `alembic/` revisions
 - UUID primary keys across all tables
 
 ---
@@ -1452,7 +1452,7 @@ Five tables: `devices`, `firmware`, `ota_deployments`, `v2g_schedules`.
 
 2. **Check metrics are exposed:**
    ```bash
-   curl http://localhost:8000/metrics | grep fleet_
+   curl http://localhost:8181/metrics | grep fleet_
    ```
 
 3. **Check Grafana datasource:**
@@ -1474,12 +1474,12 @@ Five tables: `devices`, `firmware`, `ota_deployments`, `v2g_schedules`.
 
 1. **Firmware ID not found** — List available firmware:
    ```bash
-   curl http://localhost:8000/ota/firmware
+   curl http://localhost:8181/ota/firmware
    ```
 
 2. **No online devices** — Check device status:
    ```bash
-   curl http://localhost:8000/devices?status=online
+   curl http://localhost:8181/devices?status=online
    ```
 
 3. **MQTT not connected** — Check backend logs:
@@ -1538,12 +1538,12 @@ LOG_LEVEL=DEBUG docker compose --profile demo up -d
 
 ### 16.1 Default (Development) Configuration
 
-**⚠  WARNING:** The default configuration uses **no authentication** and is intended for **development/testing only**.
+**⚠  WARNING:** The default demo configuration uses **no authentication** and is intended for **development/testing only**.
 
-- MQTT: `allow_anonymous true` — no authentication
-- API: No authentication middleware
+- MQTT: `allow_anonymous true` — no authentication (demo broker only)
+- API: `AUTH_MODE=open` in demo; production uses `strict` with RBAC roles, API keys, Google OAuth + admin JWT
 - Grafana: Default admin/admin credentials
-- No TLS encryption
+- Production MQTT: mTLS on 8883 with CRL + topic ACLs (no username/password scheme)
 
 ### 16.2 Production Hardening
 
@@ -1551,9 +1551,9 @@ For production deployment, see the full `SECURITY.md` file. Key measures include
 
 | Area | Recommended Action |
 |---|---|
-| MQTT TLS | Enable SSL/TLS on port 8883 |
-| MQTT Auth | Set `MQTT_USERNAME` and `MQTT_PASSWORD` |
-| API Security | Add JWT authentication middleware |
+| MQTT TLS | mTLS on port 8883 with CRL + topic ACLs (shipped) |
+| MQTT Auth | Client certificates (CN-bound topics); demo broker stays anonymous |
+| API Security | `AUTH_MODE=open` (demo) vs `strict` (RBAC roles, API keys, OAuth/admin JWT) |
 | Grafana | Change default admin password |
 | Secrets | Use Docker secrets or vault for passwords |
 | Network | Use Docker internal network; restrict port exposure |
@@ -1584,14 +1584,14 @@ docker compose --profile production up -d
 
 Set `DATABASE_URL` to a PostgreSQL connection string:
 ```
-DATABASE_URL=postgresql+psycopg2://fleet:fleet_password@postgres:5432/fleet
+DATABASE_URL=postgresql+asyncpg://fleet:fleetpass@postgres:5432/fleet
 ```
 
 ### 17.2 Horizontal Scaling
 
 ```bash
-# Scale backend instances
-docker compose up -d --scale backend=3
+# Scale API replicas (leader stays 1 — it owns MQTT + schedulers)
+docker compose --profile production up -d --scale backend-api=2
 ```
 
 **Important:** Multiple backend instances share the same MQTT topic subscriptions. With MQTT shared subscriptions, each message is delivered to one subscriber. Use a shared database (PostgreSQL) for consistency.
@@ -1675,24 +1675,24 @@ See `ESP32_GUIDE.md` for the complete Arduino sketch with real OTA flashing, bat
 docker compose --profile demo up --build -d
 
 # List devices
-curl http://localhost:8000/devices
+curl http://localhost:8181/devices
 
 # Check metrics
-curl http://localhost:8000/metrics | grep fleet_
+curl http://localhost:8181/metrics | grep fleet_
 
 # Upload firmware
-curl -X POST http://localhost:8000/ota/upload -F "version=2.0.0" -F "file=@firmware.bin"
+curl -X POST http://localhost:8181/ota/upload -F "version=2.0.0" -F "file=@firmware.bin"
 
 # Trigger OTA
-curl -X POST http://localhost:8000/ota/trigger \
+curl -X POST http://localhost:8181/ota/trigger \
   -H "Content-Type: application/json" \
   -d '{"firmware_id":"<FW_ID>","all_devices":true}'
 
 # V2G dispatch
-curl http://localhost:8000/agents/v2g-dispatch
+curl http://localhost:8181/agents/v2g-dispatch
 
 # Agent recommendations
-curl http://localhost:8000/agents/recommendations?notify=false
+curl http://localhost:8181/agents/recommendations?notify=false
 
 # Grafana
 open http://localhost:3000  # admin/admin
@@ -1709,26 +1709,29 @@ fleet-management/
 │   ├── main.py                # Entry point, lifespan, MQTT handlers, schedulers
 │   ├── config.py              # Pydantic settings (env-based)
 │   ├── database.py            # SQLAlchemy async engine + session
-│   ├── models.py              # ORM models (16 tables)
+│   ├── models.py              # ORM models (22 tables + registry/twin/WO/rollups)
 │   ├── schemas.py             # Pydantic request/response schemas
 │   ├── mqtt_client.py         # MQTT v5 client wrapper
 │   ├── ota_manager.py         # OTA state machine + timeout watcher
 │   ├── alert_engine.py        # Alert engine with dedup, cooldown, multi-channel
-│   ├── metrics.py             # 30+ Prometheus metrics
+│   ├── metrics.py             # ~50 Prometheus metrics
 │   ├── audit.py               # Audit log helper
 │   ├── event_emitter.py       # Webhook event fan-out with HMAC
 │   ├── firmware_signing.py    # Ed25519 sign/verify
-│   ├── geofence_checker.py    # Geofence math (haversine, polygon)
-│   ├── predictive_maintenance.py  # Telemetry trend analysis
+│   ├── geofence_checker.py    # Geofence math (haversine, point-in-polygon)
+│   ├── predictive_maintenance.py  # Telemetry trend analysis (legacy slopes)
+│   ├── retention.py           # 24h-hot rollup + tiered retention worker
 │   ├── spot_prices.py         # Real spot-price integration
 │   ├── v2g_optimizer.py       # V2G arbitrage optimizer
-│   ├── aegis/                 # Aegis Auto-Remediation Engine (8 files)
-│   ├── routers/               # 14 API route handlers
+│   ├── ml/                    # Model registry + hybrid inference + eval scenarios
+│   ├── obd/                   # DTC decode table
+│   ├── aegis/                 # Aegis Auto-Remediation Engine (10 files)
+│   ├── routers/               # 22 API route handlers (+ twin/workorders/obd)
 │   └── templates/
 │       └── dashboard.html     # Dashboard (Chart.js, Leaflet, modals)
 ├── agents/                    # 6 AI agents (dual-mode: heuristic + CrewAI)
 ├── simulator/                 # Virtual device simulator
-├── tests/                     # 91 unit tests + 40 E2E tests
+├── tests/                     # 91 unit tests + 48 E2E tests (+ eval/strict suites)
 ├── run_agents.py              # CLI agent runner
 ├── demo_pitch.sh              # Automated demo pitch script
 ├── docker-compose.yml         # Multi-service orchestration

@@ -7,7 +7,7 @@ A production-grade IoT fleet management system built with FastAPI, MQTT, Prometh
 ```mermaid
 graph TB
     subgraph Devices["Devices"]
-        SIM["Device Simulators (x5-N)"]
+        SIM["Device Simulators (x5 via compose)"]
         ESP["ESP32 Real Hardware"]
     end
     subgraph MQTT["Message"]
@@ -24,7 +24,7 @@ graph TB
     end
     subgraph Monitoring["Monitoring"]
         PRO["Prometheus :9090"]
-        GRA["Grafana :3050 (GRAFANA_PORT)"]
+        GRA["Grafana :3000 (GRAFANA_PORT)"]
     end
     SIM & ESP <-->|MQTT iot/fleet/*| MOS
     MOS <-->|HTTP REST| API
@@ -91,7 +91,7 @@ docker compose --profile demo up --build -d
 docker compose ps
 ```
 
-This spins up: backend (FastAPI :8000), Mosquitto (:1883), Prometheus (:9090), Grafana (`GRAFANA_PORT`, default :3000), and a device simulator (15 virtual devices with 20% OTA failure rate; OBD fields + fault scenarios via `SIMULATOR_OBD`/`SIMULATOR_SCENARIO`). The first 3 devices are EVs with battery simulation.
+This spins up: backend (FastAPI :8000), Mosquitto (:1883), Prometheus (:9090), Grafana (`GRAFANA_PORT`, default :3000), and a device simulator (5 virtual devices via compose with 20% OTA failure rate; OBD fields + fault scenarios via `SIMULATOR_OBD`/`SIMULATOR_SCENARIO`). The first 3 devices are EVs with battery simulation.
 
 ### Access the Interfaces
 
@@ -100,12 +100,12 @@ This spins up: backend (FastAPI :8000), Mosquitto (:1883), Prometheus (:9090), G
 | Fleet Dashboard | http://localhost:8181 | Google OAuth or admin/adminadmin |
 | API Docs (Swagger) | http://localhost:8181/docs | — |
 | Prometheus | http://localhost:9090 | — |
-| Grafana | http://localhost:3050 (`GRAFANA_PORT`) | admin / admin |
+| Grafana | http://localhost:3000 (`GRAFANA_PORT`, default 3000) | admin / admin |
 
 ## Running Tests
 
 ```bash
-# Run E2E tests (45 tests) against a clean stack
+# Run E2E tests (48 tests) against a clean stack
 docker compose down --volumes --remove-orphans
 docker compose --profile testing run --build --rm tests
 
@@ -265,7 +265,7 @@ python -m pytest tests/test_aegis_unit.py tests/test_v2g.py tests/test_simulator
 | `GET` | `/aegis/scan` | Trigger on-demand remediation scan |
 | `GET` | `/aegis/summary` | Summary counts for dashboard panel |
 | `POST` | `/aegis/ingest` | Webhook receiver for external Alertmanager |
-| `POST` | `/aegis/rerun/{id}` | Re-run a specific remediation action |
+| `POST` | `/agents/aegis/rerun/{remediation_id}` | Re-run a specific remediation action |
 
 ### Agent Recommendations (6 Agents)
 
@@ -315,7 +315,10 @@ All configuration is via environment variables (see `.env.example`):
 | `SIMULATOR_HEARTBEAT_INTERVAL` | `10` | Seconds between heartbeats |
 | `SIMULATOR_OTA_FAILURE_RATE` | `0.2` | Probability of OTA hash mismatch |
 | `SIMULATOR_CITIES` | `Bangalore,Mumbai,Delhi` | Comma-separated city list |
-| `TELEMETRY_RETENTION_DAYS` | `30` | Telemetry data retention |
+| `TELEMETRY_RETENTION_DAYS` | `7` | Telemetry data retention (forward-only) |
+| `TELEMETRY_HOT_HOURS` | `24` | Raw rows kept on hot disk |
+| `RETENTION_SWEEP_INTERVAL_SECONDS` | `600` | Retention worker interval |
+| `DEFAULT_REGION` | `default` | Region tag stamped on telemetry |
 | `GEOFENCE_CHECK_INTERVAL_SECONDS` | `30` | Geofence check interval |
 | `OTA_SCHEDULER_INTERVAL_SECONDS` | `30` | Scheduled OTA poll interval |
 | `COMMAND_QUEUE_TTL_SECONDS` | `86400` | Queued command TTL |
@@ -331,7 +334,7 @@ All configuration is via environment variables (see `.env.example`):
 
 ## Security & Dependency Management
 
-All Python dependencies are pinned to exact versions in `requirements.txt`. Pre-commit hook runs `pip-audit` + `bandit`. See [`SECURITY.md`](SECURITY.md) for the security policy.
+All Python dependencies are pinned to exact versions in `requirements.txt`. Schema upgrades via `alembic/` revisions. See [`SECURITY.md`](SECURITY.md) for the security policy.
 
 - Firmware integrity: SHA256 hash + optional Ed25519 signature
 - Auth: Google OAuth + admin basic auth + RBAC roles
@@ -355,26 +358,29 @@ fleet-management/
 │   ├── main.py               # App entry, lifespan, MQTT handlers, schedulers
 │   ├── config.py             # Pydantic settings (env-based)
 │   ├── database.py           # SQLAlchemy async engine & session
-│   ├── models.py             # ORM models (16 tables)
+│   ├── models.py             # ORM models (22 tables + registry/twin/WO/rollups)
 │   ├── schemas.py            # Pydantic request/response schemas
 │   ├── mqtt_client.py        # MQTT v5 client wrapper
 │   ├── ota_manager.py        # OTA state machine + timeout watcher
 │   ├── alert_engine.py       # Alert engine with dedup, cooldown, multi-channel
-│   ├── metrics.py            # 30+ Prometheus metrics
+│   ├── metrics.py            # ~50 Prometheus metrics
 │   ├── audit.py              # Audit log helper
 │   ├── event_emitter.py      # Webhook event fan-out with HMAC
 │   ├── firmware_signing.py   # Ed25519 sign/verify
 │   ├── geofence_checker.py   # Geofence math (haversine, point-in-polygon)
-│   ├── predictive_maintenance.py  # Telemetry trend analysis
+│   ├── predictive_maintenance.py  # Telemetry trend analysis (legacy slopes)
+│   ├── retention.py          # 24h-hot rollup + tiered retention worker
 │   ├── spot_prices.py        # Real spot-price integration
 │   ├── v2g_optimizer.py      # V2G arbitrage optimizer
-│   ├── aegis/                # Aegis Auto-Remediation Engine (8 files)
-│   ├── routers/              # API route handlers (14 routers)
+│   ├── ml/                   # Model registry + hybrid inference + eval scenarios
+│   ├── obd/                  # DTC decode table
+│   ├── aegis/                # Aegis Auto-Remediation Engine (10 files)
+│   ├── routers/              # API route handlers (22 routers + twin/workorders/obd)
 │   └── templates/            # Jinja2 templates
 │       └── dashboard.html    # Fleet UI dashboard (Chart.js, Leaflet, modals)
 ├── agents/                   # 6 AI agents (dual-mode: heuristic + CrewAI)
 ├── simulator/                # Virtual device simulator
-├── tests/                    # 91 unit tests + 40 E2E tests
+├── tests/                    # 91 unit tests + 48 E2E tests (+ eval/strict suites)
 ├── run_agents.py             # CLI runner for all agents
 ├── demo_pitch.sh             # Automated demo pitch script
 ├── docker-compose.yml        # Multi-service orchestration
@@ -389,9 +395,8 @@ fleet-management/
 |---|---|
 | [DEMO_GUIDE.md](DEMO_GUIDE.md) | Presentation scripts (3 styles) + automated pitch |
 | [CUDO.md](CUDO.md) | Customer user documentation (full API + config reference) |
-| [architecture.md](architecture.md) | Architecture diagram with 7 animated flows |
-| [AGENTS.md](AGENTS.md) | Agent session context + session history |
-| [AI_AGENTS.md](AI_AGENTS.md) | Agent architecture deep dive |
+| [architecture.md](architecture.md) | Architecture diagram with 12 animated flows |
+| [AI_AGENTS.md](AI_AGENTS.md) | Agent session context + architecture deep dive |
 | [SECURITY.md](SECURITY.md) | Security hardening guide |
 | [SCALING.md](SCALING.md) | Scaling strategy for production |
 | [ESP32_GUIDE.md](ESP32_GUIDE.md) | ESP32 Arduino sketch for real hardware |

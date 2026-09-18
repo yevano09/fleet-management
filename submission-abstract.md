@@ -29,24 +29,24 @@ Fleet Commander solves all four with a unified, AI-driven platform that is alrea
 
 ## 3. Details of the project idea
 
-Fleet Commander is a **production-grade, open-source IoT fleet management system** that runs 5 containerized services (FastAPI backend, Mosquitto MQTT broker, Prometheus, Grafana, device simulator) orchestrated via Docker Compose.
+Fleet Commander is a **production-grade, open-source IoT fleet management system** that runs 9 containerized services (FastAPI backend + API replicas, Mosquitto + TLS brokers, Postgres, Prometheus, Grafana, device simulator, test runner) orchestrated via Docker Compose profiles.
 
 ### Core Architecture
 
-- **99 REST API endpoints** over 14 routers — device management, OTA, telemetry, geofencing, command queue, shadow state, provisioning, lifecycle, webhooks, Aegis remediation, V2G, predictive maintenance, alerts, audit
-- **100+ MQTT topics** with 11 canonical topic patterns — device registration, heartbeats, OTA commands, V2G dispatch, remote config, shadow sync, geofence alerts
-- **16 database tables** — SQLite (dev) or PostgreSQL (prod) via SQLAlchemy async
-- **30+ Prometheus metrics** — fleet size, OTA deployments, API latency, MQTT message throughput, alert activity, Aegis actions
-- **Live dashboard** — Jinja2/HTMX with Chart.js telemetry trends, Leaflet fleet map, OTA lifecycle tracking, agent recommendation cards
+- **~115 REST API endpoints** over 22 routers (+ agents/aegis) — device management, OTA, telemetry, geofencing, command queue, shadow state, provisioning, lifecycle, webhooks, Aegis remediation, V2G, predictive maintenance, alerts, audit, work orders, digital twin, OBD helpers, model registry
+- **MQTT topics**: heartbeat/obd/bms/status/register inbound, command fan-out (ota/config/v2g/restart/rollback/shadow/maintenance) — ACL-locked per device identity
+- **24 database tables** — SQLite (dev) or PostgreSQL (prod) via SQLAlchemy async, Alembic revisions, 7-day retention with 5-min rollups
+- **~49 Prometheus metric families** — fleet size, OTA deployments, API latency, MQTT message throughput, alert activity, Aegis actions, ML inference, work orders, retention
+- **Live dashboard** — Jinja2 + Tailwind utilities with Chart.js telemetry trends, Leaflet fleet map + vehicle tree, OTA lifecycle tracking, agent recommendation cards, Twin tab, Maintenance panel
 
 ### Six AI Agents (Heuristic + Optional CrewAI LLM)
 
 | Agent | Function |
 |---|---|
-| **OTA Campaign Agent** | Canary-based rollout planner (10% → 50% → 100%) with automatic rollback on failure |
-| **Fleet Health / Anomaly Agent** | Detects offline devices, signal degradation, V2G revenue drops; triggers multi-channel alerts |
-| **Device Grouping Agent** | Clusters devices by firmware version, signal strength, and geographic proximity |
-| **V2G Dispatch Agent** | Computes optimal charge/discharge schedule using real spot-price data |
+| **OTA Campaign Agent** | Canary-based rollout planner (10% canary → phased rollout) with automatic rollback on failure |
+| **Fleet Health / Anomaly Agent** | Detects weak signals, stuck OTAs, failure spikes, mass/offline devices, V2G revenue drops; triggers multi-channel alerts |
+| **Device Grouping Agent** | Groups devices by firmware version and signal-strength buckets |
+| **V2G Dispatch Agent** | Computes charge/discharge schedule using spot-price data (mock by default, pluggable providers) |
 | **Device Onboarding Agent** | Conflict detection (MQTT client IDs, IPs, names) with auto-registration and firmware recommendation |
 | **Predictive Maintenance Agent** | Linear-regression trend analysis on telemetry (signal, SOC, temperature) predicting failures before they happen |
 
@@ -68,14 +68,20 @@ Fleet Commander is a **production-grade, open-source IoT fleet management system
 
 ### Test Coverage
 
-- 91 unit tests, 40 end-to-end integration tests — all passing
-- Simulator runs 5 virtual devices (3 EVs) with 20% OTA failure rate
+- 91 unit tests, 48 end-to-end integration tests (+ strict/RBAC, ML-eval and PKI suites) — all passing
+- Simulator runs 5 virtual devices via compose (3 EVs) with 20% OTA failure rate, VIN profiles, OBD/BMS feeds and fault-injection scenarios
 
 ---
 
-## 4. Board selection and role
+## 4. Board selection and role (hardware track — aspirational roadmap)
 
-**Primary: M5Stack CoreS3-SE** — Acts as the fleet edge gateway and local display terminal. The CoreS3-SE's ESP32-S3 dual-core processor runs the MQTT client that communicates with the backend for OTA updates, heartbeat reporting, and command reception. Its 2-inch IPS screen displays:
+> **Status note:** the hardware below is the competition/demo roadmap, not the
+> current integration. Today the ESP32 stays a thin MQTT publisher (heartbeat /
+> OTA / config — see `ESP32_GUIDE.md`); there is no on-device inference, Edge
+> Impulse pipeline, BLE gatewaying, or CAN/BMS drivers in the repo. The vehicle
+> simulator emulates these feeds (`source=sim|obd`) until hardware lands.
+
+**Primary: M5Stack CoreS3-SE** — Intended fleet edge gateway and local display terminal. The CoreS3-SE's ESP32-S3 dual-core processor runs the MQTT client that communicates with the backend for OTA updates, heartbeat reporting, and command reception. Its 2-inch IPS screen displays:
 - Real-time device status and health
 - Geofence breach alerts with location context
 - Local OTA progress bar during firmware updates
@@ -100,8 +106,8 @@ This **3-tier architecture** demonstrates the full power of the system: cloud in
 | **Auto-Remediation** | None (human-in-loop always) | Aegis engine: 8 autonomous rules, DLQ, dry-run, configurable threshold |
 | **Fleet Scale** | Handful of devices | Designed for 10,000+ with offline command queue, shadow sync, bulk provisioning |
 | **Energy Intelligence** | Fixed charge/discharge | V2G arbitrage with real spot prices, battery SOC forecasting, grid-aware scheduling |
-| **Observability** | Simple logging | Prometheus + Grafana + 30 metrics + Chart.js trends + Leaflet fleet map |
-| **State** | Design doc or prototype | Fully built, containerized, 131 tests passing, running in Docker with 5 virtual devices |
+| **Observability** | Simple logging | Prometheus + Grafana + ~49 metric families + Chart.js trends + Leaflet fleet map |
+| **State** | Design doc or prototype | Fully built, containerized, 192 tests passing, running in Docker with 5 virtual devices |
 
 **Key differentiator**: This is not a slide-deck project or a glued-together demo. It is a **fully functional, production-ready** fleet management platform that already manages virtual devices via real MQTT, stores telemetry, executes OTA state machines with rollback, runs AI agents making real recommendations, and can connect to physical ESP32 hardware today. The ESP32 Arduino sketch is included in the repository.
 
@@ -112,12 +118,12 @@ This **3-tier architecture** demonstrates the full power of the system: cloud in
 *Solo project — all work by a single developer.*
 
 Roles covered:
-- **Backend Engineering** — FastAPI, SQLAlchemy async, 99 endpoints, 16 database tables
-- **AI/ML Engineering** — 6 heuristic agents, predictive maintenance (linear regression), CrewAI LLM integration
-- **DevOps & Infrastructure** — Docker Compose, 5 containers, Prometheus, Grafana, healthchecks
-- **UI/UX** — Jinja2/HTMX dashboard, Chart.js, Leaflet maps, auto-refresh, modal workflows
+- **Backend Engineering** — FastAPI, SQLAlchemy async, ~115 endpoints, 24 database tables
+- **AI/ML Engineering** — 6 heuristic agents, registry IsolationForest with eval gates (legacy-slope fallback), CrewAI LLM integration
+- **DevOps & Infrastructure** — Docker Compose, 9 services across demo/testing/production profiles, Prometheus, Grafana, healthchecks
+- **UI/UX** — Jinja2 + Tailwind dashboard, Chart.js, Leaflet maps + vehicle tree, Twin tab, auto-refresh with pause-live, modal workflows
 - **Firmware & Hardware** — ESP32 Arduino sketch, MQTT topics, telemetry protocol, OTA state machine
-- **Testing** — 91 unit tests, 40 E2E integration tests
+- **Testing** — 91 unit tests, 48 E2E integration tests (+ eval/strict/PKI suites)
 - **Documentation** — README, architecture.md, CUDO.md, DEMO_GUIDE.md, AI_AGENTS.md, SECURITY.md, SCALING.md
 
 ---
@@ -168,15 +174,15 @@ Yes — Fleet Commander is published as an open-source repository with comprehen
 
 | Layer | Technology | Role |
 |---|---|---|
-| **Backend** | **Python 3.13** + **FastAPI** (async, 0.115.12) | REST API framework — 99 endpoints, auto-generated Swagger docs |
-| **ORM** | **SQLAlchemy 2.0** (async) + **aiosqlite** | 16-table database with migration-free dev setup |
-| **Messaging** | **paho-mqtt 2.1** (MQTT v5) | Device communication over 11 topic patterns |
-| **Dashboard** | **Jinja2** + **HTMX** + **Chart.js 4.4** + **Leaflet 1.9** | Live dashboard with auto-refresh, interactive maps, telemetry charts |
-| **AI Agents** | Custom **heuristic agents** + optional **CrewAI** (LLM) | 6 agents: OTA planning, anomaly detection, V2G, predictive, onboarding, grouping |
-| **Monitoring** | **Prometheus** (scrape /metrics) + **Grafana** | 30+ metrics, pre-provisioned dashboards |
-| **Containerization** | **Docker Compose** (5 services) | Production-grade orchestration with healthchecks |
+| **Backend** | **Python 3.12-slim** + **FastAPI 0.138.0** (async) | REST API framework — ~115 endpoints, auto-generated Swagger docs |
+| **ORM** | **SQLAlchemy 2.0** (async) + **aiosqlite**/**asyncpg** | 24-table database, Alembic revisions, 7-day retention |
+| **Messaging** | **paho-mqtt 2.1** (MQTT v5) | Device communication: heartbeat/obd/bms/status/register + command fan-out |
+| **Dashboard** | **Jinja2** + **Tailwind v4** + **Chart.js 4.4** + **Leaflet 1.9** | Live dashboard with pause-live refresh, Twin tab, vehicle tree |
+| **AI Agents** | Custom **heuristic agents** + registry **IsolationForest** (eval-gated) + optional **CrewAI** (LLM) | 6 agents: OTA planning, anomaly detection, V2G, predictive, onboarding, grouping |
+| **Monitoring** | **Prometheus** (scrape /metrics) + **Grafana** | ~49 metric families, pre-provisioned dashboards |
+| **Containerization** | **Docker Compose** (9 services, 3 profiles) | Production-grade orchestration with healthchecks |
 | **Security** | **cryptography** (Ed25519 signing), **python-multipart** | Firmware signing, secure file upload |
-| **Testing** | **pytest 9.0** + **pytest-asyncio** + **httpx** | 91 unit tests + 40 E2E integration tests |
+| **Testing** | **pytest 9.0** + **pytest-asyncio** + **httpx** | 91 unit tests + 48 E2E integration tests |
 | **IDE** | **VS Code** + **Cursor** | Development and AI-assisted coding |
 | **Version Control** | **Git** + **GitHub** | Source management with automated pre-commit audits |
 

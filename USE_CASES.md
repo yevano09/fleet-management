@@ -64,7 +64,7 @@ Not yet a UC (AIoT roadmap, see `docs/aiot-gap-analysis.md` §4–§5): edge inf
 * **Postconditions:** Device row created or refreshed with `status=online`; `active_devices` and `total_devices` gauges incremented appropriately; audit log entry written; `device.registered` / `device.reconnected` events emitted to webhooks.
 
 #### 2. Technical Execution Flow
-* **Entry Point(s):** `app/routers/devices.py:23` (`register_device`, REST); `app/main.py:172` (`handle_mqtt_register`, MQTT handler).
+* **Entry Point(s):** `app/routers/devices.py:27` (`register_device`, REST); `app/main.py:318` (`handle_mqtt_register`, MQTT handler).
 * **Key Components & Services:** SQLAlchemy `Device` model; `app/metrics.py` gauges; `app/audit.py:log_action()`; `app/event_emitter.py:emit_event()`; async tasks `_flush_command_queue()` / `_sync_shadow_to_device()`.
 * **Data Flow & Dependencies:** Lookup order by `mqtt_client_id` → `id` → `name`; update-or-insert into SQLite/PostgreSQL; metrics counters incremented in-process; background tasks scheduled on reconnect.
 * **Error Handling & Edge Cases:** Duplicate name re-registers existing row (no error); missing optional fields skipped gracefully; Pydantic validation rejects malformed payloads (422); offline→online transition triggers command flush + shadow sync exactly once.
@@ -108,7 +108,7 @@ sequenceDiagram
 * **Postconditions:** Device `last_seen/status/signal/soc/soh/battery_temp/plug_status/lat/lng/city` updated; one `Telemetry` row inserted; geofence evaluation task spawned when GPS present; `v2g_active_discharges` gauge adjusted on plug-state transitions.
 
 #### 2. Technical Execution Flow
-* **Entry Point(s):** `app/main.py:230` (`handle_mqtt_heartbeat`); `app/main.py:52` (`_record_telemetry`); `app/routers/devices.py:78` (`device_heartbeat`).
+* **Entry Point(s):** `app/main.py:532` (`handle_mqtt_heartbeat`); `app/main.py:118` (`_record_telemetry` batch queue); `app/routers/devices.py:117` (`device_heartbeat`).
 * **Key Components & Services:** `Telemetry` model; `geofence_checker.check_device_position()`; `alert_engine.AlertEngine.process_anomalies()`; metrics `telemetry_points_total`, `device_soc`, `v2g_active_discharges`.
 * **Data Flow & Dependencies:** MQTT thread → `run_coroutine_threadsafe` onto asyncio loop → single DB session update → fire-and-forget async tasks for telemetry insert and geofence check.
 * **Error Handling & Edge Cases:** Unknown device silently ignored; telemetry/geofence failures logged at debug without breaking heartbeat ACK; plug_status transition detection is edge-triggered (inc on start discharge, dec on stop).
@@ -154,7 +154,7 @@ sequenceDiagram
 * **Postconditions:** `Firmware` row persisted (version, filename, sha256_hash, binary_path, file_size, signature?, signing_key_id?, signed_by?); file on disk under `./firmware/`; `firmware_signed_total` incremented when signed; audit entry `firmware.upload`.
 
 #### 2. Technical Execution Flow
-* **Entry Point(s):** `app/routers/ota.py:29` (`upload_firmware`); helper `app/firmware_signing.py:sign_firmware()`.
+* **Entry Point(s):** `app/routers/ota.py:30` (`upload_firmware`); helper `app/firmware_signing.py:sign_firmware()`.
 * **Key Components & Services:** FastAPI UploadFile streaming; hashlib SHA-256; `cryptography` Ed25519 signer; `Firmware` model; metrics counter; audit log.
 * **Data Flow & Dependencies:** Read bytes → hash → write file → sign (optional) → INSERT row → audit/event fan-out.
 * **Error Handling & Edge Cases:** Oversize → 413 (checked both declared size and actual content length); duplicate version → 409; signing library absent → unsigned stored (graceful degradation); path traversal prevented via `os.path.basename`.
@@ -194,7 +194,7 @@ sequenceDiagram
 * **Postconditions:** N deployments created (`pending`→`downloading` on publish success); each device's `current_ota_id` + `previous_firmware_version` stamped; watchers started (`ota_timeout_seconds` default 120 s); metrics `ota_deployments_total{triggered|mqtt_failed}` updated; event `ota.triggered` emitted.
 
 #### 2. Technical Execution Flow
-* **Entry Point(s):** `app/routers/ota.py:98` (`trigger_ota`); shared deployment creator `app/routers/scheduled_ota.py:_create_deployment()`.
+* **Entry Point(s):** `app/routers/ota.py:101` (`trigger_ota`); shared deployment creator `app/routers/scheduled_ota.py:246` (`_create_deployment`).
 * **Key Components & Services:** `mqtt_client.publish_ota_command()`; `ota_timeout_watcher.start_watch()`; metrics; audit; webhook emitter.
 * **Data Flow & Dependencies:** Resolve firmware → resolve target set → loop: create deployment (flush for id) → stamp device fields → MQTT publish → branch on rc → commit batch.
 * **Error Handling & Edge Cases:** Partial MQTT failure tolerated—failures collected in `mqtt_failures[]` and surfaced in response; unknown firmware 404; broker down 503; per-deployment watcher replaces prior watch if re-triggered.
@@ -241,7 +241,7 @@ sequenceDiagram
 * **Postconditions:** Terminal status persisted; on success device runs new firmware and `current_ota_id` cleared; on rolled_back device restored to `previous_firmware_version`; error messages captured; in-progress gauge adjusted.
 
 #### 2. Technical Execution Flow
-* **Entry Point(s):** `app/ota_manager.py:OtaStateMachine.handle_ota_status()` (wired at `app/main.py:397`); `update_deployment_status()`; `OtaTimeoutWatcher.watch_deployment()`.
+* **Entry Point(s):** `app/ota_manager.py:98` (`OtaStateMachine.handle_ota_status`, wired at `app/main.py:741`); `update_deployment_status()`; `OtaTimeoutWatcher.watch_deployment()`.
 * **Key Components & Services:** Transition validation table; session-per-operation factory; restart-recovery `_recover_ota_timeout_watches()` (Bug 6 fix) re-arms watches for non-terminal deployments after backend restart.
 * **Data Flow & Dependencies:** MQTT callback → mapped enum → guarded UPDATE chain (hash_mismatch auto-cascades rollback→rolled_back) → device-row reconciliation → commit.
 * **Error Handling & Edge Cases:** Unknown status string ignored with warning; illegal transition rejected (returns None, no partial writes); retry policy: watcher increments `retry_count` and republishes until `max_retry_count`, then marks failed "Timeout after max retries".
@@ -285,7 +285,7 @@ sequenceDiagram
 * **Postconditions:** Schedule lifecycle `scheduled → running → completed|failed` recorded with timestamps and deployment id list; canary-first ordering preserved; blackout deferral leaves schedule intact for next tick; metrics `ota_scheduled_total{status}` updated; completion webhook emitted.
 
 #### 2. Technical Execution Flow
-* **Entry Point(s):** `app/routers/scheduled_ota.py` (CRUD + `run_due_schedules`); `app/main.py:328`.
+* **Entry Point(s):** `app/routers/scheduled_ota.py` (CRUD + `run_due_schedules`); `app/main.py:637` (`_ota_scheduler_loop`).
 * **Key Components & Services:** Reuses `_create_deployment()` from UC-04; `settings.ota_firmware_base_url` for URL construction; audit + webhooks.
 * **Data Flow & Dependencies:** Query due schedules → per-schedule transactional state changes → canary slice then remainder → aggregate deployment ids back onto schedule row.
 * **Error Handling & Edge Cases:** Blackout window check `start ≤ hour < end` skips execution that tick; missing firmware/devices ⇒ `failed` with `error_message`; unexpected exception marks failed but never kills the loop; cancel/pause/resume enforce legal source states (409 otherwise).
@@ -331,7 +331,7 @@ sequenceDiagram
 * **Postconditions:** `Alerts` rows created or count-incremented with dedup_key `type:primary_device`; warning escalates to critical at count ≥ 3; cooldown table suppresses notification storms; metrics `fleet_alerts_total/_active/_notifications_total` maintained.
 
 #### 2. Technical Execution Flow
-* **Entry Point(s):** `agents/routers.py:_run_anomaly_agent()`; detectors `agents/async_tools.async_detect_anomalies()`; pipeline `app/alert_engine.AlertEngine.process_anomalies()`.
+* **Entry Point(s):** `agents/routers.py:71` (`_run_anomaly_agent`); detectors `agents/async_tools.py:192` (`async_detect_anomalies`); pipeline `app/alert_engine.AlertEngine.process_anomalies()`.
 * **Key Components & Services:** Channel classes SlackChannel/EmailChannel/WebhookChannel (env-driven construction); escalation threshold constant; re-notify endpoint forces channel fan-out for a specific alert.
 * **Data Flow & Dependencies:** Pure read queries → anomaly dicts → per-anomaly dedup lookup → create vs increment branch → channel fan-out (requests calls wrapped in try/except).
 * **Error Handling & Edge Cases:** Cooldown map keyed by dedup_key prevents duplicate notifications within type-specific windows (120–3600 s); channel send failure isolated per channel; escalation only mutates message prefix once.
@@ -380,7 +380,7 @@ sequenceDiagram
 * **Postconditions:** Structured groups list (name, dimension, value, device_ids, count, rationale) returned; no persistence (pure computation).
 
 #### 2. Technical Execution Flow
-* **Entry Point(s):** `agents/routers.get_device_groups()` → `async_suggest_device_groups()` (`agents/async_tools.py:140`).
+* **Entry Point(s):** `agents/routers.py:201` (`get_device_groups`) → `async_suggest_device_groups()` (`agents/async_tools.py:140`).
 * **Key Components & Services:** Reuses canonical device serialization (incl. mqtt_client_id fix from Session 3).
 * **Data Flow & Dependencies:** Single devices query → two in-memory grouping passes → threshold filter.
 * **Error Handling & Edge Cases:** Empty fleet returns explanatory message; devices lacking signal default to 0 (poor bucket); O(n) complexity safe for large fleets.
@@ -1185,8 +1185,8 @@ sequenceDiagram
 | **Datetime handling** | Naive UTC via `app/utils.utcnow()` everywhere (SQLite tz-safety) |
 | **Agent execution modes** | In-backend direct SQLAlchemy (`agents/async_tools.py`) vs standalone HTTP (`agents/tools.py`) to avoid self-referential deadlock |
 | **MQTT resilience** | v5 protocol, QoS 1, `reconnect_delay_set(1,60)` on backend & simulator |
-| **Observability** | ~30 Prometheus metrics; Grafana overview; trailing-slash `/metrics/` note |
-| **Testing** | 40 E2E (`tests/test_e2e.py`) + 68 unit tests, all green |
+| **Observability** | ~49 metric families (42 fleet + 7 aegis); Grafana overview; trailing-slash `/metrics/` note |
+| **Testing** | 48 E2E (`tests/test_e2e.py`) + 144 other test fns (192 total), all green |
 | **Security posture** | Ed25519 signing (opt-in enforcement), HMAC webhooks, RBAC roles scaffold, hardened Dockerfiles |
 
 ## Traceability Index

@@ -1,5 +1,11 @@
 # Agent prompt: P0 production hardening (UC-23 … UC-27)
 
+> **STATUS: COMPLETE — do not re-execute.** UC-23…UC-27 shipped and are proven by
+> `scripts/verify-p0.sh` (exit 0). This file is kept as the historical mission
+> brief; its "Ground truth today" section below describes the PRE-P0 codebase and
+> is stale by design. Current state: `USE_CASES.md` UC-23…UC-27, `SECURITY.md`.
+> Paths below predate renames (`AGENTS.md`→`AI_AGENTS.md`, Windows paths).
+
 Copy everything below the line into a new coding-agent chat (or open this file and say “execute this prompt”). Do not implement P1/P2. Do not refactor unrelated features. Verify with a real Docker production-profile deployment before declaring done.
 
 ---

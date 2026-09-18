@@ -16,10 +16,10 @@ Interactive HTML diagram at `architecture.html`. Open in any browser and click t
 | **Telemetry Batch Worker** | Bounded batch commits (200 rows / 1s, shed + counted) | Background loop · leader-only | co-located |
 | **Retention Worker** | 24h-hot rollups + tiered expiry (7d default) | Background loop · 10min interval + boot sweep | co-located |
 | **ML Registry & Inference** | Seeded IsolationForest, hybrid forest+z scoring, eval gates | scikit-learn · joblib · registry table | scan `?model=auto\|ml\|legacy` |
-| **SQLite / PostgreSQL** | Primary datastore — 20 tables (+ Alembic revisions) | Dev: aiosqlite · fleet.db / Prod: asyncpg :5432 | file-based / :5432 |
+| **SQLite / PostgreSQL** | Primary datastore — 24 tables (+ Alembic revisions) | Dev: aiosqlite · fleet.db / Prod: asyncpg :5432 | file-based / :5432 |
 | **Mosquitto MQTT** | Message broker — heartbeat/obd/bms/status/register/command topics | eclipse-mosquitto:2 · pub/sub · persistence on | :1883 / :8883 mTLS |
-| **Device Simulator** | Virtual vehicles (15, VIN profiles, OBD/BMS feeds, fault scenarios) | Python · paho-mqtt · telemetry + GPS + battery + cells | MQTT heartbeat 10s |
-| **Prometheus** | Metrics collection — 60+ metrics | v2.53.0 · 7d retention | :9090 |
+| **Device Simulator** | Virtual vehicles (5 via compose; VIN profiles, OBD/BMS feeds, fault scenarios) | Python · paho-mqtt · telemetry + GPS + battery + cells | MQTT heartbeat 10s |
+| **Prometheus** | Metrics collection — ~49 metric families (42 fleet + 7 aegis) | v2.53.0 · 7d retention | :9090 |
 | **Grafana** | Visualization dashboards | 11.1.0 · pre-provisioned | :3050 (`GRAFANA_PORT`) |
 | **Live Fleet Map** | Interactive device location + geofence overlays + vehicle tree | Leaflet 1.9.4 · OpenStreetMap · city-color markers | dashboard embed |
 | **Digital Twin view** | Merged asset page: health score, vehicle, risks, alerts, schedules | `GET /twin/{id}` · Twin tab | dashboard embed |
@@ -29,12 +29,15 @@ Interactive HTML diagram at `architecture.html`. Open in any browser and click t
 
 ---
 
-## Database Schema (21 Tables + Alembic)
+## Database Schema (24 Tables + Alembic)
 
 Schema upgrades via `alembic/` revisions (async env); legacy files bootstrapped in code. Telemetry keeps 7 days by default (24h hot raw + 5-min warm rollups).
 
 | Table | Purpose |
 |---|---|
+| `organizations` | Tenant roots for org isolation |
+| `api_keys` | Machine credentials (hash-only) |
+| `device_certificates` | mTLS device identity + CRL |
 | `devices` | Device records (GPS, battery, lifecycle, city, claim_token, VIN/make/model/year) |
 | `firmware` | Firmware binaries (SHA256 + Ed25519 signature) |
 | `ota_deployments` | OTA deployment tracking (state machine) |
@@ -54,8 +57,8 @@ Schema upgrades via `alembic/` revisions (async env); legacy files bootstrapped 
 | `work_orders` | Maintenance tickets linked from alerts (MTTR) |
 | `webhook_subscriptions` | Outbound webhook configs (Feature 11) |
 | `event_log` | Emitted event delivery tracking (Feature 11) |
-| `remediations` | Aegis remediation records |
-| `rule_configs` | Aegis rule override configs |
+| `remediations` | Aegis remediation records (`app/aegis/models.py`) |
+| `rule_configs` | Aegis rule override configs (`app/aegis/models.py`) |
 
 ---
 
@@ -120,7 +123,7 @@ Full lifecycle from firmware upload (with optional Ed25519 signing) through depl
 2. **Backend → DB** — Dedup LRU + odometer guard → bounded batch queue (200 rows/1s) → tenant/region-stamped rows
 3. **Retention worker (10m)** — Rolls newly-cold raw into `telemetry_5m`; drops raw + rollups past 7d default
 4. **User → Backend** — POST `/predictive/scan?model=auto|ml|legacy`; registry IsolationForest or legacy slopes
-5. **Backend → DB** — PredictedFailure records with `model_version`; eval gates (lead ~22–28 steps, FP 0%)
+5. **Backend → DB** — PredictedFailure records with `model_version`; eval gates (min lead 8/8/4 steps, max FP 5%)
 6. **Dashboard** — Device detail modal (Telemetry charts, Twin, Shadow, Lifecycle, Commands); predictive panel with model chips + risk meters; reads >24h come from rollups
 
 ### 5. Geofencing & Geo-alerts
@@ -150,7 +153,7 @@ The live monitoring UI with auto-refreshing panels, Chart.js charts, Leaflet map
 3. **Dashboard polls** — Devices/table (5s, auto-paused by dialogs), MQTT status (10s), alerts (10s), Aegis (10s), agents (30s), predictions (30s), geofences (60s), schedules (30s), work orders (30s), queue (15s); manual Live/Pause toggle
 4. **Device detail modal** — Tabs: Telemetry (Chart.js charts + OBD summary), Twin (health + vehicle + risks), Shadow (versions/sources), Lifecycle, Commands; paginated table (10/page) with persistent selection
 5. **Vehicle tree** — Status → city → device hierarchy beside the map; select filters markers, double-click opens details
-6. **Prometheus → Grafana** — 60+ metrics scraped every 10s; pre-provisioned dashboards
+6. **Prometheus → Grafana** — ~49 metric families scraped every 10s; pre-provisioned dashboards
 
 ### 8. Alert Pipeline + Work Orders + Aegis Integration
 
@@ -192,7 +195,7 @@ The live monitoring UI with auto-refreshing panels, Chart.js charts, Leaflet map
 1. **Inject** — `SIMULATOR_SCENARIO=thermal|drift|tpms` arms a monotonic fault with known onset
 2. **Predict** — POST `/predictive/scan?model=auto` scores trailing-24 windows (registry model or legacy fallback); predictions carry `model_version`
 3. **Act** — Alert fires → 3rd escalation auto-opens work order → operator closes with resolution (MTTR)
-4. **Verify** — Seeded eval harness (5 tests) + backtest gates: lead ~22–28 steps, FP 0%, legacy 0/10 on tpms
+4. **Verify** — Seeded eval harness (5 tests) + backtest gates: min lead 8/8/4 steps, max FP 5%, legacy 0/10 on tpms
 5. **Observe** — Twin view shows health, risks, alerts with WO links; Maintenance panel tracks tickets
 
 ---
@@ -222,5 +225,5 @@ The live monitoring UI with auto-refreshing panels, Chart.js charts, Leaflet map
 8. **"How do alerts get to Slack?"** — Flow 8: Anomaly detection → dedup → escalation → multi-channel
 9. **"How does Aegis auto-heal the fleet?"** — Flow 9: scrape → classify → decide → act → record → 8 rules
 10. **"How do I provision devices at scale?"** — Flow 10: Bulk CSV import → QR-claim → lifecycle management
-11. **"Where does vehicle/OBD data flow?"** — Flow 7: VIN register → obd/bms topics → dedup/guards → batch store → twin vehicle block
-12. **"Show me the AI loop end to end"** — Flow 8: fault injection → ML prediction → alert → work order → twin
+11. **"Where does vehicle/OBD data flow?"** — Flow 11: VIN register → obd/bms topics → dedup/guards → batch store → twin vehicle block
+12. **"Show me the AI loop end to end"** — Flow 12: fault injection → ML prediction → alert → work order → twin

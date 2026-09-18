@@ -95,7 +95,7 @@ flowchart TD
         direction TB
         AR["/agents/* Router"]
         AT["async_tools.py<br/>(18 async DB tools)"]
-        HT["tools.py<br/>(17 HTTP tools)"]
+        HT["tools.py<br/>(23 HTTP tools)"]
         
         subgraph Agents["6 Phase 1 Agents"]
             OTA["OTA Campaign<br/>Strategist"]
@@ -139,7 +139,7 @@ Suggests a phased rollout plan with canary group, rollout phases, and gate crite
 
 **Heuristic logic:**
 1. Fetch online devices and target firmware
-2. Select 1 canary device (lowest signal strength → conservative pick)
+2. Select a 10% canary slice (`canary_size = max(1, len(devices)//10)`)
 3. Define 3 rollout phases with gate criteria:
    - Phase 1: canary (1 device, 120s monitor, <20% failure gate)
    - Phase 2: 30% of remaining (failure rate < 20% gate)
@@ -175,7 +175,7 @@ Suggests a phased rollout plan with canary group, rollout phases, and gate crite
 
 Scans the fleet for anomalies: weak signals, stuck OTAs, failure spikes, mass offline events. Fires alerts through the Alert Engine with dedup, cooldown, and multi-channel delivery.
 
-**Endpoint:** `GET /agents/anomaly-check?notify=false`
+**Endpoint:** `GET /agents/anomaly-check` (`notify=true` by default)
 **Endpoint (with alert engine):** `GET /agents/fleet-health`
 
 **Heuristic checks:**
@@ -187,24 +187,24 @@ Scans the fleet for anomalies: weak signals, stuck OTAs, failure spikes, mass of
 **Alert types:**
 | Anomaly | Alert Type | Dedup Key | Severity |
 |---|---|---|---|
-| Weak signal (< -90 dBm) | `device_offline` | `{device_id}` | warning |
-| Stuck OTA | `ota_stuck` | `{deployment_id}` | critical |
+| Weak signal (< -90 dBm) | `weak_signal` | `{device_id}` | warning |
+| Stuck OTA | `stuck_ota` | `{deployment_id}` | critical |
 | High failure rate (> 30%) | `ota_failure_spike` | `ota_failure_spike` | critical |
-| Mass offline (> 30%) | `device_offline` | `mass_offline` | critical |
+| Mass offline (> 30%) | `mass_offline` | `mass_offline` | critical |
+| Device offline (> 5 min) | `device_offline` | `{device_id}` | warning |
 | V2G revenue negative | `v2g_revenue_drop` | `v2g_revenue` | warning |
 
 **Notifications:** Sends alerts via Slack webhook, SMTP email, or generic webhook based on env config.
 
 ### Agent 3: Device Group Manager
 
-Suggests device groupings by firmware version, signal strength, and city/location with rationale.
+Suggests device groupings by firmware version and signal strength with rationale.
 
 **Endpoint:** `GET /agents/device-groups?min_group_size=3`
 
 **Grouping dimensions:**
 - **Firmware version** — same-firmware cohorts for OTA targeting
 - **Signal strength buckets** — good (>= -60), moderate (-60 to -80), poor (< -80) dBm
-- **City** — location-based cohorts (requires simulator to send `city` field)
 
 ### Agent 4: Device Onboarding Agent
 
@@ -252,14 +252,14 @@ Scans the fleet for resource pressure signals and applies configurable remediati
 **8 Remediation Rules:**
 | Rule | Signal | Action |
 |---|---|---|
-| `r001_pressure_notify` | fleet_active_devices < threshold | Log warning, escalate to human |
-| `r002_device_offline` | Device offline > 5 min | Push MQTT restart command |
-| `r003_ota_high_failure` | OTA failure rate > 30% | Notify fleet manager via alert |
-| `r004_scale_heartbeat` | Active devices = 0 (startup) | Log info, no action needed |
-| `r005_ota_stuck` | OTA in-progress > timeout | Retry OTA or mark as failed |
-| `r006_latency_spike` | API latency > 500ms | Log warning, notify ops |
-| `r007_signal_degraded` | Avg signal < -85 dBm across fleet | Flag for RF inspection |
-| `r008_predictive_risk` | Predictive risk > 0.7 | Schedule maintenance window |
+| `r001_throttle_ota` | OTA in progress > threshold | Pause pending OTA deployments |
+| `r002_mqtt_qos_downgrade` | MQTT message volume spike | Downgrade non-critical topics to QoS 0 |
+| `r003_device_soft_restart` | Weak-signal device, high uptime | Push MQTT restart command |
+| `r004_scale_heartbeat` | Active devices below threshold | Increase heartbeat frequency |
+| `r005_rollback_ota_batch` | OTA failure spike | Roll back batch to previous firmware |
+| `r006_human_escalation` | Auto-remediation exhausted | Critical alert + human escalation |
+| `r007_migrate_device_pool` | Device CPU/memory pressure | Route traffic away, flag for inspection |
+| `r008_cleanup_firmware_artifacts` | Disk pressure on firmware dir | Delete oldest resolved OTA artifacts |
 
 **Features:**
 - Cooldown per rule (configurable — default 600s)
@@ -272,14 +272,13 @@ Scans the fleet for resource pressure signals and applies configurable remediati
 
 Analyzes telemetry trends to predict device failures before they happen.
 
-**Endpoint:** `POST /agents/predictive-scan`
+**Endpoint:** `GET /agents/predictive-scan` (heuristic recommender; the versioned-model path is `POST /predictive/scan?model=auto|ml|legacy`)
 
-**Heuristic logic (per device):**
-1. **Signal trend** — linear regression on last 50 signal readings; if slope < -1.0 → `signal_degradation` risk
-2. **Temperature trend** — if slope > 0.5 → `thermal_risk`
-3. **CPU trend** — if slope > 1.0 → `cpu_pressure`
-4. **Memory trend** — if slope > 1.0 → `memory_pressure`
-5. **Composite score** — weighted average of all trend slopes → `risk_score` (0.0–1.0)
+**Heuristic logic (per device, ≥5 points within 24h, max-risk single row):**
+1. **Signal trend** — slope < -0.5 → `signal_degradation`
+2. **Temperature trend** — slope > 0.3 or current > 70°C → `thermal`
+3. **SOH trend (EVs)** — slope < -0.05 or current < 75% → `battery_degradation`
+4. **Intermittent connectivity** — ≥30% samples below 95% uptime → `intermittent`
 
 **Response (example):**
 ```json
@@ -301,7 +300,7 @@ Analyzes telemetry trends to predict device failures before they happen.
 
 ### Combined Endpoint
 
-**`GET /agents/recommendations?notify=false`** — runs all six agents in parallel and returns combined results. Consumed by the dashboard.
+**`GET /agents/recommendations?notify=false`** — runs OTA, anomaly and group agents sequentially and returns combined results (`notify` defaults true). Consumed by the dashboard.
 
 ### Optional V2G Arbitrage Optimizer
 
@@ -333,7 +332,7 @@ Crew AI agents are defined in `agents/phase1_crew.py` with proper `Agent`, `Task
 fleet-management/
 ├── agents/
 │   ├── __init__.py           # Package init
-│   ├── tools.py              # 17 HTTP-based tools (standalone CLI usage)
+│   ├── tools.py              # 23 HTTP-based tools (standalone CLI usage)
 │   ├── async_tools.py        # 18 async DB-backed tools (in-backend usage)
 │   ├── phase1_crew.py        # 7 agent runners (OTA, Anomaly, Groups,
 │   │                         #   Onboarding, Remediation, Predictive, All)
@@ -348,7 +347,7 @@ fleet-management/
 │   ├── event_emitter.py      # Webhook event fan-out with HMAC
 │   ├── spot_prices.py        # Real spot-price provider abstraction
 │   └── audit.py              # Audit log helper
-└── run_agents.py             # CLI runner (22 flags)
+└── run_agents.py             # CLI runner (27 flags)
 ```
 
 ### Quick Start
@@ -356,7 +355,7 @@ fleet-management/
 ```bash
 # Dashboard shows agent recommendations (auto-refresh every 30s)
 docker compose --profile demo up -d
-open http://localhost:8000
+open http://localhost:8181
 
 # CLI: full recommendation report
 python run_agents.py
@@ -567,8 +566,8 @@ flowchart TD
     ROUTER --> DASH["Fleet Dashboard<br/>(HTMX)<br/>Agent panels<br/>auto-refresh 30s"]
 
     subgraph CLI["Standalone CLI"]
-        RC["run_agents.py<br/>(22 flags)"]
-        HTTP_T["agents/tools.py<br/>(17 HTTP tools)"]
+        RC["run_agents.py<br/>(27 flags)"]
+        HTTP_T["agents/tools.py<br/>(23 HTTP tools)"]
     end
 
     RC --> HTTP_T --> REST["Fleet Commander<br/>REST API (:8181)"] --> BE
@@ -582,7 +581,7 @@ Each Crew AI agent needs tools that wrap Fleet Commander's API. Here are the cor
 from crewai.tools import tool
 import requests
 
-BASE = "http://localhost:8000"
+BASE = "http://localhost:8181"
 
 @tool("List Devices")
 def list_devices(status: str = None) -> list:
@@ -637,7 +636,7 @@ def onboard_device(name: str, firmware_version: str = None,
 @tool("Run Predictive Scan")
 def run_predictive_scan() -> dict:
     """Run predictive maintenance analysis on all device telemetry"""
-    resp = requests.post(f"{BASE}/agents/predictive-scan")
+    resp = requests.get(f"{BASE}/agents/predictive-scan")
     return resp.json()
 
 @tool("Run Aegis Scan")
@@ -760,11 +759,12 @@ docker compose --profile demo up -d
 open http://localhost:8181
 ```
 
-The "Agent Recommendations" section at the bottom of the dashboard auto-refreshes every 30 seconds. Additional panels exist for:
+The "Agent Recommendations" section of the dashboard auto-refreshes every 30 seconds. Live sections above it include:
+- Active Alerts (acknowledge/resolve/work-order)
+- Aegis Remediation Engine (signals/active/history)
+- Predictive Maintenance (risk meters + model chips)
+- Scheduled OTA Campaigns, Maintenance work orders, Geofences, Devices, Recent OTA, Firmware Management
 - Onboard Device (modal trigger)
-- Predictive Maintenance (risk meters)
-- Fleet Health (alert status)
-- Aegis Remediation (scan results)
 
 ### CLI Runner
 
@@ -854,8 +854,11 @@ curl 'http://localhost:8181/agents/aegis/scan'
 # Aegis history
 curl 'http://localhost:8181/agents/aegis/history'
 
-# Predictive scan (POST)
-curl -X POST 'http://localhost:8181/agents/predictive-scan'
+# Predictive scan via agent router (GET)
+curl 'http://localhost:8181/agents/predictive-scan'
+
+# Versioned-model scan (POST, ?model=auto|ml|legacy)
+curl -X POST 'http://localhost:8181/predictive/scan?model=auto'
 
 # Predictive history
 curl 'http://localhost:8181/agents/predictive-history'

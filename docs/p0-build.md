@@ -81,13 +81,13 @@ on-MCU inference, it needs a separate TinyML track (not P0).
 1. Cable DLC→ELM327 per §1.2, fuse on pin 16. 2. `screen /dev/ttyUSB0 38400`,
    `ATZ` → `ELM327 vX.Y`. 3. Ignition ON (engine off is fine for PIDs+DTC read).
    4. `0100` → `41 00 BE 1F B8 10` (PID support map). 5. Start gateway (§3, step 1),
-   watch `iot/fleet/+/obd` on the broker. 6. Confirm backend `fleet_telemetry_points_total{source="obd"}` increments.
+   watch `iot/fleet/+/obd` on the broker. 6. Confirm backend `fleet_telemetry_points_total{device}` increments and `fleet_telemetry_duplicates_total{source="obd"}` stays flat.
 
 ---
 
 ## 2. P0-A — Real signal ingest (G-01 remainder, M, ~2 wks)
 
-1. **`edge/obd_gateway.py`** (new): serial ELM327 driver per §1.3; emits
+1. **`edge/obd_gateway.py`** (FUTURE — not built): serial ELM327 driver per §1.3; emits
    `iot/fleet/{id}/obd` `{event_time, pid_map, dtcs[], odometer_km, fuel_level_pct, vin}`
    and `iot/fleet/{id}/bms` (EV cell data where exposed). Env: `OBD_PORT, OBD_POLL_SECONDS,
    DEVICE_ID, MQTT_*`. Offline-tolerant: local spill file, replay on reconnect.
@@ -105,7 +105,7 @@ on-MCU inference, it needs a separate TinyML track (not P0).
 
 ## 3. P0-B — Time-series store (G-02, S–M, ~1–2 wks)
 
-1. Production image → `timescale/timescaledb:latest-pg16`; SQLite/demo untouched.
+1. Production image → `timescale/timescaledb:latest-pg16` (FUTURE — still `postgres:16-alpine`; SQLite/demo untouched).
 2. Leader-only boot: `create_hypertable('telemetry','timestamp', 1-day chunks)` when
    Timescale present else skip+log; composite `(device_id, timestamp DESC)` + `source` index.
 3. Continuous aggregate `telemetry_5m` (avg/min/max signal/temp/soc, count; 30-min refresh);
@@ -119,19 +119,19 @@ on-MCU inference, it needs a separate TinyML track (not P0).
 
 ## 4. P0-C — Real-data training + promotion (G-03 remainder, M–L, ~2–3 wks)
 
-1. `scripts/label_outcomes.py`: predictions ⨝ work orders → labeled windows
+1. `scripts/label_outcomes.py` (FUTURE): predictions ⨝ work orders → labeled windows
    (WO close notes are the labels — incl. false-positive marks).
-2. `scripts/train.py --data --out version`: same features → registry `staging` with
+2. `scripts/train.py --data --out version` (FUTURE — today `scripts/train_mvp.py` on seeded scenarios): same features → registry `staging` with
    `{precision, recall, train_n}` metrics.
 3. `app/routers/models.py` (admin/fleet_manager): `GET /models`, `POST /models/{v}/promote`
    (runs backtest gates, refuses on fail), demote; `?model=vN` incl. shadow scoring.
 4. `backtest.py --version/--data`: load registry artifacts, wall-clock lead units.
-5. `MODEL_STORAGE_PATH` through compose + dedicated `model_data` volume.
+5. `MODEL_STORAGE_PATH` through compose + dedicated `model_data` volume (FUTURE — env-only today).
 6. Exit: ≥2 wks labeled-data model promoted through gates, canary subset, per-version FP/lead.
 
 ## 5. P0-D — Live eval (G-04 remainder, S, ~1 wk)
 
-1. `scripts/inject_fault.py`: arm simulator scenario on live stack, write onset manifest.
+1. `scripts/inject_fault.py` (FUTURE — today `SIMULATOR_SCENARIO` env): arm simulator scenario on live stack, write onset manifest.
 2. Nightly scorer: manifest ⨝ predictions → precision/recall/lead-hours → `eval/runs/`.
 3. p95 inference-latency gate in backtest output (cloud <500ms; edge <100ms with P0-E).
 4. Drift watch (lite): feature-mean vs bundle stats → `model_drift` alert (retrain = P1).
@@ -140,7 +140,7 @@ on-MCU inference, it needs a separate TinyML track (not P0).
 ## 6. P0-E — Edge runtime (G-05, M–L, ~3–4 wks)
 
 1. `edge/` service (`Dockerfile.edge`, demo+production): ONNX Runtime, pack
-   `{model.onnx, thresholds.json, feature_spec.json}` via `scripts/export_onnx.py`.
+   `{model.onnx, thresholds.json, feature_spec.json}` via `scripts/export_onnx.py` (FUTURE).
 2. Verdicts on `iot/fleet/+/edge` (never raw samples) → AlertEngine first-class
    anomalies + shadow reported-state; offline disk outbox with ordered replay.
 3. KPIs: `fleet_edge_*` metrics, **edge-autonomy %** panel; delivery via OTA-scheduler

@@ -63,8 +63,9 @@ arbitrage module.
 ## 3. TimescaleDB for Time-Series Data
 
 ### Current
-- SQLite with SQLAlchemy ORM. Battery data (SOC, SOH, temp) stored in the
-  `devices` table as scalar columns.
+- SQLite dev / PostgreSQL prod via SQLAlchemy async. Telemetry lives in the
+  `telemetry` table (+ `telemetry_5m` warm rollups); battery/SOC/SOH are
+  per-point columns, not device scalars.
 
 ### Medium-term
 - Migrate to **TimescaleDB** (PostgreSQL extension) for high-ingestion
@@ -88,7 +89,7 @@ arbitrage module.
 - **Columnar compression** on hypertables > 6 months old (storage savings ~90%).
 - **Data retention policies**: raw telemetry 90 days, hourly aggregates 2 years.
 - Query pattern: `/agents/v2g-dispatch?device_id=X` reads the latest
-  `battery_telemetry` row plus 24h of forecast data from a materialised view.
+  `telemetry` row plus 24h of forecast data (rollups beyond hot window).
 
 ---
 
@@ -115,8 +116,8 @@ arbitrage module.
 - Objective becomes expected value across scenarios, with CVaR term for
   risk-aversion.
 - **Rolling horizon**: re-solve every hour with updated SOC and prices.
-- Deploy as a separate microservice (`v2g-solver`) scaled horizontally,
-  communicating via Redis pub/sub.
+- Keep V2G in-backend (`app/v2g_optimizer.py`); no Redis pub/sub or separate
+  microservice in this repo — scale via `backend-api` replicas instead.
 
 ---
 
@@ -148,6 +149,7 @@ arbitrage module.
   optimiser decisions, SOC constraints.
 - **Integration tests**: extend `tests/test_e2e.py` to call
   `/agents/v2g-dispatch` and verify Prometheus metrics are exposed.
-- **Docker Compose profile**: V2G features work with existing `--profile demo`
-  profile; no new services required.
+- **Docker Compose profile**: V2G features work with the existing `--profile demo`
+  profile (backend + mosquitto + simulator + prometheus + grafana); production
+  adds `mosquitto-tls` + `postgres` + `backend-api`; no new services required.
 - **CI/CD**: GitHub Actions workflow runs `pytest tests/test_v2g.py` on push.
