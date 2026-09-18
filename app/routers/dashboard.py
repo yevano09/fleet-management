@@ -22,8 +22,11 @@ async def dashboard(request: Request):
         return RedirectResponse(url="/auth/login")
     if admin:
         user = admin
+    # Authenticated per-user HTML must never sit in browser/edge caches —
+    # stale copies hide new tabs/panels (e.g. the Twin tab) after deploys.
     return templates.TemplateResponse(
         request,
         "dashboard.html",
         {"request": request, "user": user, "css_version": request.app.state.css_version},
+        headers={"Cache-Control": "no-store"},
     )
