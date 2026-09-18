@@ -861,7 +861,7 @@ function renderFleetTree(devices) {
           </button>`;
           if (cOpen) {
             cHtml += '<div class="tree-children" role="group">' + byCity[city].map(d => `
-              <button class="tree-node" role="treeitem" onclick="treeFocusDevice('${d.id}')" title="Focus on map">
+              <button class="tree-node" role="treeitem" onclick="treeFocusDevice('${d.id}')" ondblclick="openDeviceDetail('${d.id}')" title="Click: focus on map · Double-click: open details">
                 ${dot(d.status)}${escapeHtml(d.name)}
                 <span class="tree-count">${escapeHtml(d.firmware_version || '')}</span>
               </button>`).join('') + '</div>';
