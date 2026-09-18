@@ -166,3 +166,4 @@ P0-E (edge) ────┘   (needs A data + B retention + C export format)
 | 2026-09-17 | P0-A1: OBD/BMS topics, event-time, dedup LRU, odo guard, `app/obd/dtc.py`, `/obd/dtc` API, ACL + persistence | live-verified: 1 row w/ producer time, dupe→`duplicates_total`, rollback→`rejected_total` |
 | 2026-09-17 | P0-A2: bounded batch ingest worker + queue metrics | live-verified: `batches_total` increments, depth 0 |
 | 2026-09-17 | e2e 46/46 (incl. test_43), eval 5/5 unaffected | testing profile, clean volumes |
+| 2026-09-18 | OBD vehicle simulator: profiles/VIN/cells, `+/obd\|+/bms` topics, Device VIN fields, cell summary, twin `vehicle` block (UC-31) | live-verified topics + twin; e2e 47/47; twin-tab screenshot |

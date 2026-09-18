@@ -131,6 +131,12 @@ class Device(Base):
     current_ota_id = Column(String, nullable=True)
     mqtt_client_id = Column(String, nullable=True)
 
+    # Vehicle identity (OBD simulator + gateway: VIN/make/model from register)
+    vin = Column(String, nullable=True, index=True)
+    make = Column(String, nullable=True)
+    model = Column(String, nullable=True)
+    model_year = Column(Integer, nullable=True)
+
     # GPS / location fields
     latitude = Column(Float, nullable=True)
     longitude = Column(Float, nullable=True)
@@ -316,6 +322,11 @@ class Telemetry(Base):
     odometer_km = Column(Float, nullable=True)
     # tire_pressures: JSON dict, e.g. '{"fl": 32.1, "fr": 31.8, "rl": 32.0, "rr": 31.9}'
     tire_pressures = Column(Text, nullable=True)
+    # Cell-voltage summary (BMS arrays summarized at ingest; raw arrays live
+    # in P0-B feature views, not here)
+    cell_min_v = Column(Float, nullable=True)
+    cell_max_v = Column(Float, nullable=True)
+    cell_spread_mv = Column(Float, nullable=True)
 
     device = relationship("Device", back_populates="telemetry")
 

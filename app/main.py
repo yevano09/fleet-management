@@ -82,6 +82,11 @@ def verify_firmware_download_token(device_id: str, sha256_hash: str, exp: int, t
 
 def _build_telemetry_point(device_id: str, payload: dict, timestamp):
     """Build (not persist) a Telemetry row — shared by inline + batch paths."""
+    cells = payload.get("cell_voltages") or []
+    try:
+        cells = [float(v) for v in cells if v is not None]
+    except (TypeError, ValueError):
+        cells = []
     return Telemetry(
         device_id=device_id,
         timestamp=timestamp or utcnow(),
@@ -101,8 +106,11 @@ def _build_telemetry_point(device_id: str, payload: dict, timestamp):
         dtc_codes=json.dumps(payload["dtc_codes"]) if payload.get("dtc_codes") is not None else None,
         fuel_level_pct=payload.get("fuel_level_pct"),
         odometer_km=payload.get("odometer_km"),
-        tire_pressures=json.dumps(payload["tire_pressures"]) if payload.get("tire_pressures") is not None else None,
-    )
+            tire_pressures=json.dumps(payload["tire_pressures"]) if payload.get("tire_pressures") is not None else None,
+            cell_min_v=min(cells) if cells else None,
+            cell_max_v=max(cells) if cells else None,
+            cell_spread_mv=round((max(cells) - min(cells)) * 1000, 1) if cells else None,
+        )
 
 
 async def _record_telemetry(device: Device, payload: dict, timestamp=None):
@@ -364,6 +372,9 @@ async def handle_mqtt_register(payload: dict, verified_id: str | None = None):
             existing.mqtt_client_id = mqtt_id or existing.mqtt_client_id
             existing.ip_address = payload.get("ip_address", existing.ip_address)
             existing.firmware_version = payload.get("firmware_version", existing.firmware_version)
+            for field in ("vin", "make", "model", "model_year"):
+                if payload.get(field) is not None:
+                    setattr(existing, field, payload[field])
             if city:
                 existing.city = city
             if was_offline:
@@ -404,6 +415,10 @@ async def handle_mqtt_register(payload: dict, verified_id: str | None = None):
                 last_seen=utcnow(),
                 ip_address=payload.get("ip_address", ""),
                 city=city,
+                vin=payload.get("vin"),
+                make=payload.get("make"),
+                model=payload.get("model"),
+                model_year=payload.get("model_year"),
                 org_id=org_id,
             )
             db.add(device)

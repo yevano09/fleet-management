@@ -35,6 +35,7 @@ from app.models import (
     OtaSchedule,
     PredictedFailure,
     ScheduleStatus,
+    Telemetry,
     V2gSchedule,
 )
 from app.routers.shadow import _is_in_sync, _shadow_to_dict
@@ -109,8 +110,33 @@ async def get_twin(
     )
     v2g_rows = v2g_res.scalars().all()
 
+    tel_res = await db.execute(
+        select(Telemetry).where(Telemetry.device_id == device_id)
+        .order_by(Telemetry.timestamp.desc()).limit(20)
+    )
+    tel_rows = tel_res.scalars().all()
+    latest_tel = tel_rows[0] if tel_rows else None
+
+    def _first(field):
+        for row in tel_rows:
+            val = getattr(row, field, None)
+            if val is not None and val != "[]":
+                return val
+        return None
+
     offline = device.status != DeviceStatus.online
     score = health_score(risks, offline, len(alerts))
+
+    def _dtcs(row):
+        if not row or not row.dtc_codes:
+            return []
+        try:
+            import json as _json
+
+            val = _json.loads(row.dtc_codes)
+            return val if isinstance(val, list) else []
+        except Exception:
+            return []
 
     return {
         "device_id": device.id,
@@ -124,6 +150,19 @@ async def get_twin(
         "city": device.city,
         "last_seen": device.last_seen.isoformat() if device.last_seen else None,
         "health_score": score,
+        "vehicle": {
+            "vin": device.vin,
+            "make": device.make,
+            "model": device.model,
+            "model_year": device.model_year,
+            "odometer_km": _first("odometer_km"),
+            "fuel_level_pct": _first("fuel_level_pct"),
+            "dtc_codes": _dtcs(next((r for r in tel_rows if r.dtc_codes and r.dtc_codes != "[]"), None)),
+            "cell_min_v": _first("cell_min_v"),
+            "cell_max_v": _first("cell_max_v"),
+            "cell_spread_mv": _first("cell_spread_mv"),
+            "telemetry_at": latest_tel.timestamp.isoformat() if latest_tel and latest_tel.timestamp else None,
+        },
         "shadow": {
             "desired": _shadow_to_dict(desired) if desired else None,
             "reported": _shadow_to_dict(reported) if reported else None,

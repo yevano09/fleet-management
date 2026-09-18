@@ -179,6 +179,29 @@ async def _bootstrap_shadow_versioning() -> None:
         await conn.execute(text("UPDATE device_shadows SET source = 'cloud' WHERE source IS NULL"))
 
 
+async def _bootstrap_vehicle_columns() -> None:
+    """Add vehicle-identity + cell-summary columns to legacy DBs (OBD sim)."""
+    async with engine.begin() as conn:
+        def _cols(sync_conn, table: str) -> set:
+            insp = sa_inspect(sync_conn)
+            if table not in insp.get_table_names():
+                return set()
+            return {c["name"] for c in insp.get_columns(table)}
+
+        async def _ensure(table: str, columns: dict) -> None:
+            existing = await conn.run_sync(_cols, table)
+            for col, ddl in columns.items():
+                if col not in existing:
+                    await conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {col} {ddl}"))
+
+        await _ensure("devices", {
+            "vin": "VARCHAR", "make": "VARCHAR", "model": "VARCHAR", "model_year": "INTEGER",
+        })
+        await _ensure("telemetry", {
+            "cell_min_v": "FLOAT", "cell_max_v": "FLOAT", "cell_spread_mv": "FLOAT",
+        })
+
+
 async def init_db():
     from app.models import (
         Device, Firmware, OtaDeployment, V2gSchedule, Alert, UserSession,
@@ -198,4 +221,5 @@ async def init_db():
     await _bootstrap_prediction_model_version()
     await _bootstrap_alert_work_order()
     await _bootstrap_shadow_versioning()
+    await _bootstrap_vehicle_columns()
     await _seed_default_org()

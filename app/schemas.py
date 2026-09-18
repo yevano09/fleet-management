@@ -11,6 +11,10 @@ class DeviceRegisterRequest(BaseModel):
     mqtt_client_id: Optional[str] = None
     city: Optional[str] = None
     claim_token: Optional[str] = None
+    vin: Optional[str] = None
+    make: Optional[str] = None
+    model: Optional[str] = None
+    model_year: Optional[int] = None
 
 
 class DeviceRegisterResponse(BaseModel):
@@ -41,6 +45,7 @@ class HeartbeatRequest(BaseModel):
     fuel_level_pct: Optional[float] = None
     odometer_km: Optional[float] = None
     tire_pressures: Optional[Dict[str, float]] = None
+    cell_voltages: Optional[List[float]] = None
 
 
 class DeviceResponse(BaseModel):
@@ -62,6 +67,10 @@ class DeviceResponse(BaseModel):
     mqtt_client_id: Optional[str] = None
     previous_firmware_version: Optional[str] = None
     current_ota_id: Optional[str] = None
+    vin: Optional[str] = None
+    make: Optional[str] = None
+    model: Optional[str] = None
+    model_year: Optional[int] = None
     lifecycle_status: str = "active"
     decommissioned_at: Optional[datetime] = None
     decommissioned_by: Optional[str] = None
@@ -241,6 +250,9 @@ class TelemetryPoint(BaseModel):
     fuel_level_pct: Optional[float] = None
     odometer_km: Optional[float] = None
     tire_pressures: Optional[str] = None
+    cell_min_v: Optional[float] = None
+    cell_max_v: Optional[float] = None
+    cell_spread_mv: Optional[float] = None
 
     model_config = {"from_attributes": True}
 

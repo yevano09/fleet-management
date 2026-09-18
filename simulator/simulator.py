@@ -75,8 +75,29 @@ CITY_COORDS = {
 }
 
 
+# Vehicle profiles cycled across simulated devices (make, model, year span, EV?).
+VEHICLE_PROFILES = [
+    ("Tata", "Nexon EV", 2023, True),
+    ("Mahindra", "XUV400", 2023, True),
+    ("Tata", "Ace EV", 2022, True),
+    ("Ashok Leyland", "Dost", 2021, False),
+    ("Maruti", "Super Carry", 2022, False),
+    ("Tata", "Intra V30", 2021, False),
+]
+CELL_COUNT = 96
+CELL_NOMINAL_V = 4.10
+
+
+def make_vin(index: int) -> str:
+    """Deterministic 17-char demo VIN (MAT prefix + zero-padded index + check)."""
+    base = f"MAT6242{index:05d}P"
+    check = str((sum(ord(c) * (i + 1) for i, c in enumerate(base)) + index) % 10)
+    return (base + check + "X").ljust(17, "0")[:17]
+
+
 class SimulatedDevice:
-    def __init__(self, device_id: str, name: str, city: str = "Bangalore", is_ev: bool = False):
+    def __init__(self, device_id: str, name: str, city: str = "Bangalore", is_ev: bool = False,
+                 profile_idx: int = 0):
         self.id = device_id
         self.name = name
         self.firmware_version = INITIAL_FIRMWARE
@@ -115,6 +136,18 @@ class SimulatedDevice:
         self.dtc_codes: list = []
         self.scenario = "none"
         self._fault_step = 0
+
+        # Vehicle identity + EV cell model (OBD simulator)
+        make, model, year, profile_ev = VEHICLE_PROFILES[profile_idx % len(VEHICLE_PROFILES)]
+        self.make = make
+        self.model = model
+        self.model_year = year + (profile_idx // len(VEHICLE_PROFILES)) % 3
+        if profile_ev:
+            self.is_ev = True
+        self.vin = make_vin(abs(hash(device_id)) % 100000)
+        self.cell_voltages = [round(random.uniform(4.05, 4.15), 3) for _ in range(CELL_COUNT)]
+        self.rpm = random.uniform(800, 1200)
+        self.speed_kph = 0.0
 
         self._client = mqtt.Client(
             client_id=f"sim-{device_id[:8]}",
@@ -302,6 +335,12 @@ class SimulatedDevice:
         # SOH slowly degrades over time
         self.soh = max(70.0, self.soh - 0.001)
 
+        # Cell voltages drift with SOC + noise; thermal fault spreads the pack.
+        spread = 0.03 if self.scenario != "thermal" else min(0.25, 0.03 + self._fault_step * 0.01)
+        base = 3.6 + (self.soc / 100.0) * 0.55
+        self.cell_voltages = [round(base + random.uniform(-spread, spread), 3)
+                              for _ in range(CELL_COUNT)]
+
     def _update_fault(self):
         """MVP DATA-01: advance the armed fault scenario one heartbeat step.
 
@@ -364,6 +403,10 @@ class SimulatedDevice:
             "firmware_version": self.firmware_version,
             "ip_address": f"10.0.0.{random.randint(1, 254)}",
             "city": self.city,
+            "vin": self.vin,
+            "make": self.make,
+            "model": self.model,
+            "model_year": self.model_year,
         })
         # P0 UC-25 JITP: per-device topic — broker ACL binds this topic to the
         # client cert CN, giving the backend a verified identity. The legacy
@@ -379,12 +422,17 @@ class SimulatedDevice:
             return  # Skip heartbeats while in maintenance mode (Feature 9)
         self.uptime = min(100.0, 100.0 * (1.0 - (time.time() - self.start_time) / 86400) + 95.0)
         self.signal_strength = random.randint(max(-95, self.signal_strength - 2), min(-30, self.signal_strength + 2))
+        # Driving cycle: cruise segments with RPM/speed, parked otherwise.
+        cruising = (int(time.time() / HEARTBEAT_INTERVAL) % 6) < 4
+        self.speed_kph = round(random.uniform(35, 65), 1) if cruising else 0.0
+        self.rpm = round(random.uniform(1400, 2200) if cruising else random.uniform(750, 900), 0)
         self._update_battery()
         self._update_gps()
         self._update_resources()
         self._update_obd()
         self._update_fault()
 
+        now_iso = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         payload = {
             "uptime_percentage": round(self.uptime, 1),
             "signal_strength": self.signal_strength,
@@ -412,6 +460,47 @@ class SimulatedDevice:
 
         topic = f"iot/fleet/{self.id}/heartbeat"
         self._client.publish(topic, json.dumps(payload), qos=1)
+        self._publish_obd(now_iso)
+        if self.is_ev:
+            self._publish_bms(now_iso)
+
+    def _publish_obd(self, now_iso: str):
+        """OBD-II gateway feed: PID map + vehicle identity + OBD state."""
+        if not SIMULATOR_OBD:
+            return
+        obd = {
+            "event_time": now_iso,
+            "source": "obd",
+            "vin": self.vin,
+            "odometer_km": round(self.odometer_km, 1),
+            "fuel_level_pct": round(self.fuel_level_pct, 1),
+            "dtc_codes": list(self.dtc_codes),
+            "tire_pressures": dict(self.tire_pressures),
+            "pid_map": {
+                "rpm": self.rpm,
+                "speed_kph": self.speed_kph,
+                "coolant_c": round(self.temperature - 8.0, 1),
+                "maf_gs": round(2.0 + self.rpm / 1000.0, 2),
+            },
+        }
+        self._client.publish(f"iot/fleet/{self.id}/obd", json.dumps(obd), qos=1)
+
+    def _publish_bms(self, now_iso: str):
+        """BMS feed for EVs: pack state + full cell-voltage array."""
+        cells = self.cell_voltages
+        bms = {
+            "event_time": now_iso,
+            "source": "bms",
+            "soc": round(self.soc, 1),
+            "soh": round(self.soh, 1),
+            "pack_temp": round(self.battery_temp, 1),
+            "plug_status": self.plug_status,
+            "cell_voltages": cells,
+            "cell_min_v": min(cells),
+            "cell_max_v": max(cells),
+            "cell_count": len(cells),
+        }
+        self._client.publish(f"iot/fleet/{self.id}/bms", json.dumps(bms), qos=1)
 
     def connect(self, loop: asyncio.AbstractEventLoop):
         self._loop = loop
@@ -472,7 +561,7 @@ async def main():
         is_ev = i < 3  # first 3 devices are EVs with battery simulation
         name = f"Device-{i+1:03d}"
         city = city_list[i % len(city_list)]
-        device = SimulatedDevice(device_id, name, city=city, is_ev=is_ev)
+        device = SimulatedDevice(device_id, name, city=city, is_ev=is_ev, profile_idx=i)
         # MVP DATA-01: arm the fault scenario on one device (eval ground truth).
         if SIMULATOR_SCENARIO in ("drift", "thermal", "tpms") and i == SIMULATOR_FAULT_DEVICE_INDEX:
             device.scenario = SIMULATOR_SCENARIO

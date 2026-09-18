@@ -1571,11 +1571,19 @@ async function loadTwinForDevice(deviceId) {
     const alerts = (t.active_alerts || []).map(a => `
       <div class="py-1 text-[0.78rem]"><span aria-hidden="true">⚠</span> ${escapeHtml(a.type)} — ${escapeHtml(a.severity)}${a.work_order_id ? ' (WO open)' : ''}</div>`).join('');
     const sh = t.shadow || {};
+    const v = t.vehicle || {};
+    const vehLine = (v.vin || v.make || v.model)
+      ? `<div class="mb-3"><strong>Vehicle:</strong>
+        <span class="text-xs text-muted">${escapeHtml([v.make, v.model, v.model_year].filter(Boolean).join(' ') || '–')} · VIN <span class="font-mono">${escapeHtml(v.vin || '–')}</span>${v.odometer_km != null ? ` · odo ${Math.round(v.odometer_km)}km` : ''}${v.fuel_level_pct != null ? ` · fuel ${v.fuel_level_pct}%` : ''}</span>
+        ${(v.dtc_codes && v.dtc_codes.length) ? `<div class="mt-1 text-xs">DTC: <span class="text-amber">${escapeHtml(v.dtc_codes.join(', '))}</span></div>` : ''}
+        ${(v.cell_spread_mv != null) ? `<div class="mt-1 text-xs text-muted">Cells: ${v.cell_min_v}–${v.cell_max_v}V (spread ${v.cell_spread_mv}mV)</div>` : ''}
+      </div>` : '';
     display.innerHTML = `
       <div class="mb-3 flex items-center gap-3">
         <div class="font-display text-[1.6rem] font-bold ${scoreText}">${score}</div>
         <div class="text-xs text-muted">twin health<br>${escapeHtml(t.status || '')} · ${escapeHtml(t.lifecycle_status || 'active')}</div>
       </div>
+      ${vehLine}
       <div class="mb-3"><strong>Shadow:</strong>
         <span class="text-xs text-muted">desired v${sh.desired ? sh.desired.version : '–'} (${escapeHtml((sh.desired || {}).source || '–')}) / reported v${sh.reported ? sh.reported.version : '–'} (${escapeHtml((sh.reported || {}).source || '–')}) — ${t.shadow && t.shadow.in_sync ? '<span class="text-green">in sync</span>' : '<span class="text-amber">drifted</span>'}</span>
       </div>

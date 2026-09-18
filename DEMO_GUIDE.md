@@ -786,9 +786,14 @@ SIMULATOR_DEVICE_COUNT=3 SIMULATOR_SCENARIO=thermal SIMULATOR_FAULT_DEVICE_INDEX
   python -m simulator.simulator
 ```
 
-(Or set the same env vars on the `simulator` service.) Heartbeats now carry
-`source: "obd"` plus fuel/odometer/tire/DTC fields. Scenarios: `drift` (signal
-decay → `U0100`), `thermal` (temperature climb → `P0128`), `tpms` (tire sag → `C0745`).
+(Or set the same env vars on the `simulator` service.) Each simulated vehicle
+carries an identity (VIN/make/model/year from built-in profiles) and publishes
+three feeds: `heartbeat` (presence + resources), `iot/fleet/{id}/obd` (event time,
+VIN, odometer, fuel, DTCs, tire pressures, PID map), and — for EVs —
+`iot/fleet/{id}/bms` (SOC/SOH/pack temp + 96 cell voltages). Open any device →
+**Twin** tab to see the vehicle block (identity, odo, fuel, DTCs, cell spread).
+Scenarios: `drift` (signal decay → `U0100`), `thermal` (temperature climb +
+cell spread → `P0128`), `tpms` (tire sag → `C0745`).
 
 #### 14b. Run the ML scan
 

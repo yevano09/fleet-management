@@ -45,6 +45,9 @@ async def register_device(
             existing.mqtt_client_id = req.mqtt_client_id
         if req.city:
             existing.city = req.city
+        for field in ("vin", "make", "model", "model_year"):
+            if getattr(req, field) is not None:
+                setattr(existing, field, getattr(req, field))
         if was_offline:
             active_devices.inc()
         await db.commit()
@@ -68,6 +71,10 @@ async def register_device(
         ip_address=req.ip_address,
         mqtt_client_id=req.mqtt_client_id,
         city=req.city,
+        vin=req.vin,
+        make=req.make,
+        model=req.model,
+        model_year=req.model_year,
         org_id=org_id,
     )
     db.add(device)
@@ -138,6 +145,7 @@ async def device_heartbeat(
         device.longitude = req.longitude
     # MVP DATA-01: REST heartbeats persist telemetry too, so eval/demo tooling
     # can seed labeled series over HTTP without an MQTT broker.
+    cells = [float(v) for v in (req.cell_voltages or []) if v is not None]
     db.add(Telemetry(
         device_id=device.id,
         timestamp=utcnow(),
@@ -157,6 +165,9 @@ async def device_heartbeat(
         fuel_level_pct=req.fuel_level_pct,
         odometer_km=req.odometer_km,
         tire_pressures=json.dumps(req.tire_pressures) if req.tire_pressures is not None else None,
+        cell_min_v=min(cells) if cells else None,
+        cell_max_v=max(cells) if cells else None,
+        cell_spread_mv=round((max(cells) - min(cells)) * 1000, 1) if cells else None,
     ))
     await db.commit()
     telemetry_points_total.labels(device=device.name).inc()

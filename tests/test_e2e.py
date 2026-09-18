@@ -735,6 +735,32 @@ class TestE2E:
         r = requests.get(f"{BASE_URL}/twin/nonexistent-id", timeout=10)
         assert r.status_code == 404
 
+    def test_44_vehicle_identity_and_cell_summary_in_twin(self):
+        """OBD sim: VIN/make/model on register, cell summary + vehicle block in twin."""
+        r = requests.post(f"{BASE_URL}/devices/register", json={
+            "name": "E2E-Vehicle", "firmware_version": "1.0.0",
+            "vin": "MAT624200001P7X00000", "make": "Tata", "model": "Nexon EV",
+            "model_year": 2023,
+        }, timeout=10)
+        assert r.status_code == 201
+        dev_id = r.json()["device_id"]
+
+        cells = [round(4.05 + i * 0.001, 3) for i in range(96)]
+        r = requests.post(f"{BASE_URL}/devices/{dev_id}/heartbeat", json={
+            "uptime_percentage": 99.0, "signal_strength": -62, "source": "obd",
+            "odometer_km": 45210.5, "fuel_level_pct": 61.2, "cell_voltages": cells,
+        }, timeout=10)
+        assert r.status_code == 200
+
+        r = requests.get(f"{BASE_URL}/twin/{dev_id}", timeout=10)
+        assert r.status_code == 200
+        veh = r.json()["vehicle"]
+        assert veh["vin"] == "MAT624200001P7X00000"
+        assert veh["make"] == "Tata" and veh["model"] == "Nexon EV"
+        assert veh["odometer_km"] == 45210.5
+        assert veh["cell_min_v"] == min(cells)
+        assert veh["cell_spread_mv"] == round((max(cells) - min(cells)) * 1000, 1)
+
     def test_43_obd_dtc_and_ingest_metrics(self):
         """P0-A: DTC decode table + OBD ingest quality metrics exist."""
         r = requests.get(f"{BASE_URL}/obd/dtc/P0128", timeout=10)
