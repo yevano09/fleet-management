@@ -597,9 +597,11 @@
   <button class="flowtab" data-flow="flow_agents" aria-pressed="false"><span class="num">4</span> Agent Recommendations</button>
   <button class="flowtab" data-flow="flow_alerts" aria-pressed="false"><span class="num">5</span> Alert Pipeline</button>
   <button class="flowtab" data-flow="flow_aegis" aria-pressed="false"><span class="num">6</span> Aegis Auto-Remediation</button>
+  <button class="flowtab" data-flow="flow_obd" aria-pressed="false"><span class="num">7</span> OBD &amp; Vehicle Telemetry</button>
+  <button class="flowtab" data-flow="flow_aiot" aria-pressed="false"><span class="num">8</span> AIoT Predict &rarr; Act Loop</button>
 </nav>
 
-<p class="scenario-note">Shortcuts: <kbd>Space</kbd> play/pause &middot; <kbd>&larr;</kbd>/<kbd>&rarr;</kbd> step &middot; <kbd>1</kbd>&ndash;<kbd>6</kbd> flow &middot; <kbd>O</kbd> mode &middot; <kbd>T</kbd> theme &middot; <kbd>F</kbd> fullscreen &middot; <kbd>R</kbd> reset layout &middot; Drag nodes to reposition</p>
+<p class="scenario-note">Shortcuts: <kbd>Space</kbd> play/pause &middot; <kbd>&larr;</kbd>/<kbd>&rarr;</kbd> step &middot; <kbd>1</kbd>&ndash;<kbd>8</kbd> flow &middot; <kbd>O</kbd> mode &middot; <kbd>T</kbd> theme &middot; <kbd>F</kbd> fullscreen &middot; <kbd>R</kbd> reset layout &middot; Drag nodes to reposition</p>
 
 <main>
   <section class="canvas" aria-label="Architecture diagram">
@@ -627,8 +629,8 @@
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
         </div>
         <div class="label">User (Browser)</div>
-        <div class="tech">Jinja2 &middot; HTMX &middot; auto-refresh</div>
-        <div class="port" data-port-dev="localhost:8000" data-port-prod="fleet.example.com">localhost:8000</div>
+        <div class="tech">Jinja2 &middot; Tailwind &middot; auto-refresh</div>
+        <div class="port" data-port-dev="localhost:8181" data-port-prod="fleet.example.com">localhost:8181</div>
         <span class="step-badge">&middot;</span>
       </div>
 
@@ -682,7 +684,7 @@
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg>
         </div>
         <div class="label">Device Simulator</div>
-        <div class="tech">5 virtual devices &middot; 20% fail rate</div>
+        <div class="tech">15 vehicles &middot; VIN profiles &middot; OBD/BMS + fault scenarios</div>
         <div class="port">MQTT &middot; heartbeat 10s</div>
         <span class="step-badge">&middot;</span>
       </div>
@@ -705,7 +707,18 @@
         </div>
         <div class="label">Grafana</div>
         <div class="tech">11.1.0 &middot; pre-provisioned</div>
-        <div class="port">:3000 &middot; admin/admin</div>
+        <div class="port">:3050 &middot; admin/admin</div>
+        <span class="step-badge">&middot;</span>
+      </div>
+
+      <!-- ML Registry & Inference -->
+      <div class="node" data-role="compute" data-id="ml" style="left: 44%; top: 62%;">
+        <div class="icon">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="2"/><circle cx="5" cy="6" r="2"/><circle cx="19" cy="6" r="2"/><circle cx="5" cy="18" r="2"/><circle cx="19" cy="18" r="2"/><line x1="6.5" y1="7.5" x2="10.5" y2="10.5"/><line x1="17.5" y1="7.5" x2="13.5" y2="10.5"/><line x1="6.5" y1="16.5" x2="10.5" y2="13.5"/><line x1="17.5" y1="16.5" x2="13.5" y2="13.5"/></svg>
+        </div>
+        <div class="label">ML Registry</div>
+        <div class="tech">sklearn IF &middot; seeded bootstrap &middot; eval gates</div>
+        <div class="port">scan ?model=auto|ml|legacy</div>
         <span class="step-badge">&middot;</span>
       </div>
 
@@ -833,7 +846,7 @@ WHERE mqtt_client_id = 'sim-xxxxxx'`,
         from:"simulator", to:"mqtt", color:"--c-seed",
         title:"Periodic Heartbeat",
         route:"PUB iot/fleet/{id}/heartbeat",
-        desc:"Every <em>10 seconds</em> each simulated device publishes a heartbeat with uptime, signal strength, and (for EV devices) battery telemetry: <em>SoC</em>, <em>SoH</em>, <em>temperature</em>, <em>plug_status</em>.",
+        desc:"Every <em>10 seconds</em> each simulated vehicle publishes a heartbeat with uptime, signal strength, EV battery telemetry (<em>SoC</em>, <em>SoH</em>, <em>temperature</em>, <em>plug_status</em>) and OBD-grade fields (<em>source</em>, <em>fuel</em>, <em>odometer</em>, <em>tires</em>, <em>DTCs</em>). Parallel <em>obd</em> / <em>bms</em> topics carry event-timed PID maps and 96-cell arrays.",
         payload:
 `PUB iot/fleet/device-xxx/heartbeat QOS 1
 {
@@ -842,9 +855,23 @@ WHERE mqtt_client_id = 'sim-xxxxxx'`,
   "soc": 80.0,
   "soh": 99.9,
   "battery_temp": 25.3,
-  "plug_status": "connected"
-}`,
-        chips:["every 10s","~10ms","V2G telemetry"]
+  "plug_status": "connected",
+  "source": "obd",
+  "fuel_level_pct": 61.2,
+  "odometer_km": 45210.5,
+  "tire_pressures": {"fl":32.1,"fr":31.9,"rl":32.0,"rr":30.5},
+  "dtc_codes": ["P0128"]
+}
+
+PUB iot/fleet/device-xxx/obd QOS 1
+{ "event_time": "...Z", "vin": "MAT…",
+  "odometer_km": 45210.5, "dtc_codes": ["P0128"],
+  "pid_map": {"rpm":1650,"speed_kph":48} }
+
+PUB iot/fleet/device-xxx/bms QOS 1   (EVs)
+{ "soc": 72.1, "cell_min_v": 4.01,
+  "cell_max_v": 4.069, "cell_count": 96 }`,
+        chips:["every 10s","~10ms","OBD + BMS feeds"]
       },
       {
         from:"mqtt", to:"backend", color:"--c-embed",
@@ -1701,6 +1728,166 @@ aegis_dlq_depth 0
         chips:["10s refresh","3 columns","expandable entries"]
       }
     ]
+  },
+
+  /* ───── Flow 7: OBD & Vehicle Telemetry ───── */
+  flow_obd: {
+    name: "OBD & Vehicle Telemetry",
+    note: "VIN identity &rarr; event-timed OBD/BMS feeds &rarr; dedup + guards &rarr; batch store",
+    steps: [
+      {
+        from:"simulator", to:"mqtt", color:"--c-seed",
+        title:"Vehicle Identity on Register",
+        route:"PUB iot/fleet/{id}/register",
+        desc:"Each simulated vehicle registers with a deterministic <em>VIN</em>, <em>make</em>, <em>model</em> and <em>model_year</em> (Tata Nexon EV, Mahindra XUV400, …). The backend stores identity on the device row.",
+        payload:
+`PUB iot/fleet/device-xxx/register QOS 1
+{
+  "device_id": "uuid-xxxx",
+  "name": "Device-001",
+  "vin": "MAT624296613P3X00",
+  "make": "Tata",
+  "model": "Nexon EV",
+  "model_year": 2023,
+  "city": "Bangalore"
+}`,
+        chips:["VIN profiles","JITP","re-register safe"]
+      },
+      {
+        from:"simulator", to:"mqtt", color:"--c-seed",
+        title:"OBD + BMS Feeds",
+        route:"PUB iot/fleet/{id}/obd &middot; /bms",
+        desc:"Alongside heartbeats, the simulator publishes an OBD frame (producer <em>event_time</em>, odometer, fuel, DTCs, tire pressures, PID map) and — for EVs — a BMS frame (SoC/SoH/pack temp + 96 cell voltages). Fault scenarios (<em>drift/thermal/tpms</em>) degrade these feeds monotonically as eval ground truth.",
+        payload:
+`PUB iot/fleet/device-xxx/obd QOS 1
+{
+  "event_time": "2026-09-18T04:05:08Z",
+  "source": "obd",
+  "vin": "MAT624296613P3X00",
+  "odometer_km": 69544.0,
+  "fuel_level_pct": 68.0,
+  "dtc_codes": ["P0128"],
+  "pid_map": {"rpm":1650,"speed_kph":48}
+}
+
+PUB iot/fleet/device-xxx/bms QOS 1
+{ "soc": 72.1, "cell_min_v": 4.01,
+  "cell_max_v": 4.069, "cell_count": 96 }`,
+        chips:["event-time","QoS 1","fault scenarios"]
+      },
+      {
+        from:"mqtt", to:"backend", color:"--c-embed",
+        title:"Dedup + Odo Guards",
+        route:"handle_mqtt_obd() &middot; handle_mqtt_bms()",
+        desc:"The backend preserves producer <em>event_time</em> (no server-time overwrite), suppresses QoS redeliveries via a 20k-entry dedup LRU keyed <em>(device,event_time,source)</em>, and rejects odometer rollbacks. Every accept/dupe/reject is counted in Prometheus.",
+        payload:
+`# OBD ingest guards
+key = (device_id, event_iso, source)
+if key in dedup_lru:
+    duplicates_total{source="obd"}.inc()
+    return  # redelivery, already stored
+if odometer < last_odo - 1.0:
+    rejected_total{reason="odo_rollback"}.inc()
+    return`,
+        chips:["dedup LRU","odo guard","counted"]
+      },
+      {
+        from:"backend", to:"db", color:"--c-orch",
+        title:"Batch Store + Cell Summary",
+        route:"batch queue &middot; 200 rows / 1s",
+        desc:"MQTT points flow through a bounded batch queue (5,000 cap, oldest-shed + counted) into one commit. Cell arrays are summarized to <em>min/max/spread-mV</em> at ingest; raw arrays are reserved for the P-ret-2 feature store. Tenant + region are stamped per row.",
+        payload:
+`-- one commit per batch, not per point
+INSERT INTO telemetry
+  (device_id, timestamp, tenant_id, region,
+   source, dtc_codes, fuel_level_pct, odometer_km,
+   cell_min_v, cell_max_v, cell_spread_mv, …)
+VALUES (…200 rows…)`,
+        chips:["single commit","cell summary","tenant-stamped"]
+      },
+      {
+        from:"backend", to:"user", color:"--c-user",
+        title:"Twin Vehicle Block",
+        route:"GET /twin/{id} &middot; Twin tab",
+        desc:"The merged twin view carries a <em>vehicle</em> block — identity, odometer, fuel, DTCs with human meanings (<code>/obd/dtc/P0128</code>), and cell spread — rendered in the dashboard Twin tab beside health score, shadow versions and open risks.",
+        payload:
+`"vehicle": {
+  "vin": "MAT624296613P3X00",
+  "make": "Tata", "model": "Nexon EV",
+  "odometer_km": 69544.0,
+  "fuel_level_pct": 68.0,
+  "dtc_codes": ["P0128"],
+  "cell_min_v": 4.01, "cell_max_v": 4.069,
+  "cell_spread_mv": 59.0
+}`,
+        chips:["Twin tab","DTC decode","live values"]
+      }
+    ]
+  },
+
+  /* ───── Flow 8: AIoT Predict-to-Act Loop ───── */
+  flow_aiot: {
+    name: "AIoT Predict-to-Act Loop",
+    note: "fault injection &rarr; ML prediction &rarr; alert &rarr; work order &rarr; twin",
+    steps: [
+      {
+        from:"simulator", to:"mqtt", color:"--c-seed",
+        title:"Inject a Fault",
+        route:"SIMULATOR_SCENARIO=thermal",
+        desc:"Arm a fault progression on one vehicle (<em>drift</em>: signal decay, <em>thermal</em>: temperature + cell-spread climb, <em>tpms</em>: tire sag). Monotonic from a known onset — the eval harness's ground truth.",
+        payload:
+`SIMULATOR_SCENARIO=thermal SIMULATOR_FAULT_DEVICE_INDEX=0
+python -m simulator.simulator
+
+# onset == first degraded heartbeat`,
+        chips:["3 scenarios","known onset","eval truth"]
+      },
+      {
+        from:"backend", to:"ml", color:"--c-compute",
+        title:"ML Scan Scores Windows",
+        route:"POST /predictive/scan?model=auto",
+        desc:"The registry IsolationForest (<em>mvp-iforest-v1</em>, hybrid forest+z scoring over trailing-24 windows) flags anomalous devices with risk type, calibrated score and lead-time estimate. <em>auto</em> falls back to legacy slopes when no model is staged; every prediction carries its <em>model_version</em>.",
+        payload:
+`POST /predictive/scan?model=auto
+→ {
+  "risk_type": "thermal",
+  "risk_score": 0.91,
+  "model_version": "mvp-iforest-v1",
+  "predicted_hours_to_failure": 27.5
+}
+
+# gates: lead ~22-28 steps, FP 0%
+# legacy misses tpms entirely`,
+        chips:["model_version","eval-gated","legacy fallback"]
+      },
+      {
+        from:"ml", to:"backend", color:"--c-compute",
+        title:"Alert Fires, Work Order Opens",
+        route:"AlertEngine &middot; 3rd-escalation auto-WO",
+        desc:"The prediction surfaces as an alert (dedup + cooldown). On the 3rd escalation a templated <em>work order</em> auto-opens and links back to the alert; operators can also open one from the alert card. Closing with a resolution feeds MTTR — and, once LOOP-01 lands, training labels.",
+        payload:
+`POST /workorders {"alert_id": "…"}
+→ {"id": "wo-uuid", "status": "open",
+    "title": "Recover stuck OTA deployment"}
+
+POST /workorders/{id}/close
+  {"resolution": "Replaced antenna", …}
+→ fleet_workorder_close_latency_seconds.observe(...)`,
+        chips:["auto-create","MTTR metric","future labels"]
+      },
+      {
+        from:"backend", to:"user", color:"--c-user",
+        title:"Twin Shows the Whole Story",
+        route:"GET /twin/{id} &middot; Maintenance panel",
+        desc:"One asset page: health score, vehicle block, open risks with model versions, active alerts with WO links, relevant OTA campaigns. The dashboard Maintenance section lists open tickets with one-click close — detect&rarr;predict&rarr;act&rarr;learn in miniature.",
+        payload:
+`GET /twin/device-xxx
+→ { "health_score": 62,
+    "vehicle": {...}, "open_risks": [...],
+    "active_alerts": [{…, "work_order_id": "wo-uuid"}] }`,
+        chips:["single asset page","WO badge","demo narrative"]
+      }
+    ]
   }
 };
 
@@ -2020,7 +2207,7 @@ function pickMode(m){
 
 const CONFIG = {
   fallbackFlow: "flow_register",
-  keyboardFlowOrder: ["flow_register", "flow_ota", "flow_dashboard", "flow_agents", "flow_alerts", "flow_aegis"],
+  keyboardFlowOrder: ["flow_register", "flow_ota", "flow_dashboard", "flow_agents", "flow_alerts", "flow_aegis", "flow_obd", "flow_aiot"],
   toggleModes: ["dev", "prod"]
 };
 
