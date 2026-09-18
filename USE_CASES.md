@@ -49,6 +49,7 @@ Legend: **Done** = implemented + e2e-covered · **Done\*** = implemented with no
 | UC-29 | Score Predictions with Registry Models + Eval Gates (MVP ML-01/EVAL-01) | Done | Seeded IsolationForest, `?model=auto\|ml\|legacy`, `tests/test_ml_eval.py` 5/5, `scripts/backtest.py` gates pass |
 | UC-30 | Ingest OBD-Grade Telemetry + Inject Fault Scenarios (MVP DATA-01) | Done | `source/dtc/fuel/odometer/tires` on heartbeat+telemetry; simulator `drift\|thermal\|tpms` progressions as eval ground truth |
 | UC-31 | Simulate Vehicle Identity + OBD/BMS Feeds, Surface in Twin (P0-A) | Done | VIN/make/model profiles, `iot/fleet/+/obd\|bms` topics, cell-voltage summary, `vehicle` block in `GET /twin/{id}` + Twin tab |
+| UC-32 | Enterprise Telemetry Store: Alembic, Tenant Stamping, 24h-Hot Retention (P-ret-1) | Done | `alembic/` revisions, tenant/region columns + dedup unique, 5-min rollups, retention worker (7d default), tiered reads |
 
 Not yet a UC (AIoT roadmap, see `docs/aiot-gap-analysis.md` §4–§5): edge inference + offline tier, model OTA-canary, driver scoring/coaching, fuel-fraud, video events, BI/MCP export.
 

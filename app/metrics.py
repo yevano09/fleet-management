@@ -68,6 +68,17 @@ telemetry_batches_total = Counter(
     "fleet_telemetry_batches_total", "Batch commits flushed by the ingest worker"
 )
 
+# ── P-ret-1: retention worker metrics ─────────────────────────────────────────
+retention_runs_total = Counter(
+    "fleet_retention_runs_total", "Retention sweeps completed", ["result"]
+)
+telemetry_dropped_total = Counter(
+    "fleet_telemetry_dropped_total", "Raw rows dropped past retention", ["tier"]
+)
+telemetry_tiered_total = Counter(
+    "fleet_telemetry_tiered_total", "Rollup rows written to warm tier"
+)
+
 # ── Feature 2: Geofence metrics ───────────────────────────────────────────────
 geofence_events_total = Counter(
     "fleet_geofence_events_total", "Total geofence enter/exit events", ["event_type"]

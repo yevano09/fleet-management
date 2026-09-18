@@ -80,7 +80,7 @@ def verify_firmware_download_token(device_id: str, sha256_hash: str, exp: int, t
     return hmac.compare_digest(expected, token or "")
 
 
-def _build_telemetry_point(device_id: str, payload: dict, timestamp):
+def _build_telemetry_point(device_id: str, payload: dict, timestamp, tenant_id=None, region=None):
     """Build (not persist) a Telemetry row — shared by inline + batch paths."""
     cells = payload.get("cell_voltages") or []
     try:
@@ -90,6 +90,8 @@ def _build_telemetry_point(device_id: str, payload: dict, timestamp):
     return Telemetry(
         device_id=device_id,
         timestamp=timestamp or utcnow(),
+        tenant_id=tenant_id or DEFAULT_ORG_ID,
+        region=region or payload.get("region") or settings.default_region,
         signal_strength=payload.get("signal_strength"),
         uptime_percentage=payload.get("uptime_percentage"),
         soc=payload.get("soc"),
@@ -141,10 +143,11 @@ _TELEMETRY_BATCH_MAX = 200
 _telemetry_queue: "asyncio.Queue" = asyncio.Queue(maxsize=_TELEMETRY_QUEUE_MAX)
 
 
-def enqueue_telemetry(device_id: str, device_name: str, payload: dict, timestamp=None) -> bool:
+def enqueue_telemetry(device_id: str, device_name: str, payload: dict, timestamp=None,
+                      tenant_id=None, region=None) -> bool:
     """Non-blocking enqueue for the MQTT hot path. Returns False when shed."""
     try:
-        _telemetry_queue.put_nowait((device_id, device_name, dict(payload), timestamp))
+        _telemetry_queue.put_nowait((device_id, device_name, dict(payload), timestamp, tenant_id, region))
         telemetry_queue_depth.set(_telemetry_queue.qsize())
         return True
     except asyncio.QueueFull:
@@ -154,7 +157,7 @@ def enqueue_telemetry(device_id: str, device_name: str, payload: dict, timestamp
             pass
         telemetry_rejected_total.labels(reason="queue_full").inc()
         try:
-            _telemetry_queue.put_nowait((device_id, device_name, dict(payload), timestamp))
+            _telemetry_queue.put_nowait((device_id, device_name, dict(payload), timestamp, tenant_id, region))
         except asyncio.QueueFull:
             return False
         return True
@@ -176,10 +179,11 @@ async def _telemetry_flusher():
             continue
         try:
             async with async_session_factory() as db:
-                for device_id, _name, payload, timestamp in batch:
-                    db.add(_build_telemetry_point(device_id, payload, timestamp))
+                for device_id, _name, payload, timestamp, tenant_id, region in batch:
+                    db.add(_build_telemetry_point(device_id, payload, timestamp,
+                                                  tenant_id=tenant_id, region=region))
                 await db.commit()
-            for _device_id, name, _p, _t in batch:
+            for _device_id, name, _p, _t, _o, _r in batch:
                 telemetry_points_total.labels(device=name).inc()
             for _ in batch:
                 _telemetry_queue.task_done()
@@ -501,7 +505,8 @@ async def handle_mqtt_obd(device_id: str, payload: dict):
             active_devices.inc()
         record = dict(payload)
         record["source"] = source
-        enqueue_telemetry(device.id, device.name, record, timestamp=event_time)
+        enqueue_telemetry(device.id, device.name, record, timestamp=event_time,
+                          tenant_id=device.org_id, region=settings.default_region)
     mqtt_messages_received.labels(topic="obd").inc()
 
 
@@ -565,7 +570,8 @@ async def handle_mqtt_heartbeat(device_id: str, payload: dict):
                 asyncio.create_task(_flush_command_queue(device_id))
                 asyncio.create_task(_sync_shadow_to_device(device_id))
             # Feature 1: record telemetry via the batch queue (P0-A2)
-            enqueue_telemetry(device.id, device.name, payload)
+            enqueue_telemetry(device.id, device.name, payload,
+                              tenant_id=device.org_id, region=settings.default_region)
             # Feature 2: geofence check
             if "latitude" in payload and "longitude" in payload:
                 asyncio.create_task(_check_geofences(device_id))
@@ -772,6 +778,11 @@ async def lifespan(app: FastAPI):
     # P0-A2: start telemetry batch-commit worker (leader only)
     telemetry_task = asyncio.create_task(_telemetry_flusher())
 
+    # P-ret-1: retention sweeps (leader only: roll up newly-cold raw, expire past-retention)
+    from app.retention import retention_loop
+
+    retention_task = asyncio.create_task(retention_loop())
+
     # Auto-create GPS demo firmware record if it doesn't exist
     try:
         async with async_session_factory() as db:
@@ -802,7 +813,8 @@ async def lifespan(app: FastAPI):
     ota_scheduler_task.cancel()
     cmd_queue_task.cancel()
     telemetry_task.cancel()
-    for task in [aegis_task, ota_scheduler_task, cmd_queue_task, telemetry_task]:
+    retention_task.cancel()
+    for task in [aegis_task, ota_scheduler_task, cmd_queue_task, telemetry_task, retention_task]:
         try:
             await task
         except asyncio.CancelledError:

@@ -16,7 +16,7 @@ from pydantic import BaseModel
 from app.metrics import active_devices, total_devices, telemetry_points_total
 from app.mqtt_client import mqtt_client
 from app.utils import utcnow
-from app.config import DEFAULT_ORG_ID
+from app.config import DEFAULT_ORG_ID, settings
 
 logger = logging.getLogger(__name__)
 
@@ -149,6 +149,8 @@ async def device_heartbeat(
     db.add(Telemetry(
         device_id=device.id,
         timestamp=utcnow(),
+        tenant_id=device.org_id,
+        region=settings.default_region,
         signal_strength=req.signal_strength,
         uptime_percentage=req.uptime_percentage,
         soc=req.soc,

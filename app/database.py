@@ -205,13 +205,13 @@ async def _bootstrap_vehicle_columns() -> None:
 async def init_db():
     from app.models import (
         Device, Firmware, OtaDeployment, V2gSchedule, Alert, UserSession,
-        Telemetry, Geofence, GeofenceEvent, CommandQueue, AuditLog,
+        Telemetry, TelemetryRollup5m, Geofence, GeofenceEvent, CommandQueue, AuditLog,
         DeviceShadow, OtaSchedule, PredictedFailure, WebhookSubscription, EventLog,
         Organization, ApiKey, DeviceCertificate, MLModel, WorkOrder,
     )
     from app.aegis.models import Remediation, RuleConfig  # noqa: F401
     _ = (Device, Firmware, OtaDeployment, V2gSchedule, Alert, UserSession,
-         Telemetry, Geofence, GeofenceEvent, CommandQueue, AuditLog,
+         Telemetry, TelemetryRollup5m, Geofence, GeofenceEvent, CommandQueue, AuditLog,
          DeviceShadow, OtaSchedule, PredictedFailure, WebhookSubscription, EventLog,
          Organization, ApiKey, DeviceCertificate, MLModel, WorkOrder)
     async with engine.begin() as conn:

@@ -93,9 +93,12 @@ class Settings(BaseSettings):
     aegis_backend_url: str = ""
     aegis_dry_run: bool = False
 
-    # Feature 1: Telemetry retention
-    telemetry_retention_days: int = 30
+    # Feature 1: Telemetry retention (P-ret-1: 7-day default, tiered growth)
+    telemetry_retention_days: int = 7
+    telemetry_hot_hours: int = 24
+    retention_sweep_interval_seconds: int = 600
     telemetry_sample_interval_seconds: int = 10
+    default_region: str = "default"
 
     # Feature 2: Geofencing
     geofence_check_interval_seconds: int = 30

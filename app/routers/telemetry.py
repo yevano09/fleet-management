@@ -34,23 +34,53 @@ async def get_telemetry(
     principal: dict = Depends(require_user()),
     db: AsyncSession = Depends(get_db),
 ):
-    """Fetch telemetry time-series for a device."""
+    """Fetch telemetry time-series for a device.
+
+    P-ret-1 tiered reads: windows within hot_hours come from raw rows;
+    older windows come from 5-minute rollups (same shape, summary values).
+    """
     dev_result = await db.execute(select(Device).where(Device.id == device_id))
     if not dev_result.scalar_one_or_none():
         raise HTTPException(status_code=404, detail="Device not found")
 
     cutoff = utcnow() - timedelta(hours=hours)
+    if hours <= settings.telemetry_hot_hours:
+        result = await db.execute(
+            select(Telemetry)
+            .where(Telemetry.device_id == device_id, Telemetry.timestamp >= cutoff)
+            .order_by(Telemetry.timestamp.asc())
+            .limit(limit)
+        )
+        points = result.scalars().all()
+        return TelemetrySeriesResponse(
+            device_id=device_id,
+            points=[TelemetryPoint.model_validate(p) for p in points],
+            total=len(points),
+        )
+
+    from app.models import TelemetryRollup5m
+
     result = await db.execute(
-        select(Telemetry)
-        .where(Telemetry.device_id == device_id, Telemetry.timestamp >= cutoff)
-        .order_by(Telemetry.timestamp.asc())
+        select(TelemetryRollup5m)
+        .where(TelemetryRollup5m.device_id == device_id, TelemetryRollup5m.bucket >= cutoff)
+        .order_by(TelemetryRollup5m.bucket.asc())
         .limit(limit)
     )
-    points = result.scalars().all()
+    rows = result.scalars().all()
     return TelemetrySeriesResponse(
         device_id=device_id,
-        points=[TelemetryPoint.model_validate(p) for p in points],
-        total=len(points),
+        points=[
+            TelemetryPoint(
+                id=f"rollup-{r.bucket.isoformat()}" if r.bucket else "rollup",
+                device_id=device_id,
+                timestamp=r.bucket,
+                signal_strength=int(r.avg_signal) if r.avg_signal is not None else None,
+                temperature=r.avg_temp,
+                soc=r.avg_soc,
+            )
+            for r in rows
+        ],
+        total=len(rows),
     )
 
 

@@ -2,7 +2,7 @@ import uuid
 import enum
 from datetime import datetime, timezone
 
-from sqlalchemy import Column, String, Integer, Float, DateTime, ForeignKey, Text, Enum as SAEnum, Boolean, Index
+from sqlalchemy import Column, String, Integer, Float, DateTime, ForeignKey, Text, Enum as SAEnum, Boolean, Index, UniqueConstraint
 from sqlalchemy.orm import relationship
 from app.database import Base
 from app.utils import utcnow
@@ -298,10 +298,21 @@ class UserSession(Base):
 
 class Telemetry(Base):
     __tablename__ = "telemetry"
+    # P-ret-1: id stays populated for backward-compat reads but is NOT the
+    # physical PK on migrated DBs (dropped by 0002_telemetry_reshape for
+    # hypertable readiness). Fresh create_all DBs still get id-PK; the P-ret-2
+    # hypertable step drops it idempotently. Mapper needs a PK either way.
+    __table_args__ = (
+        UniqueConstraint("device_id", "timestamp", "source", name="telemetry_device_ts_source_unique"),
+        Index("ix_telemetry_tenant_device_ts", "tenant_id", "device_id", "timestamp"),
+    )
 
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     device_id = Column(String, ForeignKey("devices.id"), nullable=False, index=True)
     timestamp = Column(DateTime, default=utcnow, index=True)
+    # P-ret-1: hot-path tenancy stamped at ingest (no join inheritance at scale)
+    tenant_id = Column(String, default=DEFAULT_ORG_ID, index=True)
+    region = Column(String, default="default")
     signal_strength = Column(Integer, nullable=True)
     uptime_percentage = Column(Float, nullable=True)
     soc = Column(Float, nullable=True)
@@ -329,6 +340,26 @@ class Telemetry(Base):
     cell_spread_mv = Column(Float, nullable=True)
 
     device = relationship("Device", back_populates="telemetry")
+
+
+# ── P-ret-1: 5-minute rollups (warm tier; raw older than hot_hours is dropped) ──
+
+class TelemetryRollup5m(Base):
+    __tablename__ = "telemetry_5m"
+
+    device_id = Column(String, ForeignKey("devices.id"), nullable=False, primary_key=True)
+    bucket = Column(DateTime, nullable=False, primary_key=True)
+    tenant_id = Column(String, default=DEFAULT_ORG_ID, index=True)
+    samples = Column(Integer, default=0)
+    avg_signal = Column(Float, nullable=True)
+    min_signal = Column(Float, nullable=True)
+    avg_temp = Column(Float, nullable=True)
+    max_temp = Column(Float, nullable=True)
+    avg_soc = Column(Float, nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint("device_id", "bucket", name="telemetry_5m_device_bucket_unique"),
+    )
 
 
 # ── Feature 2: Geofencing ─────────────────────────────────────────────────────

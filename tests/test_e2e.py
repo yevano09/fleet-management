@@ -735,6 +735,19 @@ class TestE2E:
         r = requests.get(f"{BASE_URL}/twin/nonexistent-id", timeout=10)
         assert r.status_code == 404
 
+    def test_45_rollup_read_path_and_retention_metrics(self):
+        """P-ret-1: >hot-hours reads route to rollups; retention metrics exist."""
+        dev_id = self.created_device_ids[0]
+        r = requests.get(f"{BASE_URL}/telemetry/{dev_id}?hours=48&limit=10", timeout=10)
+        assert r.status_code == 200, f"rollup read failed: {r.text}"
+        body = r.json()
+        assert "points" in body and "total" in body
+
+        r = requests.get(f"{BASE_URL}/metrics", timeout=10)
+        for name in ("fleet_retention_runs_total", "fleet_telemetry_dropped_total",
+                     "fleet_telemetry_tiered_total"):
+            assert name in r.text, f"P-ret-1 metric {name} missing"
+
     def test_44_vehicle_identity_and_cell_summary_in_twin(self):
         """OBD sim: VIN/make/model on register, cell summary + vehicle block in twin."""
         r = requests.post(f"{BASE_URL}/devices/register", json={
