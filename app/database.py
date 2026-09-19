@@ -209,13 +209,15 @@ async def init_db():
         DeviceShadow, OtaSchedule, PredictedFailure, WebhookSubscription, EventLog,
         Organization, ApiKey, DeviceCertificate, MLModel, WorkOrder,
         CargoProfile, CargoReading, ShockEvent,
+        ServiceNote, CopilotSession, CopilotMessage,
     )
     from app.aegis.models import Remediation, RuleConfig  # noqa: F401
     _ = (Device, Firmware, OtaDeployment, V2gSchedule, Alert, UserSession,
          Telemetry, TelemetryRollup5m, Geofence, GeofenceEvent, CommandQueue, AuditLog,
          DeviceShadow, OtaSchedule, PredictedFailure, WebhookSubscription, EventLog,
          Organization, ApiKey, DeviceCertificate, MLModel, WorkOrder,
-         CargoProfile, CargoReading, ShockEvent)
+         CargoProfile, CargoReading, ShockEvent,
+         ServiceNote, CopilotSession, CopilotMessage)
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     await _bootstrap_tenancy()

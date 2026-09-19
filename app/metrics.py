@@ -191,3 +191,20 @@ async def metrics_middleware(request: Request, call_next):
         method=request.method, endpoint=request.url.path
     ).observe(elapsed)
     return response
+
+
+# ── SRS Idea 5: Copilot metrics ───────────────────────────────────────────────
+copilot_requests_total = Counter(
+    "fleet_copilot_requests_total", "Copilot turns served", ["intent", "provider"]
+)
+copilot_latency_seconds = Histogram(
+    "fleet_copilot_latency_seconds",
+    "Copilot turn latency",
+    buckets=(0.1, 0.5, 1.0, 2.5, 5.0, 15.0, 60.0),
+)
+copilot_tool_calls_total = Counter(
+    "fleet_copilot_tool_calls_total", "Copilot tool executions", ["tool"]
+)
+copilot_blocked_total = Counter(
+    "fleet_copilot_blocked_total", "Copilot turns restricted", ["reason"]
+)

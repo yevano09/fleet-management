@@ -591,3 +591,41 @@ class ShockEvent(Base):
     event_class = Column(String, nullable=False, index=True)
     model_version = Column(String, default="heuristic-v1")
     org_id = Column(String, ForeignKey("organizations.id"), default=DEFAULT_ORG_ID, index=True)
+
+
+# ── SRS Idea 5: Fleet Agentic Copilot ──────────────────────────────────────────
+
+class ServiceNote(Base):
+    """RAG-lite knowledge base: SOPs, DTC guides, runbooks (FTS-ranked)."""
+    __tablename__ = "service_notes"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    title = Column(String, nullable=False)
+    body = Column(Text, nullable=False)
+    source = Column(String, default="runbook")  # runbook | dtc | sop
+    org_id = Column(String, ForeignKey("organizations.id"), default=DEFAULT_ORG_ID, index=True)
+
+
+class CopilotSession(Base):
+    __tablename__ = "copilot_sessions"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_email = Column(String, nullable=False, index=True)
+    role = Column(String, default="operator")
+    org_id = Column(String, ForeignKey("organizations.id"), default=DEFAULT_ORG_ID, index=True)
+    created_at = Column(DateTime, default=utcnow)
+
+
+class CopilotMessage(Base):
+    """Only REDACTED content is stored; raw_sha tracks the original for forensics."""
+    __tablename__ = "copilot_messages"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    session_id = Column(String, ForeignKey("copilot_sessions.id"), nullable=False, index=True)
+    role = Column(String, nullable=False)  # user | assistant | tool
+    content = Column(Text, nullable=False)  # redacted
+    raw_sha = Column(String, nullable=True)
+    tools_used = Column(Text, default="[]")  # JSON list
+    provider = Column(String, default="mock")
+    latency_ms = Column(Float, nullable=True)
+    created_at = Column(DateTime, default=utcnow, index=True)

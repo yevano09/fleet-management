@@ -11,6 +11,8 @@ import uuid
 import logging
 from typing import Optional
 
+from pydantic import BaseModel, Field
+
 from fastapi import APIRouter, Depends, Query, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -553,3 +555,45 @@ async def get_predictive_history(
     from agents.async_tools import async_get_predictions
     result = await async_get_predictions(db, min_risk=min_risk, resolved=False, limit=limit)
     return result
+
+
+class CopilotChatRequest(BaseModel):
+    message: str = Field(..., min_length=1, max_length=2000)
+    session_id: Optional[str] = None
+
+
+@router.post("/copilot/chat")
+async def copilot_chat(
+    req: CopilotChatRequest,
+    principal: dict = Depends(require_role("operator")),
+    db: AsyncSession = Depends(get_db),
+):
+    """Fleet Agentic Copilot turn (SRS Idea 5): CrewAI + privacy layer.
+
+    Response shape matches the SRS: session_id, response, actions_taken,
+    suggested_actions (+ provider/intent/flagged_input diagnostics).
+    """
+    from agents.copilot import run_copilot
+
+    try:
+        return await run_copilot(db, principal, req.message, req.session_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/copilot/sessions")
+async def copilot_sessions(
+    limit: int = Query(20, ge=1, le=100),
+    principal: dict = Depends(require_user()),
+    db: AsyncSession = Depends(get_db),
+):
+    """List my copilot sessions (redacted previews only)."""
+    from sqlalchemy import select as _select
+    from app.models import CopilotSession as _Sess
+
+    rows = (await db.execute(
+        _select(_Sess).where(_Sess.user_email == principal.get("email", "unknown"))
+        .order_by(_Sess.created_at.desc()).limit(limit))).scalars().all()
+    return {"sessions": [
+        {"id": s.id, "role": s.role, "created_at": s.created_at.isoformat() if s.created_at else None}
+        for s in rows]}

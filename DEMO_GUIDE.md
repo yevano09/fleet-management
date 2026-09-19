@@ -915,6 +915,31 @@ The script walks through 12 scripted demo beats with color-coded narration (beat
 14. **Work Orders** — Auto-created on 3rd escalation, manual open/close with MTTR (§14c, manual — not yet scripted)
 15. **Eval Gates** — Seeded backtest table with lead-time/FP numbers (§14e, manual — not yet scripted)
 
+### 15. Smart Cargo + Copilot (SRS Ideas 4 & 5)
+
+```bash
+# Cold-chain profile + hot reading, then fleet-health fires the alert
+curl -X PUT http://localhost:8181/cargo/<DEVICE_ID>/profile \
+  -H "Content-Type: application/json" \
+  -d '{"commodity":"pharma","temp_min_c":2,"temp_max_c":4,"trip_eta_minutes":120}'
+curl -X POST http://localhost:8181/cargo/<DEVICE_ID>/readings \
+  -H "Content-Type: application/json" \
+  -d '{"bay_temp_c":6.2,"humidity_pct":72.4,"source":"sim"}'
+curl http://localhost:8181/agents/fleet-health   # -> cargo_spoilage_risk alert
+curl http://localhost:8181/cargo/overview        # dashboard Cold Chain panel source
+
+# Copilot (mock brain, no keys): diagnostics, safety, cargo, fleet health
+curl -X POST http://localhost:8181/agents/copilot/chat \
+  -H "Content-Type: application/json" \
+  -d '{"message":"Why is my engine light on and can I keep driving?"}'
+# => session_id, tool-cited response, suggested_actions (names pseudonymized)
+```
+
+Or click the teal chat bubble (bottom-right) — same endpoint, answers inline.
+Simulator publishes `+/cargo` frames (bay climate + `ai_inference` stub) with
+`SIMULATOR_CARGO=1`; script a drop with `SIMULATOR_CARGO_DROP=1`, then
+`POST /cargo/scan` classifies it (`HARD_DROP`).
+
 Each beat includes:
 - A narrated header (what we're about to do)
 - The actual API call (with output)

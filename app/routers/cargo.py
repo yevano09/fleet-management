@@ -158,6 +158,40 @@ async def list_shocks(
     }
 
 
+@router.get("/overview")
+async def cargo_overview(
+    principal: dict = Depends(require_user()),
+    db: AsyncSession = Depends(get_db),
+):
+    """Fleet cold-chain rollup for the dashboard cargo panel + copilot."""
+    from app.cargo_thermal import estimate_tts
+
+    result = await db.execute(_scope_profile(select(CargoProfile), principal))
+    profs = result.scalars().all()
+    loads = []
+    for p in profs:
+        rows = (await db.execute(
+            select(CargoReading)
+            .where(CargoReading.device_id == p.device_id)
+            .order_by(CargoReading.timestamp.desc())
+            .limit(12)
+        )).scalars().all()
+        if not rows:
+            loads.append({"device_id": p.device_id, "commodity": p.commodity,
+                          "bay_temp_c": None, "tts_minutes": None, "risk": "UNKNOWN",
+                          "door_open": None})
+            continue
+        asc = [(r.timestamp, r.bay_temp_c) for r in reversed(rows)]
+        est = estimate_tts(asc, p.temp_max_c, p.thermal_mass or 1.0)
+        loads.append({"device_id": p.device_id, "commodity": p.commodity,
+                      "bay_temp_c": rows[0].bay_temp_c,
+                      "humidity_pct": rows[0].humidity_pct,
+                      "door_open": rows[0].door_open,
+                      "tts_minutes": est["tts_minutes"], "risk": est["risk_level"]})
+    high = sum(1 for l in loads if l["risk"] == "HIGH")
+    return {"loads": loads, "total": len(loads), "high_risk_count": high}
+
+
 @router.post("/scan")
 async def run_shock_scan(
     lookback_hours: int = Query(1, ge=1, le=24),

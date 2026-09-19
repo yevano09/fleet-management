@@ -50,6 +50,8 @@ Legend: **Done** = implemented + e2e-covered · **Done\*** = implemented with no
 | UC-30 | Ingest OBD-Grade Telemetry + Inject Fault Scenarios (MVP DATA-01) | Done | `source/dtc/fuel/odometer/tires` on heartbeat+telemetry; simulator `drift\|thermal\|tpms` progressions as eval ground truth |
 | UC-31 | Simulate Vehicle Identity + OBD/BMS Feeds, Surface in Twin (P0-A) | Done | VIN/make/model profiles, `iot/fleet/+/obd\|bms` topics, cell-voltage summary, `vehicle` block in `GET /twin/{id}` + Twin tab |
 | UC-32 | Enterprise Telemetry Store: Alembic, Tenant Stamping, 24h-Hot Retention (P-ret-1) | Done | `alembic/` revisions, tenant/region columns + dedup unique, 5-min rollups, retention worker (7d default), tiered reads |
+| UC-33 | Smart Cargo Monitoring: profiles, TTS, shock events (SRS Idea 4) | Done | `cargo_profiles/readings`, `shock_events`, `+/cargo` feed, TTS estimator + alerts, `GET /cargo/overview`, cargo panel |
+| UC-34 | Fleet Agentic Copilot on CrewAI with privacy layer (SRS Idea 5) | Done | CrewAI Agent/Task/Crew, mock brain default, 7 read-only tools, PII redaction, sessions, `POST /agents/copilot/chat`, chat widget |
 
 Not yet a UC (AIoT roadmap, see `docs/aiot-gap-analysis.md` §4–§5): edge inference + offline tier, model OTA-canary, driver scoring/coaching, fuel-fraud, video events, BI/MCP export.
 

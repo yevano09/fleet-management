@@ -338,6 +338,18 @@ td code { font-family:var(--font-mono); font-size:0.78em; background:rgba(45,212
   </div>
   </div>
 
+  <div class="mt-8">
+  <div class="mb-4 flex items-center justify-between">
+  <h2 class="font-display text-[1.15rem] tracking-[-0.01em] text-ink">Cold Chain <span id="cargo-badge" class="hidden rounded-full bg-red-400/15 px-2 py-0.5 align-middle text-xs text-red-400">0 at risk</span></h2>
+  <div class="flex gap-2">
+  <button class="rounded-lg border border-line bg-transparent px-4 py-1.5 text-xs font-medium text-body transition-colors hover:border-teal hover:bg-surface" onclick="loadCargo()">Refresh</button>
+  </div>
+  </div>
+  <div id="cargo-panel" class="mb-6 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+  <div class="rounded-[0.625rem] border border-line bg-surface p-4"><div class="text-[0.7rem] uppercase tracking-[0.08em] text-muted">No profiled cargo loads.</div></div>
+  </div>
+  </div>
+
 <div class="ota-section">
 <div class="toolbar">
 <h2>Geofences</h2>
@@ -562,6 +574,26 @@ Auto-register (skip review)
 </div>
 
  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+ <button id="copilot-fab" aria-label="Open fleet copilot"
+   class="fixed bottom-6 right-6 z-[90] flex h-14 w-14 items-center justify-center rounded-full bg-teal text-abyss shadow-lg transition-transform hover:scale-105"
+   onclick="toggleCopilot(true)">
+   <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+ </button>
+ <div id="copilot-panel" class="fixed bottom-24 right-6 z-[90] hidden max-h-[60vh] w-[380px] max-w-[calc(100vw-3rem)] flex-col overflow-hidden rounded-xl border border-line bg-surface shadow-2xl" role="dialog" aria-modal="false" aria-labelledby="copilot-title">
+   <div class="flex items-center justify-between border-b border-line bg-raised px-4 py-2.5">
+     <strong id="copilot-title" class="font-display text-sm text-ink">Fleet Copilot <span class="font-body font-normal text-muted">(mock brain)</span></strong>
+     <button class="text-muted hover:text-ink" aria-label="Close copilot" onclick="toggleCopilot(false)">✕</button>
+   </div>
+   <div id="copilot-messages" class="flex-1 space-y-2 overflow-y-auto p-3 text-[0.82rem]" aria-live="polite" style="min-height:180px;">
+     <div class="text-muted">Ask about diagnostics, safety, cold-chain, or fleet health. Answers cite fleet tools; names are pseudonymized.</div>
+   </div>
+   <form id="copilot-form" class="flex gap-2 border-t border-line p-2.5">
+     <input id="copilot-input" type="text" autocomplete="off" maxlength="2000" placeholder="Why is the engine light on?"
+       class="flex-1 rounded-lg border border-line bg-abyss px-3 py-2 text-sm text-body placeholder:text-muted focus:border-teal focus:outline-none" />
+     <button type="submit" class="rounded-lg bg-teal px-3.5 py-2 text-sm font-semibold text-abyss hover:brightness-110">Ask</button>
+   </form>
+ </div>
 
 <script>
 function toggleAegisDetail(id) {
@@ -2061,6 +2093,96 @@ async function closeWorkOrder(id) {
   } catch { showToast('Network error', 'error'); }
 }
 
+// ═══ SRS Idea 4: Cold-chain panel ═══════════════════════════════════════════
+
+async function loadCargo() {
+  try {
+    const data = await fetchJson('/cargo/overview');
+    const panel = document.getElementById('cargo-panel');
+    const badge = document.getElementById('cargo-badge');
+    const loads = data.loads || [];
+    if (data.high_risk_count > 0) {
+      badge.style.display = 'inline';
+      badge.textContent = `${data.high_risk_count} at risk`;
+    } else { badge.style.display = 'none'; }
+    if (loads.length === 0) {
+      panel.innerHTML = '<div class="rounded-[0.625rem] border border-line bg-surface p-4"><div class="text-[0.7rem] uppercase tracking-[0.08em] text-muted">No profiled cargo loads.</div></div>';
+    } else {
+      const riskText = { HIGH: 'text-red-400', MEDIUM: 'text-amber-500', LOW: 'text-green-500', UNKNOWN: 'text-muted' };
+      panel.innerHTML = loads.map(l => `
+        <div class="rounded-[0.625rem] border border-line bg-surface p-4">
+          <div class="flex items-center justify-between">
+            <strong class="text-[0.9rem]">${escapeHtml(l.commodity || 'cargo')}</strong>
+            <span class="text-xs font-semibold ${riskText[l.risk] || 'text-muted'}">${escapeHtml(l.risk || 'UNKNOWN')}</span>
+          </div>
+          <div class="mt-1 font-mono text-[0.7rem] text-muted">${escapeHtml((l.device_id || '').substring(0, 8))}…</div>
+          <div class="mt-2 font-display text-2xl font-semibold text-ink">${l.bay_temp_c != null ? l.bay_temp_c.toFixed(1) + '°C' : '–'}</div>
+          <div class="mt-1 text-xs text-muted">${l.tts_minutes != null ? `TTS ~${Math.round(l.tts_minutes)} min` : 'TTS n/a'}${l.door_open ? ' · <span class="text-amber-500">door open</span>' : ''}</div>
+        </div>`).join('');
+    }
+  } catch (err) { console.error('Cargo load error:', err); }
+}
+
+// ═══ SRS Idea 5: Fleet Copilot chat widget ══════════════════════════════════
+
+let copilotSessionId = null;
+
+function toggleCopilot(open) {
+  const panel = document.getElementById('copilot-panel');
+  const fab = document.getElementById('copilot-fab');
+  panel.classList.toggle('hidden', !open);
+  panel.classList.toggle('flex', open);
+  fab.style.display = open ? 'none' : 'flex';
+  if (open) {
+    const input = document.getElementById('copilot-input');
+    if (input) input.focus();
+  }
+}
+
+function copilotBubble(text, mine) {
+  const box = document.getElementById('copilot-messages');
+  const div = document.createElement('div');
+  div.className = mine
+    ? 'ml-8 rounded-lg bg-teal/15 p-2.5 text-body'
+    : 'mr-8 rounded-lg border border-line bg-abyss p-2.5 text-body';
+  div.style.whiteSpace = 'pre-wrap';
+  div.textContent = text;
+  box.appendChild(div);
+  box.scrollTop = box.scrollHeight;
+  return div;
+}
+
+document.getElementById('copilot-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const input = document.getElementById('copilot-input');
+  const message = input.value.trim();
+  if (!message) return;
+  input.value = '';
+  copilotBubble(message, true);
+  const pending = copilotBubble('Thinking… (mock brain, on-device tools)', false);
+  try {
+    const res = await fetch('/agents/copilot/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message, session_id: copilotSessionId }),
+    });
+    const data = await res.json();
+    pending.remove();
+    if (!res.ok) {
+      copilotBubble('Error: ' + (data.detail || res.status), false);
+      return;
+    }
+    copilotSessionId = data.session_id;
+    copilotBubble(data.response || '(empty)', false);
+    if (data.suggested_actions && data.suggested_actions.length) {
+      copilotBubble('Suggested: ' + data.suggested_actions.join(' · '), false);
+    }
+  } catch {
+    pending.remove();
+    copilotBubble('Network error contacting copilot.', false);
+  }
+});
+
 initMap();
 loadDashboard();
 loadFirmwareList();
@@ -2071,6 +2193,7 @@ loadPredictions();
 loadGeofences();
 loadSchedules();
 loadWorkOrders();
+loadCargo();
 loadQueueStat();
 setInterval(loadDashboard, 5000);
 setInterval(loadFirmwareList, 30000);
@@ -2082,6 +2205,7 @@ setInterval(loadPredictions, 30000);
 setInterval(loadGeofences, 60000);
 setInterval(loadSchedules, 30000);
 setInterval(loadWorkOrders, 30000);
+setInterval(loadCargo, 30000);
 setInterval(loadQueueStat, 15000);
 loadAegisPanel();
 </script>
