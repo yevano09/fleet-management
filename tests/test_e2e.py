@@ -790,3 +790,33 @@ class TestE2E:
         for name in ("fleet_telemetry_duplicates_total", "fleet_telemetry_rejected_total",
                      "fleet_telemetry_queue_depth", "fleet_telemetry_batches_total"):
             assert name in r.text, f"P0-A metric {name} missing"
+
+    def test_46_cargo_profile_and_readings(self):
+        """SRS Idea 4 M1.1: cargo profile CRUD + reading ingest + history."""
+        dev_id = self.created_device_ids[0]
+        r = requests.put(f"{BASE_URL}/cargo/{dev_id}/profile", json={
+            "commodity": "pharma", "temp_min_c": 2.0, "temp_max_c": 4.0,
+            "thermal_mass": 1.2, "door_alerts": True, "trip_eta_minutes": 120.0,
+        }, timeout=10)
+        assert r.status_code == 200, f"cargo profile failed: {r.text}"
+        assert r.json()["commodity"] == "pharma"
+
+        r = requests.get(f"{BASE_URL}/cargo/{dev_id}/profile", timeout=10)
+        assert r.status_code == 200 and r.json()["temp_max_c"] == 4.0
+
+        r = requests.post(f"{BASE_URL}/cargo/{dev_id}/readings", json={
+            "bay_temp_c": 6.2, "humidity_pct": 72.4, "door_open": False,
+            "shock_g": 0.4, "source": "sim",
+            "ai_inference": {"spoilage_risk_level": "HIGH", "predicted_tts_minutes": 42.0,
+                             "last_impact_event": "NORMAL_ROAD_BUMP"},
+        }, timeout=10)
+        assert r.status_code == 201, f"cargo ingest failed: {r.text}"
+
+        r = requests.get(f"{BASE_URL}/cargo/{dev_id}/readings?hours=1&limit=10", timeout=10)
+        assert r.status_code == 200 and r.json()["total"] >= 1
+
+        r = requests.get(f"{BASE_URL}/cargo/{dev_id}/shocks?limit=10", timeout=10)
+        assert r.status_code == 200 and "events" in r.json()
+
+        r = requests.get(f"{BASE_URL}/metrics", timeout=10)
+        assert "fleet_cargo_readings_total" in r.text

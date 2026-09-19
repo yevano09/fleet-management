@@ -23,6 +23,8 @@ MQTT_TOPIC_REGISTER_SINGULAR = "iot/fleet/{device_id}/register"
 # P0-A: OBD-II gateway + BMS feeds (event-timed, source-tagged).
 MQTT_TOPIC_OBD = "iot/fleet/{device_id}/obd"
 MQTT_TOPIC_BMS = "iot/fleet/{device_id}/bms"
+# SRS Idea 4: Smart Cargo telemetry feed (bay climate + door + shock summary).
+MQTT_TOPIC_CARGO = "iot/fleet/{device_id}/cargo"
 
 
 class MqttClient:
@@ -35,6 +37,7 @@ class MqttClient:
         self._on_v2g_status: Optional[Callable] = None
         self._on_obd: Optional[Callable] = None
         self._on_bms: Optional[Callable] = None
+        self._on_cargo: Optional[Callable] = None
         self._loop: Optional[asyncio.AbstractEventLoop] = None
 
     def set_event_loop(self, loop: asyncio.AbstractEventLoop):
@@ -60,6 +63,10 @@ class MqttClient:
         """P0-A: BMS cell-data feed handler."""
         self._on_bms = callback
 
+    def on_cargo(self, callback: Callable):
+        """SRS Idea 4: Smart Cargo telemetry feed handler."""
+        self._on_cargo = callback
+
     def _on_connect(self, client, userdata, flags, reason_code, properties=None):
         if reason_code == 0:
             logger.info("Connected to MQTT broker")
@@ -71,6 +78,7 @@ class MqttClient:
             client.subscribe("iot/fleet/+/status/v2g", qos=1)
             client.subscribe("iot/fleet/+/obd", qos=1)  # P0-A OBD-II gateway feed
             client.subscribe("iot/fleet/+/bms", qos=1)  # P0-A BMS cell-data feed
+            client.subscribe("iot/fleet/+/cargo", qos=1)  # SRS Idea 4 cargo feed
         else:
             logger.error("Failed to connect to MQTT broker, rc=%s", reason_code)
             self._connected = False
@@ -113,6 +121,13 @@ class MqttClient:
                     if self._loop and self._loop.is_running():
                         asyncio.run_coroutine_threadsafe(
                             cb(device_id, payload), self._loop
+                        )
+            elif msg.topic.endswith("/cargo") and len(topic_parts) >= 4:
+                device_id = topic_parts[2]
+                if self._on_cargo:
+                    if self._loop and self._loop.is_running():
+                        asyncio.run_coroutine_threadsafe(
+                            self._on_cargo(device_id, payload), self._loop
                         )
             elif msg.topic.endswith("/register"):
                 # Per-device topic `iot/fleet/{id}/register` carries a

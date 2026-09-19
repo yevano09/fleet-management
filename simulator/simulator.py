@@ -59,6 +59,9 @@ BATTERY_CAPACITY_KWH = 60.0
 SIMULATOR_OBD = os.environ.get("SIMULATOR_OBD", "1").lower() in ("1", "true", "yes")
 SIMULATOR_SCENARIO = os.environ.get("SIMULATOR_SCENARIO", "none").lower()
 SIMULATOR_FAULT_DEVICE_INDEX = int(os.environ.get("SIMULATOR_FAULT_DEVICE_INDEX", "0"))
+# SRS Idea 4: cargo telemetry (bay climate + door + IMU) + drop injection.
+SIMULATOR_CARGO = os.environ.get("SIMULATOR_CARGO", "1").lower() in ("1", "true", "yes")
+SIMULATOR_CARGO_DROP = os.environ.get("SIMULATOR_CARGO_DROP", "0").lower() in ("1", "true", "yes")
 # Fault DTCs asserted once the progression crosses its threshold.
 SCENARIO_DTC = {"drift": ["U0100"], "thermal": ["P0128"], "tpms": ["C0745"]}
 NOMINAL_TIRE_PSI = 32.0
@@ -137,6 +140,13 @@ class SimulatedDevice:
         self.scenario = "none"
         self._fault_step = 0
 
+        # SRS Idea 4: cargo bay climate + door + IMU handling state.
+        self.bay_temp_c = random.uniform(2.5, 3.5)
+        self.humidity_pct = random.uniform(60, 75)
+        self.door_open = False
+        self.shock_g = 0.2  # latest peak-g in window
+        self._drop_armed = False
+
         # Vehicle identity + EV cell model (OBD simulator)
         make, model, year, profile_ev = VEHICLE_PROFILES[profile_idx % len(VEHICLE_PROFILES)]
         self.make = make
@@ -148,7 +158,6 @@ class SimulatedDevice:
         self.cell_voltages = [round(random.uniform(4.05, 4.15), 3) for _ in range(CELL_COUNT)]
         self.rpm = random.uniform(800, 1200)
         self.speed_kph = 0.0
-
         self._client = mqtt.Client(
             client_id=f"sim-{device_id[:8]}",
             protocol=mqtt.MQTTv5,
@@ -463,6 +472,42 @@ class SimulatedDevice:
         self._publish_obd(now_iso)
         if self.is_ev:
             self._publish_bms(now_iso)
+        self._publish_cargo(now_iso)
+
+    def _publish_cargo(self, now_iso: str):
+        """SRS Idea 4: cargo telemetry with edge ai_inference stub block."""
+        if not SIMULATOR_CARGO:
+            return
+        # Bay climate random-walks around the cold-chain band; door blips rare.
+        self.bay_temp_c = max(-5.0, min(15.0, self.bay_temp_c + random.uniform(-0.3, 0.3)))
+        self.humidity_pct = max(20.0, min(95.0, self.humidity_pct + random.uniform(-1, 1)))
+        if random.random() < 0.02:
+            self.door_open = not self.door_open
+        # IMU: background road noise; scripted HARD_DROP when armed.
+        if SIMULATOR_CARGO_DROP and not self._drop_armed and random.random() < 0.1:
+            self._drop_armed = True
+            self.shock_g = round(random.uniform(6.0, 9.0), 1)
+        else:
+            self.shock_g = round(random.uniform(0.1, 0.8), 2)
+        tts = max(0.0, (4.0 - self.bay_temp_c) * 45.0)  # stub slope model
+        cargo = {
+            "event_time": now_iso,
+            "source": "sim",
+            "device_id": self.id,
+            "sensors": {
+                "temperature_celsius": round(self.bay_temp_c, 1),
+                "humidity_pct": round(self.humidity_pct, 1),
+                "door_open": self.door_open,
+            },
+            "shock_g": self.shock_g,
+            "ai_inference": {
+                "spoilage_risk_level": "HIGH" if tts < 60 else ("MEDIUM" if tts < 180 else "LOW"),
+                "predicted_tts_minutes": round(tts, 1),
+                "last_impact_event": "HARD_DROP" if self._drop_armed and self.shock_g > 5 else "NORMAL_ROAD_BUMP",
+            },
+        }
+        self._client.publish(f"iot/fleet/{self.id}/cargo", json.dumps(cargo), qos=1)
+        self._drop_armed = False
 
     def _publish_obd(self, now_iso: str):
         """OBD-II gateway feed: PID map + vehicle identity + OBD state."""

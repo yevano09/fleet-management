@@ -68,6 +68,17 @@ telemetry_batches_total = Counter(
     "fleet_telemetry_batches_total", "Batch commits flushed by the ingest worker"
 )
 
+# ── SRS Idea 4: Smart Cargo metrics ───────────────────────────────────────────
+cargo_readings_total = Counter(
+    "fleet_cargo_readings_total", "Cargo telemetry frames recorded", ["source"]
+)
+cargo_alerts_total = Counter(
+    "fleet_cargo_alerts_total", "Cold-chain / shock alerts raised", ["type"]
+)
+shock_events_total = Counter(
+    "fleet_shock_events_total", "Classified handling events", ["event_class"]
+)
+
 # ── P-ret-1: retention worker metrics ─────────────────────────────────────────
 retention_runs_total = Counter(
     "fleet_retention_runs_total", "Retention sweeps completed", ["result"]

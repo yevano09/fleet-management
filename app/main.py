@@ -32,6 +32,7 @@ from app.routers.predictive import router as predictive_router
 from app.routers.workorders import router as workorders_router
 from app.routers.twin import router as twin_router
 from app.routers.obd import router as obd_router
+from app.routers.cargo import router as cargo_router
 from app.routers.webhooks import router as webhooks_router
 from app.routers.provisioning import router as provisioning_router
 from app.routers.orgs import router as orgs_router
@@ -47,10 +48,12 @@ from app.metrics import (
     shadow_updates_total, device_cert_rejected_total,
     telemetry_duplicates_total, telemetry_rejected_total,
     telemetry_queue_depth, telemetry_batches_total,
+    cargo_readings_total,
 )
 from app.models import (
     Device, DeviceStatus, DeviceLifecycle, Firmware, Telemetry, CommandQueue,
     CommandStatus, DeviceShadow, OtaDeployment, OtaStatus, DeviceCertificate,
+    CargoReading,
 )
 from app.utils import utcnow
 from app.audit import log_action
@@ -529,6 +532,39 @@ async def handle_mqtt_bms(device_id: str, payload: dict):
     await handle_mqtt_obd(device_id, {**payload, **{k: v for k, v in record.items() if v is not None}})
 
 
+async def handle_mqtt_cargo(device_id: str, payload: dict):
+    """SRS Idea 4: Smart Cargo telemetry → CargoReading rows.
+
+    Accepts bay climate + door + shock summary + edge ai_inference block.
+    Unknown devices are rejected (counted); tenant stamped from device row.
+    """
+    import json as _json
+
+    async with async_session_factory() as db:
+        result = await db.execute(select(Device).where(Device.id == device_id))
+        device = result.scalar_one_or_none()
+        if not device:
+            telemetry_rejected_total.labels(reason="unknown_device").inc()
+            return
+        sensors = payload.get("sensors", {}) or {}
+        ai_block = payload.get("ai_inference")
+        row = CargoReading(
+            device_id=device.id,
+            timestamp=_obd_event_time(payload),
+            bay_temp_c=payload.get("bay_temp_c", sensors.get("temperature_celsius")),
+            humidity_pct=payload.get("humidity_pct", sensors.get("humidity_pct")),
+            door_open=bool(payload.get("door_open", sensors.get("door_open", False))),
+            shock_g=payload.get("shock_g"),
+            source=payload.get("source", "sim"),
+            ai_inference=_json.dumps(ai_block) if ai_block is not None else None,
+            tenant_id=device.org_id,
+        )
+        db.add(row)
+        await db.commit()
+        cargo_readings_total.labels(source=row.source).inc()
+    mqtt_messages_received.labels(topic="cargo").inc()
+
+
 async def handle_mqtt_heartbeat(device_id: str, payload: dict):
     # P0 UC-25 defense-in-depth: ignore heartbeats from revoked identities.
     if settings.auth_mode == "strict" and device_id in await _revoked_device_ids():
@@ -744,6 +780,7 @@ async def lifespan(app: FastAPI):
     mqtt_client.on_v2g_status(handle_mqtt_v2g_status)  # Bug 1 fix: wire V2G status handler
     mqtt_client.on_obd(handle_mqtt_obd)  # P0-A OBD-II gateway feed
     mqtt_client.on_bms(handle_mqtt_bms)  # P0-A BMS cell-data feed
+    mqtt_client.on_cargo(handle_mqtt_cargo)  # SRS Idea 4 cargo feed
     mqtt_client.connect()
 
     from app.aegis.engine import AegisEngine, set_engine
@@ -874,6 +911,7 @@ app.include_router(predictive_router)
 app.include_router(workorders_router)
 app.include_router(twin_router)
 app.include_router(obd_router)
+app.include_router(cargo_router)
 app.include_router(webhooks_router)
 app.include_router(provisioning_router)
 app.include_router(orgs_router)      # P0 UC-26

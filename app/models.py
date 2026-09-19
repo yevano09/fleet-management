@@ -540,3 +540,54 @@ class EventLog(Base):
     delivered = Column(Integer, default=0)  # count of successful webhook deliveries
     failed = Column(Integer, default=0)
     timestamp = Column(DateTime, default=utcnow, index=True)
+
+
+# ── SRS Idea 4: Smart Cargo & Environmental Monitoring ─────────────────────────
+
+class CargoProfile(Base):
+    """Per-device cold-chain contract: thresholds + trip context for TTS."""
+    __tablename__ = "cargo_profiles"
+
+    device_id = Column(String, ForeignKey("devices.id"), nullable=False, primary_key=True)
+    commodity = Column(String, default="general")  # pharma | dairy | produce | general
+    temp_min_c = Column(Float, default=2.0)
+    temp_max_c = Column(Float, default=4.0)
+    thermal_mass = Column(Float, default=1.0)  # relative thermal inertia multiplier
+    door_alerts = Column(Boolean, default=True)
+    trip_eta_minutes = Column(Float, nullable=True)  # remaining trip time for TTS compare
+    org_id = Column(String, ForeignKey("organizations.id"), default=DEFAULT_ORG_ID, index=True)
+
+
+class CargoReading(Base):
+    """Edge cargo telemetry: bay climate + door + shock summary + edge verdict."""
+    __tablename__ = "cargo_readings"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    device_id = Column(String, ForeignKey("devices.id"), nullable=False, index=True)
+    timestamp = Column(DateTime, default=utcnow, index=True)
+    bay_temp_c = Column(Float, nullable=True)
+    humidity_pct = Column(Float, nullable=True)
+    door_open = Column(Boolean, default=False)
+    shock_g = Column(Float, nullable=True)  # latest peak-g in window
+    source = Column(String, default="sim")  # sim | edge | device
+    # Edge inference block (TTS + last impact), stored verbatim as JSON.
+    ai_inference = Column(Text, nullable=True)
+    tenant_id = Column(String, default=DEFAULT_ORG_ID, index=True)
+
+    __table_args__ = (
+        Index("ix_cargo_device_ts", "device_id", "timestamp"),
+    )
+
+
+class ShockEvent(Base):
+    """Classified handling events: NORMAL_ROAD_BUMP | CORNERING_FORCE | HARD_DROP | CARGO_COLLISION."""
+    __tablename__ = "shock_events"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    device_id = Column(String, ForeignKey("devices.id"), nullable=False, index=True)
+    timestamp = Column(DateTime, default=utcnow, index=True)
+    peak_g = Column(Float, nullable=False)
+    axis = Column(String, default="z")  # x | y | z | vector
+    event_class = Column(String, nullable=False, index=True)
+    model_version = Column(String, default="heuristic-v1")
+    org_id = Column(String, ForeignKey("organizations.id"), default=DEFAULT_ORG_ID, index=True)

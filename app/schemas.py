@@ -518,3 +518,61 @@ class BulkImportResponse(BaseModel):
     skipped: int
     errors: List[str] = []
     device_ids: List[str] = []
+
+
+# ── SRS Idea 4: Smart Cargo schemas ───────────────────────────────────────────
+
+class CargoProfileUpdate(BaseModel):
+    commodity: Optional[str] = None
+    temp_min_c: Optional[float] = None
+    temp_max_c: Optional[float] = None
+    thermal_mass: Optional[float] = None
+    door_alerts: Optional[bool] = None
+    trip_eta_minutes: Optional[float] = None
+
+
+class CargoProfileResponse(BaseModel):
+    device_id: str
+    commodity: str = "general"
+    temp_min_c: float = 2.0
+    temp_max_c: float = 4.0
+    thermal_mass: float = 1.0
+    door_alerts: bool = True
+    trip_eta_minutes: Optional[float] = None
+
+    model_config = {"from_attributes": True}
+
+
+class CargoReadingIngest(BaseModel):
+    bay_temp_c: Optional[float] = None
+    humidity_pct: Optional[float] = None
+    door_open: bool = False
+    shock_g: Optional[float] = None
+    source: str = "sim"
+    ai_inference: Optional[dict] = None
+
+
+class CargoReadingResponse(BaseModel):
+    id: str
+    device_id: str
+    timestamp: datetime
+    bay_temp_c: Optional[float] = None
+    humidity_pct: Optional[float] = None
+    door_open: bool = False
+    shock_g: Optional[float] = None
+    source: str = "sim"
+    ai_inference: Optional[str] = None
+
+    model_config = {"from_attributes": True}
+
+
+class ShockEventResponse(BaseModel):
+    id: str
+    device_id: str
+    timestamp: datetime
+    peak_g: float
+    axis: str = "z"
+    event_class: str
+    model_version: str = "heuristic-v1"
+
+    model_config = {"from_attributes": True}
