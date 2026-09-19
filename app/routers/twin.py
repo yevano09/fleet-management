@@ -29,6 +29,8 @@ from app.deps import require_user
 from app.models import (
     Alert,
     AlertStatus,
+    CargoProfile,
+    CargoReading,
     Device,
     DeviceStatus,
     DeviceShadow,
@@ -117,6 +119,25 @@ async def get_twin(
     tel_rows = tel_res.scalars().all()
     latest_tel = tel_rows[0] if tel_rows else None
 
+    cargo_prof = (
+        await db.execute(select(CargoProfile).where(CargoProfile.device_id == device_id))
+    ).scalar_one_or_none()
+    cargo_rows = (
+        await db.execute(
+            select(CargoReading)
+            .where(CargoReading.device_id == device_id)
+            .order_by(CargoReading.timestamp.desc())
+            .limit(12)
+        )
+    ).scalars().all()
+    cargo_tts = None
+    if cargo_prof and len(cargo_rows) >= 2:
+        from app.cargo_thermal import estimate_tts
+
+        asc = [(r.timestamp, r.bay_temp_c) for r in reversed(cargo_rows)]
+        cargo_tts = estimate_tts(asc, cargo_prof.temp_max_c, cargo_prof.thermal_mass or 1.0)
+    cargo_latest = cargo_rows[0] if cargo_rows else None
+
     def _first(field):
         for row in tel_rows:
             val = getattr(row, field, None)
@@ -162,6 +183,16 @@ async def get_twin(
             "cell_max_v": _first("cell_max_v"),
             "cell_spread_mv": _first("cell_spread_mv"),
             "telemetry_at": latest_tel.timestamp.isoformat() if latest_tel and latest_tel.timestamp else None,
+        },
+        "cargo": {
+            "commodity": cargo_prof.commodity if cargo_prof else None,
+            "temp_band_c": [cargo_prof.temp_min_c, cargo_prof.temp_max_c] if cargo_prof else None,
+            "bay_temp_c": cargo_latest.bay_temp_c if cargo_latest else None,
+            "humidity_pct": cargo_latest.humidity_pct if cargo_latest else None,
+            "door_open": cargo_latest.door_open if cargo_latest else None,
+            "tts_minutes": (cargo_tts or {}).get("tts_minutes"),
+            "spoilage_risk": (cargo_tts or {}).get("risk_level"),
+            "reading_at": cargo_latest.timestamp.isoformat() if cargo_latest and cargo_latest.timestamp else None,
         },
         "shadow": {
             "desired": _shadow_to_dict(desired) if desired else None,

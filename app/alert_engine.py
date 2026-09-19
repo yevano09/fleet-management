@@ -61,6 +61,14 @@ WORKORDER_TEMPLATES = {
         "title": "Review V2G dispatch economics",
         "detail": "Projected revenue turned negative. Re-run dispatch against current tariffs before further discharges.",
     },
+    "cargo_spoilage_risk": {
+        "title": "Protect cold-chain cargo",
+        "detail": "Bay temperature trending past threshold. Reroute to refrigerated depot or prioritize delivery; verify door seal.",
+    },
+    "cargo_door_open": {
+        "title": "Close cargo door",
+        "detail": "Door open on a cold-chain load. Confirm loading complete and reseal; check TTS impact.",
+    },
 }
 DEFAULT_WO_TEMPLATE = {
     "title": "Investigate fleet alert",
@@ -189,6 +197,8 @@ class AlertEngine:
         "mass_offline": 300,
         "device_offline": 600,
         "v2g_revenue_drop": 3600,
+        "cargo_spoilage_risk": 300,
+        "cargo_door_open": 600,
     }
 
     # Escalation threshold: if count >= this, bump severity

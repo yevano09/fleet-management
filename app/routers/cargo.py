@@ -156,3 +156,24 @@ async def list_shocks(
         "events": [ShockEventResponse.model_validate(r) for r in rows],
         "total": len(rows),
     }
+
+
+@router.post("/scan")
+async def run_shock_scan(
+    lookback_hours: int = Query(1, ge=1, le=24),
+    principal: dict = Depends(require_role("operator")),
+    db: AsyncSession = Depends(get_db),
+):
+    """Classify recent shock peaks into ShockEvent rows (M1.3 heuristic v1)."""
+    from app.shock_classifier import scan_shocks
+
+    events = await scan_shocks(db, lookback_hours=lookback_hours)
+    return {
+        "message": f"Shock scan completed. {len(events)} events classified.",
+        "events_count": len(events),
+        "events": [
+            {"device_id": e.device_id, "event_class": e.event_class,
+             "peak_g": e.peak_g, "model_version": e.model_version}
+            for e in events
+        ],
+    }

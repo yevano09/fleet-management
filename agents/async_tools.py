@@ -290,6 +290,16 @@ async def async_detect_anomalies(db: AsyncSession) -> list[dict]:
             "timestamp": ts,
         })
 
+    # ── 7. Cold-chain cargo (SRS Idea 4 M1.2) ──
+    try:
+        from app.cargo_thermal import assess_cargo_fleet
+
+        anomalies.extend(await assess_cargo_fleet(db))
+    except Exception:
+        import logging as _logging
+
+        _logging.getLogger(__name__).exception("Cargo anomaly check failed")
+
     return anomalies
 
 
