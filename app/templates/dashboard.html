@@ -1610,12 +1610,19 @@ async function loadTwinForDevice(deviceId) {
         ${(v.dtc_codes && v.dtc_codes.length) ? `<div class="mt-1 text-xs">DTC: <span class="text-amber">${escapeHtml(v.dtc_codes.join(', '))}</span></div>` : ''}
         ${(v.cell_spread_mv != null) ? `<div class="mt-1 text-xs text-muted">Cells: ${v.cell_min_v}–${v.cell_max_v}V (spread ${v.cell_spread_mv}mV)</div>` : ''}
       </div>`;
+    const c = t.cargo || {};
+    const cargoLine = (c.commodity || c.bay_temp_c != null)
+      ? `<div class="mb-3"><strong>Cargo:</strong>
+        <span class="text-xs text-muted">${escapeHtml(c.commodity || 'general')}${c.bay_temp_c != null ? ` · bay ${c.bay_temp_c}°C` : ''}${c.humidity_pct != null ? ` · ${c.humidity_pct}% RH` : ''}${c.door_open ? ' · <span class="text-amber-500">door open</span>' : ''}</span>
+        ${(c.tts_minutes != null || c.spoilage_risk) ? `<div class="mt-1 text-xs">TTS ${c.tts_minutes != null ? `~${Math.round(c.tts_minutes)} min` : 'n/a'} · <span class="${c.spoilage_risk === 'HIGH' ? 'text-red-400' : c.spoilage_risk === 'MEDIUM' ? 'text-amber-500' : 'text-green-500'}">${escapeHtml(c.spoilage_risk || '')}</span></div>` : ''}
+      </div>` : '';
     display.innerHTML = `
       <div class="mb-3 flex items-center gap-3">
         <div class="font-display text-[1.6rem] font-bold ${scoreText}">${score}</div>
         <div class="text-xs text-muted">twin health<br>${escapeHtml(t.status || '')} · ${escapeHtml(t.lifecycle_status || 'active')}</div>
       </div>
       ${vehLine}
+      ${cargoLine}
       <div class="mb-3"><strong>Shadow:</strong>
         <span class="text-xs text-muted">desired v${sh.desired ? sh.desired.version : '–'} (${escapeHtml((sh.desired || {}).source || '–')}) / reported v${sh.reported ? sh.reported.version : '–'} (${escapeHtml((sh.reported || {}).source || '–')}) — ${t.shadow && t.shadow.in_sync ? '<span class="text-green">in sync</span>' : '<span class="text-amber">drifted</span>'}</span>
       </div>
