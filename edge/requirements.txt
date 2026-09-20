@@ -1,0 +1,5 @@
+# Edge gateway deps (kept OUT of backend requirements.txt).
+# onnxruntime is optional at runtime: without it the gateway runs z-gate only.
+paho-mqtt==2.1.0
+numpy==1.26.4
+onnxruntime==1.21.1

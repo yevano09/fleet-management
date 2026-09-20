@@ -279,6 +279,33 @@ services:
     profiles:
       - testing
 
+  edge:
+    build:
+      context: .
+      dockerfile: Dockerfile.edge
+      args:
+        HTTP_PROXY: ${HTTP_PROXY:-}
+        HTTPS_PROXY: ${HTTPS_PROXY:-}
+        http_proxy: ${http_proxy:-}
+        https_proxy: ${https_proxy:-}
+    container_name: fleet-edge
+    environment:
+      - EDGE_BROKER_HOST=${EDGE_BROKER_HOST:-mosquitto}
+      - EDGE_BROKER_PORT=${EDGE_BROKER_PORT:-1883}
+      - EDGE_MODEL_DIR=/app/edge-pack
+      - EDGE_OUTBOX=/app/data/edge_outbox.db
+      - EDGE_DEVICE_PREFIX=${EDGE_DEVICE_PREFIX:-}
+    volumes:
+      # Bake the pack at deploy time: scripts/export_onnx.py output, or a
+      # thresholds-only dir for z-gate mode. Empty dir = gateway idles loudly.
+      - ${EDGE_PACK_DIR:-./edge-pack.dev}:/app/edge-pack:ro
+      - sqlite_data:/app/data
+    depends_on:
+      mosquitto:
+        condition: service_healthy
+    profiles:
+      - edge
+
 volumes:
   pgdata:
   firmware_data:

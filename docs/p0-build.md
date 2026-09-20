@@ -169,3 +169,4 @@ P0-E (edge) ────┘   (needs A data + B retention + C export format)
 | 2026-09-18 | OBD vehicle simulator: profiles/VIN/cells, `+/obd\|+/bms` topics, Device VIN fields, cell summary, twin `vehicle` block (UC-31) | live-verified topics + twin; e2e 47/47; twin-tab screenshot |
 | 2026-09-18 | P-ret-1: Alembic + reshape migration (proven on legacy SQLite), tenant/region stamping, 24h-hot retention worker + 5m rollups (UC-32) | e2e 48/48, eval 5/5; 7-day default enforced |
 | 2026-09-19 | SRS Ideas 4+5: cargo plane + TTS/shock, CrewAI copilot + privacy, cargo panel + chat widget (UC-33/34) | e2e 50/50, eval 5/5; browser-verified panels + copilot turn |
+| 2026-09-20 | P0-E edge track: gateway + ONNX export (parity-asserted) + ESP32/Arduino firmware (UC-35) | gateway/backend exact parity 4/4 scenarios; live verdicts on broker |

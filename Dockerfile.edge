@@ -1,0 +1,29 @@
+FROM python:3.12-slim
+
+ARG HTTP_PROXY
+ARG HTTPS_PROXY
+ARG http_proxy
+ARG https_proxy
+
+WORKDIR /app
+
+RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends \
+    gcc g++ \
+    && apt-get autoremove -y && rm -rf /var/lib/apt/lists/*
+
+COPY edge/requirements.txt ./edge-requirements.txt
+RUN pip install --no-cache-dir -r edge-requirements.txt && rm edge-requirements.txt
+
+COPY edge/gateway.py ./edge/gateway.py
+
+RUN mkdir -p data
+
+ENV PYTHONPATH=/app
+ENV EDGE_MODEL_DIR=/app/edge-pack
+ENV EDGE_OUTBOX=/app/data/edge_outbox.db
+
+# Model pack is baked at deploy time: mount or COPY a directory containing
+# thresholds.json (+ optional model.onnx) to /app/edge-pack.
+# Produce it with: python scripts/export_onnx.py
+
+CMD ["python", "-m", "edge.gateway"]

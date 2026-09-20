@@ -31,3 +31,4 @@ certs/*
 # Tailwind build output (built in Docker; `npm run dev:css` locally)
 app/static/app.css
 node_modules/
+edge-pack.dev/

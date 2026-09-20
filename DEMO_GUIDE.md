@@ -952,3 +952,16 @@ Edit `demo_pitch.sh` to adjust:
 - Which features to demo (comment out sections)
 - Narration text
 - API parameters (firmware versions, geofence coords, etc.)
+
+### 16. Edge AI track (docs/edge-ai.md)
+
+```bash
+# 1. Export the registry model to an edge pack (asserts ONNX parity)
+pip install skl2onnx onnx onnxruntime
+python scripts/export_onnx.py   # -> data/models/edge/mvp-iforest-v1/
+
+# 2. Run the gateway against the demo broker (z-gate + ONNX, offline outbox)
+EDGE_PACK_DIR=./edge-pack.prod docker compose --profile edge --profile demo up -d edge
+# verdicts land on iot/fleet/+/edge; kill the broker 60s to watch replay.
+
+```

@@ -52,6 +52,7 @@ Legend: **Done** = implemented + e2e-covered · **Done\*** = implemented with no
 | UC-32 | Enterprise Telemetry Store: Alembic, Tenant Stamping, 24h-Hot Retention (P-ret-1) | Done | `alembic/` revisions, tenant/region columns + dedup unique, 5-min rollups, retention worker (7d default), tiered reads |
 | UC-33 | Smart Cargo Monitoring: profiles, TTS, shock events (SRS Idea 4) | Done | `cargo_profiles/readings`, `shock_events`, `+/cargo` feed, TTS estimator + alerts, `GET /cargo/overview`, cargo panel |
 | UC-34 | Fleet Agentic Copilot on CrewAI with privacy layer (SRS Idea 5) | Done | CrewAI Agent/Task/Crew, mock brain default, 7 read-only tools, PII redaction, sessions, `POST /agents/copilot/chat`, chat widget |
+| UC-35 | Edge AI track: gateway + export + ESP32/Arduino firmware (P0-E) | Done | `edge/` ONNX gateway + outbox, `export_onnx.py` (parity-asserted), ESP32 threshold verdicts, Arduino sensor node, `docs/edge-ai.md` |
 
 Not yet a UC (AIoT roadmap, see `docs/aiot-gap-analysis.md` §4–§5): edge inference + offline tier, model OTA-canary, driver scoring/coaching, fuel-fraud, video events, BI/MCP export.
 
