@@ -29,7 +29,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Start backend stack
-        run: docker compose --profile testing up --build -d backend mosquitto
+        run: HOST_PORT=8000 docker compose --profile testing up --build -d backend mosquitto
       - name: Wait for backend healthy
         run: |
           timeout 120 bash -c 'until curl -sf http://localhost:8000/health > /dev/null 2>&1; do sleep 2; done'
