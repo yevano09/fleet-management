@@ -12,7 +12,7 @@ Each use case below follows a fixed framework:
 2. **Technical Execution Flow** — entry points, key components, data flow & dependencies, error handling & edge cases
 3. **Sequence & Flow Diagram** — Mermaid.js end-to-end flow
 
-## Current status map (verified 2026-09-16)
+## Current status map (verified 2026-10-03)
 
 Legend: **Done** = implemented + e2e-covered · **Done\*** = implemented with noted limits (heuristic/opt-in/mock-default) · **Partial** = wired but not default/complete. Cross-ref: AIoT gaps in `docs/aiot-gap-analysis.md`.
 
@@ -1178,6 +1178,341 @@ sequenceDiagram
     Note over R: kill any replica ⇒ leader ingestion unaffected
     Monitoring->>L: GET /health/ready → db+mqtt
     Monitoring->>R: GET /health/ready → db only
+```
+
+---
+
+### Use Case [UC-28]: Open/Track/Close Work Orders from Alerts (MVP WO-01)
+
+#### 1. Overview
+ * **Description:** Closes the detection-to-action loop: escalated alerts auto-open templated maintenance tickets, operators can also open work orders manually, and closing a ticket with a resolution/parts/cost feeds MTTR accounting and the fleet learning loop.
+ * **Actors / Trigger:** AlertEngine `_update_existing_alert` on 3rd escalation (auto-create); REST `POST /workorders` (manual); `POST /workorders/{id}/close`; dashboard Maintenance panel.
+ * **Preconditions:** Alert exists with a known type (for template lookup) or manual request body supplied; caller holds `operator` role for create/close.
+ * **Postconditions:** `WorkOrder` row created (status `open`), linked back from `Alert.work_order_id`; on close, `closed_at` + `resolution` set and `workorder_close_latency_seconds` observes the elapsed time; `workorders_total{status}` incremented.
+
+#### 2. Technical Execution Flow
+ * **Entry Point(s):** `app/alert_engine.py:262` (`_auto_create_work_order`); `app/routers/workorders.py` (list/create/get/close).
+ * **Key Components & Services:** `WORKORDER_TEMPLATES` map (8 alert types + DEFAULT); `WorkOrder` model; `Alert.work_order_id` back-link; metrics `workorders_total`, `workorder_close_latency_seconds`.
+ * **Data Flow & Dependencies:** Escalation path — `_update_existing_alert` bumps count/severity, then creates WO idempotently; manual path — operator supplies title/detail/severity/assignee or falls back to template; close path — records resolution + parts JSON + cost, computes MTTR from existing `created_at`.
+ * **Error Handling & Edge Cases:** Auto-create swallows exceptions (never masks alert processing); duplicate create on same alert returns existing WO (idempotent); close on already-done WO is idempotent; 404 for unknown IDs.
+
+#### 3. Sequence & Flow Diagram
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant AE as AlertEngine
+    participant DB as Database
+    participant Op as Operator
+    participant WO as workorders router
+
+    Note over AE: 3rd escalation hits
+    AE->>DB: alert.count >= ESCALATION_THRESHOLD
+    AE->>DB: INSERT WorkOrder(template, open)
+    AE->>DB: alert.work_order_id = wo.id
+    AE-->>Op: alert card shows WO badge
+
+    Op->>WO: POST /workorders/{id}/close {resolution}
+    WO->>DB: wo.status=done, closed_at=now
+    WO->>WO: workorder_close_latency_seconds.observe(MTTR)
+    WO-->>Op: 200 WorkOrderResponse
+```
+
+---
+
+### Use Case [UC-29]: Score Predictions with Registry Models + Eval Gates (MVP ML-01/EVAL-01)
+
+#### 1. Overview
+ * **Description:** Upgrades the legacy slope heuristics to a versioned, measured ML scorer: an IsolationForest trained on normal telemetry windows, registered in a model registry (`ml_models` table), loaded at inference time via `?model=auto|ml|legacy`, with every prediction attributable to a `model_version`. An eval harness gates model promotion by comparing lead time and false-positive rate against legacy on seeded fault scenarios.
+ * **Actors / Trigger:** `POST /predictive/scan?model=auto|ml|legacy`; `app/ml/bootstrap.py` seeds the stand-in model at boot; `scripts/backtest.py` + `tests/test_ml_eval.py` gate promotion; `scripts/train_mvp.py` (LOOP-01 precursor).
+ * **Preconditions:** `scikit-learn` + `joblib` installed (else legacy fallback, eval tests skipped); `model_storage_path` writable; a production model row exists (or bootstrap creates the seeded one).
+ * **Postconditions:** `PredictedFailure` rows carry `model_version` (e.g. `mvp-iforest-v1` or `legacy`); `ml_inference_latency_seconds`, `ml_predictions_total`, `ml_fallback_total` metrics updated; eval gates exit non-zero when the model misses drift/thermal/tpms or exceeds the FP budget.
+
+#### 2. Technical Execution Flow
+ * **Entry Point(s):** `app/routers/predictive.py:41` (`run_predictive_scan`); `app/predictive_maintenance.py:260` (`run_prediction_cycle`); `app/ml/inference.py:ml_score_points`; `app/ml/bootstrap.py:ensure_default_model`.
+ * **Key Components & Services:** `app/ml/features.py` (12-dim windowed feature vector, FEATURE_GROUPS for attribution); `app/ml/model.py` (`train_iforest`, `forest_risk`, `z_risk`, `attribute_risk`, hybrid risk floor at 0.4); `app/ml/registry.py` (`get_active_bundle`, `register_model`, `promote_to_production`, `load_bundle`); `app/ml/scenarios.py` (seeded `drift|thermal|tpms` fault series for eval ground truth).
+ * **Data Flow & Dependencies:** Bootstrap trains on 60 seeded normal windows (WINDOW_POINTS=24) → joblib artifact → `ml_models` row at `production` → `run_prediction_cycle` fetches the bundle once → `ml_score_points` scores trailing-24 windows → candidates ranked by risk → `analyze_device` picks max-risk and persists with `model_version`.
+ * **Error Handling & Edge Cases:** `?model=ml` with no bundle increments `ml_fallback_total` and falls back to legacy; sklearn absence skips bootstrap (legacy active); ONNX divergence asserted in export; eval tests are skipped (not failed) when sklearn absent.
+
+#### 3. Sequence & Flow Diagram
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant B as bootstrap (lifespan)
+    participant DB as Database
+    participant R as predictive router
+    participant I as ml/inference
+    participant T as test_ml_eval / backtest
+
+    B->>DB: no production model? → train seeded IF, save joblib, register
+    B->>DB: promote_to_production(mvp-iforest-v1)
+
+    Note over R: POST /predictive/scan?model=auto
+    R->>DB: get_active_bundle → joblib.load
+    R->>I: ml_score_points(trailing-24 pts, bundle)
+    I-->>R: candidates w/ model_version
+    R->>DB: persist PredictedFailure(model_version)
+
+    Note over T: promotion gate
+    T->>T: seeded fault series → median lead, FP rate
+    T-->>T: all gates pass? exit 0 : exit 1
+```
+
+---
+
+### Use Case [UC-30]: Ingest OBD-Grade Telemetry + Inject Fault Scenarios (MVP DATA-01)
+
+#### 1. Overview
+ * **Description:** Extends telemetry beyond synthetic heartbeat fields to real vehicle signals — OBD-II DTCs, fuel level, odometer, tire pressures — ingested with event-time preservation, QoS-dedup, and an odometer-rollback guard. The simulator can arm monotonic fault progressions (`drift|thermal|tpms`) that serve as eval ground truth.
+ * **Actors / Trigger:** Simulator publishes `iot/fleet/{id}/obd`, `+/bms`, and heartbeat with `source=obd` fields; MQTT handlers route to telemetry batch worker; `SIMULATOR_SCENARIO=drift|thermal|tpms` arms a fault on one device.
+ * **Preconditions:** MQTT connected; device registered; `SIMULATOR_OBD=1` enables OBD fields on every heartbeat; `SIMULATOR_SCENARIO` picks the fault kind.
+ * **Postconditions:** `Telemetry` rows carry `source`, `dtc_codes`, `fuel_level_pct`, `odometer_km`, `tire_pressures`, `cell_min_v/max_v/spread_mv`; duplicates suppressed (LRU dedup on `(device_id, event_time_iso, source)`); odometer rollbacks rejected with metric.
+
+#### 2. Technical Execution Flow
+ * **Entry Point(s):** `app/main.py:475` (`handle_mqtt_obd`); `app/main.py:516` (`handle_mqtt_bms`); `app/main.py:535` (`handle_mqtt_cargo`); `app/database.py:_bootstrap_telemetry_v2` (column backfill).
+ * **Key Components & Services:** `_obd_seen` OrderedDict LRU (cap 20000); `_obd_last_odo` rollback guard; `_obd_event_time` producer event-time parser; `enqueue_telemetry` bounded batch queue (5000 deep, 200/1s batches); `app/obd/dtc.py` (SAE J2012 family decode); `app/routers/obd.py` (`GET /obd/dtc/{code}`).
+ * **Data Flow & Dependencies:** MQTT `+/obd` → dedup check → odo guard → device upsert → `enqueue_telemetry(source, event_time, tenant_id, region)` → leader `_telemetry_flusher` batch commit → `Telemetry` row. BMS feed merges scalar battery fields into the same telemetry row; raw cell arrays logged (P0-B deferred).
+ * **Error Handling & Edge Cases:** Unknown device rejected (`telemetry_rejected_total{reason=unknown_device}`); QoS redelivery deduped (`telemetry_duplicates_total`); odometer rollback >1 km rejected; bad `event_time` falls back to server time; queue full sheds oldest (`reason=queue_full`).
+
+#### 3. Sequence & Flow Diagram
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant S as Simulator
+    participant MQ as Mosquitto
+    participant H as handle_mqtt_obd
+    participant Q as telemetry queue
+    participant DB as Database
+
+    S->>MQ: iot/fleet/{id}/obd {event_time, vin, odo, dtc, tires}
+    MQ->>H: payload
+    H->>H: dedup key (device, event_time, source)
+    H->>H: odo rollback guard
+    H->>DB: device upsert (last_seen, online)
+    H->>Q: enqueue_telemetry(source=obd, event_time)
+    Note over Q: leader flushes ≤200 rows / 1s
+    Q->>DB: batch INSERT Telemetry(source, dtc_codes, ...)
+```
+
+---
+
+### Use Case [UC-31]: Simulate Vehicle Identity + OBD/BMS Feeds, Surface in Twin (P0-A)
+
+#### 1. Overview
+ * **Description:** Vehicles are full assets: deterministic VIN/make/model/year profiles are assigned at registration (simulator cycles 10 profile combinations), per-beat `+/obd` (PID map, odometer, fuel, DTCs, tires) and `+/bms` (cell-voltage arrays, pack temp, plug state) topics are published, cell arrays are summarized to min/max/spread, and the merged `GET /twin/{id}` view exposes a `vehicle` block for the dashboard Twin tab.
+ * **Actors / Trigger:** Simulator publishes vehicle identity at register + per-beat OBD/BMS; `app/mqtt_client.py` subscribes to `+/obd`/`+/bms`; `GET /twin/{id}` consumes the data for the dashboard.
+ * **Preconditions:** Device registered (VIN/make/model stamped); `is_ev` flag drives BMS publish; OBD feed enabled via `SIMULATOR_OBD=1`.
+ * **Postconditions:** `Device` row carries `vin/make/model/model_year`; `Telemetry` rows carry OBD/BMS fields with `source=obd|bms`; `GET /twin/{id}` returns a `vehicle` object with identity, odometer, fuel, DTCs, and cell health.
+
+#### 2. Technical Execution Flow
+ * **Entry Point(s):** `simulator/simulator.py:151` (VEHICLE_PROFILES, `make_vin`); `simulator/simulator.py:512` (`_publish_obd`); `simulator/simulator.py:533` (`_publish_bms`); `app/main.py:handle_mqtt_obd/bms`; `app/routers/twin.py:162` (`vehicle` block).
+ * **Key Components & Services:** `VEHICLE_PROFILES` (10 make/model/year/EV tuples); `_publish_bms` summarizes `cell_voltages` to `cell_min_v/max_v/cell_count`; `handle_mqtt_bms` extracts `soc/soh/battery_temp/plug_status` and delegates to `handle_mqtt_obd`; twin merges `Device` + latest `Telemetry` row for the vehicle block.
+ * **Data Flow & Dependencies:** Register payload includes VIN/make/model/year + `is_ev`; every heartbeat also publishes `+/obd` (PID map) and, for EVs, `+/bms` (cells); both route through the same dedup/guard/batch pipeline as UC-30; twin reads the most recent `Telemetry` row per scalar field and the first row carrying `dtc_codes`.
+ * **Error Handling & Edge Cases:** `is_ev=False` skips BMS publish (no cell array); missing `cell_voltages` in BMS payload falls through to scalar-only record; unknown device rejected with metric; cell summary only computed when arrays are present.
+
+#### 3. Sequence & Flow Diagram
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant S as Simulator
+    participant MQ as Mosquitto
+    participant B as backend (handle_mqtt_bms)
+    participant DB as Database
+    participant T as GET /twin/{id}
+
+    S->>MQ: register {vin, make, model, year}
+    B->>DB: Device row stamped
+    loop every 10s
+        S->>MQ: +/obd {vin, odo, fuel, dtc, tires, pid_map}
+        B->>DB: Telemetry(source=obd)
+        S->>MQ: +/bms {soc, soh, pack_temp, cell_voltages[]}
+        B->>B: summarize cells → min/max/spread
+        B->>DB: Telemetry(source=bms, cell_min_v, cell_max_v)
+    end
+    T->>DB: latest Telemetry + Device
+    T-->>T: vehicle = {vin, make, odo, fuel, dtc, cell_health}
+```
+
+---
+
+### Use Case [UC-32]: Enterprise Telemetry Store: Alembic, Tenant Stamping, 24h-Hot Retention (P-ret-1)
+
+#### 1. Overview
+ * **Description:** Reshapes the telemetry table for enterprise scale: Alembic owns schema revisions (baseline → reshape → cargo → copilot), every hot-path row is tenant/region stamped at ingest (no join inheritance at query time), a UNIQUE `(device_id, timestamp, source)` constraint replaces the in-memory LRU at scale, raw rows are kept hot for 24h then rolled into 5-minute summaries, and a background retention worker expires raw + rollups past 7 days.
+ * **Actors / Trigger:** MQTT ingest stamps `tenant_id`/`region`; `app/retention.py` `retention_loop()` (leader-only, 10-min interval + boot sweep); `GET /telemetry/{id}` routes to raw (≤24h) or rollup (>24h) tier.
+ * **Preconditions:** `alembic/` installed and `alembic upgrade head` applied on pre-existing DBs (fresh DBs: create_all + `alembic stamp head`); `telemetry_hot_hours` (24), `telemetry_retention_days` (7), `retention_sweep_interval_seconds` (600) configured.
+ * **Postconditions:** `telemetry` table is UUID-PK-less (hypertable-ready), tenant-stamped, dedup-constrained; `telemetry_5m` holds 5-min rollups; `telemetry_duplicates_total`/`telemetry_rejected_total`/`telemetry_dropped_total`/`telemetry_tiered_total`/`retention_runs_total` metrics active.
+
+#### 2. Technical Execution Flow
+ * **Entry Point(s):** `alembic/versions/0001_baseline.py`, `0002_telemetry_reshape.py`, `0003_cargo.py`, `0004_copilot.py`; `app/retention.py:retention_sweep`; `app/main.py:_telemetry_flusher` (batch worker); `app/routers/telemetry.py:get_telemetry` (tiered reads).
+ * **Key Components & Services:** `TelemetryRollup5m` model (PK `device_id+bucket`); `_bucket_expr()` (dialect-aware 5-min bucket for PG/SQLite); `_rollup_window` idempotent upsert; `enqueue_telemetry` bounded queue (200/1s); `handle_mqtt_obd` stamps `tenant_id=device.org_id`, `region=settings.default_region`.
+ * **Data Flow & Dependencies:** MQTT → `enqueue_telemetry(tenant_id, region)` → leader flusher batch-commits ≤200 rows/1s → raw rows live on hot disk for 24h → retention sweep rolls newly-cold raw into `telemetry_5m` (avg/min signal, avg/max temp, avg soc, samples) → raw + rollups past 7d dropped. Reads: `hours ≤ telemetry_hot_hours` hit raw, else hit `telemetry_5m`.
+ * **Error Handling & Edge Cases:** Retention sweep is idempotent (rollup upsert keyed on device_id+bucket; overlap on restart is safe); `_last_rollup_upto` watermark avoids re-scanning; tiered read returns rollup rows with `id=rollup-<bucket>`; PG uses `JSONB` for dtc/tire_pressures, SQLite keeps Text; missing production model does not block retention.
+
+#### 3. Sequence & Flow Diagram
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant MQ as Mosquitto
+    participant BE as backend (leader)
+    participant Q as telemetry queue
+    participant DB as telemetry (raw)
+    participant R5m as telemetry_5m
+    participant API as GET /telemetry/{id}
+
+    MQ->>BE: +/obd, +/bms, heartbeat
+    BE->>Q: enqueue_telemetry(tenant_id, region, event_time)
+    Q->>DB: batch commit ≤200 rows / 1s
+    Note over DB: 24h hot
+    loop retention sweep (10min)
+        BE->>R5m: upsert 5-min rollups from newly-cold raw
+        BE->>DB: DELETE raw WHERE ts < now-7d
+        BE->>R5m: DELETE rollups WHERE bucket < now-7d
+    end
+    API->>DB: hours ≤ 24 → raw rows
+    API->>R5m: hours > 24 → rollup rows
+```
+
+---
+
+### Use Case [UC-33]: Smart Cargo Monitoring: profiles, TTS, shock events (SRS Idea 4)
+
+#### 1. Overview
+ * **Description:** Cold-chain cargo is a first-class asset: each device carries a `CargoProfile` (commodity, temp band, thermal mass, door-alert flag, trip ETA), `+/cargo` telemetry records bay climate + door + IMU peak-g, a documented heuristic estimates Time-to-Spoilage (TTS) with a door-open penalty, shock peaks are classified into `NORMAL_ROAD_BUMP|CORNERING_FORCE|HARD_DROP|CARGO_COLLISION`, and alerts fire on spoilage risk and door-open events.
+ * **Actors / Trigger:** Simulator publishes `+/cargo` (SIMULATOR_CARGO=1, SIMULATOR_CARGO_DROP for scripted drops); REST `POST /cargo/{id}/readings` (tooling/tests); `GET /cargo/overview` for the dashboard panel; `POST /cargo/scan` classifies recent shock peaks.
+ * **Preconditions:** Device exists; `CargoProfile` set (or safe defaults returned); MQTT connected for live ingest.
+ * **Postconditions:** `CargoReading` rows with bay_temp/humidity/door/shock/ai_inference; `ShockEvent` rows (only actionable classes: HARD_DROP+/CARGO_COLLISION); alerts `cargo_spoilage_risk` / `cargo_door_open` fired through AlertEngine; `cargo_readings_total{source}`, `shock_events_total{event_class}` metrics active.
+
+#### 2. Technical Execution Flow
+ * **Entry Point(s):** `app/routers/cargo.py` (profile CRUD, readings ingest/list, shocks list, overview, scan); `app/cargo_thermal.py:estimate_tts` / `assess_cargo_device` / `assess_cargo_fleet`; `app/shock_classifier.py:classify_shock` / `scan_shocks`; `app/main.py:handle_mqtt_cargo`.
+ * **Key Components & Services:** `estimate_tts` (linear slope of 15-min bay-temp window vs threshold, thermal-mass scaled, door penalty 30 min, median smoothing over last 3 readings); `classify_shock` (peak-g bands: ≥8g collision, ≥5g hard drop, ≥2g+800ms cornering, else normal bump); `assess_cargo_fleet` produces anomaly dicts for AlertEngine.
+ * **Data Flow & Dependencies:** MQTT `+/cargo` → `handle_mqtt_cargo` → `CargoReading` insert (tenant stamped) → on `POST /cargo/scan`, `scan_shocks` classifies peaks ≥2g into `ShockEvent` (deduped by device+timestamp) → TTS estimator compares slope against profile threshold → alert fires if TTS < 180 min (warning) or < 60 min (critical) and trip ETA warning appended.
+ * **Error Handling & Edge Cases:** Profile-less device uses safe defaults (`temp_min=2, temp_max=4, thermal_mass=1.0`); <2 readings → TTS `None`/`UNKNOWN`; cooling/flat slope + already over threshold → `HIGH` (TTS 0); door-open subtracts 30 min from TTS and escalates risk to `HIGH` if TTS <60; shock scan skips `NORMAL_ROAD_BUMP` (not actionable); duplicate (device, timestamp) shock rows skipped.
+
+#### 3. Sequence & Flow Diagram
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant S as Simulator
+    participant H as handle_mqtt_cargo
+    participant DB as Database
+    participant TTS as estimate_tts
+    participant AE as AlertEngine
+
+    S->>H: +/cargo {sensors:{temp,hum,door}, shock_g, ai_inference}
+    H->>DB: INSERT CargoReading
+    Note over DB: POST /cargo/scan
+    H->>DB: scan_shocks → classify peaks ≥2g
+    DB->>DB: INSERT ShockEvent (deduped)
+    Note over TTS: assess_cargo_fleet
+    TTS->>DB: load profile + recent readings
+    TTS->>TTS: slope × thermal_mass, door penalty
+    alt TTS < 180min
+        TTS-->>AE: cargo_spoilage_risk anomaly
+        AE->>DB: Alert row + notify
+    end
+    alt door_open
+        TTS-->>AE: cargo_door_open anomaly
+    end
+```
+
+---
+
+### Use Case [UC-34]: Fleet Agentic Copilot on CrewAI with privacy layer (SRS Idea 5)
+
+#### 1. Overview
+ * **Description:** A conversational copilot answers operator questions about DTCs, safety, cargo, work orders, and fleet health using CrewAI `Agent/Task/Crew` orchestration. A mock deterministic brain is the offline default (no keys, no network, fully testable); real providers (openai/anthropic/vllm) are gated by env keys and fail closed when missing. A privacy layer redacts PII, degrades GPS, masks VINs, scans for prompt injection, and persists only redacted content.
+ * **Actors / Trigger:** Dashboard copilot chat widget (POST `/agents/copilot/chat`); CLI-mode HTTP twin; `GET /agents/copilot/sessions` lists prior sessions.
+ * **Preconditions:** Caller holds `operator` role; `COPILOT_PROVIDER` defaults to `mock`; for real LLM, the matching env key is set; a DB session stores operator context.
+ * **Postconditions:** `CopilotSession` + `CopilotMessage` rows (redacted content + raw_sha for forensics); `fleet_copilot_requests_total/latency_seconds/tool_calls_total/blocked_total` metrics; tool evidence minimized and redacted BEFORE entering LLM context; injection-flagged turns get summaries only (still read-only).
+
+#### 2. Technical Execution Flow
+ * **Entry Point(s):** `agents/routers.py:565` (`copilot_chat`); `agents/copilot.py:286` (`run_copilot`); `agents/copilot_tools.py:build_tools` (7 read-only tools); `agents/privacy.py` (redaction + injection scan).
+ * **Key Components & Services:** `classify_intent` (regex router: dtc/safety/cargo/wo/fleet/general); `DeterministicFleetLLM` (mock brain, same tool functions, templated synth); `INTENT_TOOLS` map (intent → tool subset); `get_llm` provider switch; `ServiceNote` RAG-lite seed (SOPs + DTC guides, FTS-ranked); 7 tools: `fleet_status_summary`, `device_lookup`, `dtc_lookup`, `telemetry_snapshot`, `alert_search`, `cargo_status`, `service_notes_search`.
+ * **Data Flow & Dependencies:** User message → `scan_injection` + `redact_text` → `classify_intent` → `_run_tools_deterministic` runs the intent's tool subset via `asyncio.to_thread` (fresh DB session per tool) → evidence JSON → `P.summarize_for_llm` wraps as `<NAME-DATA>` blocks → `synthesize` composes the answer from evidence + verdict lines → persist redacted answer + redacted user message. Real-LLM path: `get_llm` → `Crew.kickoff` with the wanted tools.
+ * **Error Handling & Edge Cases:** Injection pattern hit → `copilot_blocked_total{reason=injection}` + flagged in response (turn still read-only); non-mock provider without key → `ValueError` (fail-closed); unknown session_id → 400; tool exceptions logged and skipped (evidence block omitted); redacted content truncated to 4000 chars for persistence.
+
+#### 3. Sequence & Flow Diagram
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant U as Operator
+    participant API as POST /agents/copilot/chat
+    participant P as privacy layer
+    participant C as copilot (run_copilot)
+    participant T as tools (7, read-only)
+    participant LLM as mock/real LLM
+    participant DB as Database
+
+    U->>API: {message, session_id?}
+    API->>P: scan_injection + redact_text
+    P-->>C: redacted_msg, flagged?
+    C->>C: classify_intent → INTENT_TOOLS
+    loop each wanted tool
+        C->>T: tool._run(entity)
+        T->>DB: scoped query (org_id)
+        T-->>C: minimized+redacted dict
+    end
+    C->>P: summarize_for_llm → <NAME-DATA> blocks
+    C->>LLM: Crew.kickoff(analyst, evidence_text)
+    LLM-->>C: answer
+    C->>P: redact_text(answer)
+    C->>DB: INSERT CopilotMessage(redacted, raw_sha)
+    C-->>U: {session_id, response, actions_taken, suggested_actions, provider, intent, flagged_input}
+```
+
+---
+
+### Use Case [UC-35]: Edge AI track: gateway + export + ESP32/Arduino firmware (P0-E)
+
+#### 1. Overview
+ * **Description:** Three-tier edge inference runs the same model contract everywhere: an Arduino sensor node samples DHT22+MPU6050 and serials JSON to a hub, an ESP32 edge hub scores thresholds locally and publishes compact verdicts, and a Raspberry Pi/x86 gateway runs the exported IsolationForest ONNX + z-gate. Verdicts (never raw samples) flow to `iot/fleet/{id}/edge`; an offline sqlite outbox buffers and replays with `replayed:true`.
+ * **Actors / Trigger:** ESP32 firmware (`edgeScoreAndPublish` every heartbeat), Arduino sensor node (serials @2Hz), edge gateway (`edge/gateway.py` compose `edge` profile); `scripts/export_onnx.py` produces the pack.
+ * **Preconditions:** `MODEL_STORAGE_PATH/edge/<version>/` contains `model.onnx` + `thresholds.json`; gateway has broker access (else buffers to outbox); ESP32 flashed with `ESp32-FleetManagement.ino`; Arduino serial-wired to ESP32.
+ * **Postconditions:** `iot/fleet/{id}/edge` carries `{risk_type, risk_score, model_version, window_end, anomaly_score?, replayed}`; `thresholds.json` is the single source of truth (no hand-tuned drift); ONNX/sklearn parity asserted (<1e-4); outbox replay is lossless (rows deleted only after successful publish).
+
+#### 2. Technical Execution Flow
+ * **Entry Point(s):** `scripts/export_onnx.py` (skl2onnx export, parity assert, thresholds.json); `edge/gateway.py` (`load_pack`, `score_window`, `Outbox.spill/replay`); `ESp32-FleetManagement.ino` (`edgeSlope`, `edgePush`, `edgeReadSensors`, `edgeScoreAndPublish`); `arduino/sensor_node/sensor_node.ino`.
+ * **Key Components & Services:** `GATe_GROUPS` (same 12-dim feature groups as cloud); `series_to_features` (pure-Python port, identical to `app/ml/features.py`); `Outbox` sqlite spill; ESP32 ring buffers (`EDGE_WIN=12`) with same least-squares slope math; threshold pack sync via `command/edge` (temp_slope, temp_max, sig_slope, model_version).
+ * **Data Flow & Dependencies:** Arduino → serial → ESP32 reads sensors → pushes to 2 ring windows → `edgeScoreAndPublish` computes slopes → if over threshold, publishes `+/edge` verdict → gateway independently mirrors `+/heartbeat`/`+/obd` into a trailing-24 window → `score_window` runs ONNX (if available) + z-gate → publishes `+/edge` verdict → offline: outbox.spill, on reconnect: outbox.replay sets `replayed:true`.
+ * **Error Handling & Edge Cases:** Gateway with no `model.onnx` degrades to z-gate only (documented); ONNX/sklearn divergence >1e-4 asserts in export; outbox row deleted only after successful publish (no loss); ESP32 without sensors runs simulated drift (flashes+runs); verdict only published on flag (risk ≥ 0.4), otherwise silent; ESP32 is thresholds, not the IF model — sensitivity lower (documented, not hidden).
+
+#### 3. Sequence & Flow Diagram
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant A as Arduino node
+    participant E as ESP32 hub
+    participant G as edge gateway (RPi)
+    participant MQ as Mosquitto
+    participant CL as cloud backend
+
+    A->>E: serial JSON @2Hz {t,h,ax,ay,az,g}
+    E->>E: ring buffer 12 → edgeScoreAndPublish
+    alt over threshold
+        E->>MQ: +/edge {risk_type, risk_score, model_version+esp32}
+        MQ->>CL: verdict ingested
+    end
+
+    G->>MQ: subscribe +/heartbeat, +/obd
+    MQ->>G: mirror samples
+    G->>G: trailing-24 window → ONNX + z-gate
+    alt risk ≥ 0.4
+        alt broker down
+            G->>G: outbox.spill(sqlite)
+        else broker up
+            G->>MQ: +/edge {model_version+edge, anomaly_score}
+        end
+    end
+    Note over G: reconnect → outbox.replay(replayed:true)
+```
 
 ---
 
@@ -1189,7 +1524,7 @@ sequenceDiagram
 | **Agent execution modes** | In-backend direct SQLAlchemy (`agents/async_tools.py`) vs standalone HTTP (`agents/tools.py`) to avoid self-referential deadlock |
 | **MQTT resilience** | v5 protocol, QoS 1, `reconnect_delay_set(1,60)` on backend & simulator |
 | **Observability** | ~49 metric families (42 fleet + 7 aegis); Grafana overview; trailing-slash `/metrics/` note |
-| **Testing** | 48 E2E (`tests/test_e2e.py`) + 144 other test fns (192 total), all green |
+| **Testing** | 50 E2E (`tests/test_e2e.py`) + 50 unit/strict/eval (`test_aegis_unit`, `test_auth_rbac`, `test_e2e_strict`, `test_ml_eval`, `test_pki`, `test_tenancy`, `test_v2g`, `test_session5_unit`, `test_simulator_unit`, `test_config_unit`) = 144 other test fns, all green |
 | **Security posture** | Ed25519 signing (opt-in enforcement), HMAC webhooks, RBAC roles scaffold, hardened Dockerfiles |
 
 ## Traceability Index
@@ -1201,3 +1536,11 @@ sequenceDiagram
 | UC-21 | Session 3 onboarding agent |
 | UC-06, UC-08..20 | Session 5 realism features (13 features, 8 bug fixes) |
 | UC-23..27 | Session 6 P0 hardening — proven by `scripts/verify-p0.sh` (exit 0) |
+| UC-28 (WO-01) | MVP slice: alert→work order loop, MTTR histogram |
+| UC-29 (ML-01/EVAL-01) | MVP slice: IsolationForest registry, seeded eval harness, backtest gates |
+| UC-30 (DATA-01) | MVP slice: OBD/DTC/fuel/odo/tires telemetry + fault-scenario injection |
+| UC-31 (P0-A) | OBD vehicle simulator + twin vehicle block |
+| UC-32 (P-ret-1) | Alembic revisions, tenant/region stamping, 24h-hot retention + rollups |
+| UC-33 (SRS Idea 4) | Smart cargo monitoring: profiles, TTS, shock classifier, cargo panel |
+| UC-34 (SRS Idea 5) | Fleet agentic copilot on CrewAI with privacy layer + chat widget |
+| UC-35 (P0-E) | Edge AI: gateway, ONNX export, ESP32 threshold engine, Arduino sensor node |
