@@ -1,0 +1,26 @@
+FROM python:3.12-slim
+
+ARG HTTP_PROXY
+ARG HTTPS_PROXY
+ARG http_proxy
+ARG https_proxy
+
+RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends \
+    gcc \
+    && apt-get autoremove -y && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY edge/requirements.txt edge/requirements.txt
+RUN pip install --no-cache-dir -r edge/requirements.txt && \
+    pip install --no-cache-dir pyserial
+
+COPY edge/ edge/
+COPY app/ml/ app/ml/
+COPY app/__init__.py app/
+
+ENV EDGE_MODEL_DIR=/app/edge-pack
+ENV UNO_Q_UART=/dev/ttyHS1
+ENV UNO_Q_DEVICE_ID=uno-q-001
+
+CMD ["python", "edge/uno_q_gateway.py"]

@@ -965,3 +965,34 @@ EDGE_PACK_DIR=./edge-pack.prod docker compose --profile edge --profile demo up -
 # verdicts land on iot/fleet/+/edge; kill the broker 60s to watch replay.
 
 ```
+
+### 17. Arduino UNO Q Edge Device (docs/uno-q.md)
+
+The UNO Q collapses the Uno/Nano + ESP32 + RPi-gateway trio into one board.
+Its STM32 MCU samples sensors; its QRB Linux SoC runs the **full**
+IsolationForest ONNX model (the ESP32 is thresholds-only).
+
+**No physical board needed** — test the Linux gateway right now:
+
+```bash
+# The gateway falls back to simulated thermal drift when /dev/ttyHS1 is absent
+export EDGE_BROKER_HOST=localhost
+export UNO_Q_DEVICE_ID=uno-q-sim
+export EDGE_MODEL_DIR=./data/models/edge/mvp-iforest-v1
+python edge/uno_q_gateway.py
+# → publishes {"source":"uno-q-sim", "risk_type":..., "model_version":"mvp-iforest-v1+uno-q"}
+#   to iot/fleet/uno-q-sim/edge on flag
+```
+
+**STM32 sensor bridge** (needs Wokwi while the board is in transit):
+
+1. Open https://wokwi.com → new Arduino Uno project
+2. Paste `arduino/uno-q/uno_q_bridge.ino` (defines `WOKWI` → streams over `Serial`)
+3. Add DHT22 (pin 2) + MPU6050 (I2C) to the diagram
+4. The Serial Monitor shows the exact JSON the real STM32 produces:
+   `{"t":26.4,"h":61.2,"ax":0.02,"ay":-0.01,"az":1.01,"g":0.03}`
+
+Real hardware: flash `uno_q_bridge.ino` to the STM32, copy the edge pack to
+the QRB SoC, run `edge/uno_q_gateway.py` (or `Dockerfile.uno-q`). Wire per
+`docs/uno-q.md` § Wiring.
+

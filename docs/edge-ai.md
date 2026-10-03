@@ -1,6 +1,6 @@
 # Edge AI — hardware roles, wiring & contracts (P0-E)
 
-Three tiers. Each tier does ONLY what its silicon allows; the verdict
+Three tiers (+ UNO Q alternative). Each tier does ONLY what its silicon allows; the verdict
 contract is identical everywhere so the cloud can't tell them apart.
 
 ## 1. Roles
@@ -10,12 +10,18 @@ contract is identical everywhere so the cloud can't tell them apart.
 | Sensor node | Arduino Uno/Nano (2KB RAM) | DHT22 + MPU6050 sampling @2Hz | Serial JSON lines to ESP32 | Network, ML, MQTT |
 | Edge sensor hub | ESP32-WROOM-32 | Threshold verdict engine (slopes + limits), cargo frames, OTA | `+/edge` verdicts (on flag only), `+/cargo`, heartbeat | Full IF model (RAM) |
 | Edge gateway | Raspberry Pi 4 / x86 (`edge` compose profile) | Exported IsolationForest (ONNX) + z-gate over trailing-24 windows | `+/edge` verdicts, replayed spillover | Raw samples upstream |
+| **UNO Q** | Arduino UNO Q (STM32+QRB) | STM32: sensors @2Hz · QRB Linux: full IsolationForest ONNX gateway | `+/edge` verdicts, replayed spillover | (replaces Uno+ESP32 with one board) |
+
+> **UNO Q** collapses the sensor-node + edge-hub + gateway trio into a single
+> board. See `docs/uno-q.md` for wiring, flash, and deployment.
 
 ## 2. Wiring
 
 ```
 [DHT22+MPU6050] --I2C--> [Arduino] --Serial 115200--> [ESP32] --WiFi/MQTT--> broker
- gripping: Arduino TX->ESP32 RX2, RX->TX2, common GND (3V3-safe levels!)
+  gripping: Arduino TX->ESP32 RX2, RX->TX2, common GND (3V3-safe levels!)
+
+[UNO Q]  STM32 --Serial1--> QRB Linux --WiFi/MQTT--> broker
 
 [RPi gateway] --Ethernet/WiFi--> broker (mirrors heartbeat/obd topics)
 [Real OBD-II dongle] --USB/BT serial--> [RPi] (ELM327 init in docs/p0-build.md §1.3)
