@@ -103,6 +103,11 @@ _TELEMETRY_V2_COLUMNS = {
     "fuel_level_pct": "FLOAT",
     "odometer_km": "FLOAT",
     "tire_pressures": "TEXT",
+    "tenant_id": "VARCHAR DEFAULT 'org-default'",
+    "region": "VARCHAR DEFAULT 'default'",
+    "cell_min_v": "FLOAT",
+    "cell_max_v": "FLOAT",
+    "cell_spread_mv": "FLOAT",
 }
 
 
