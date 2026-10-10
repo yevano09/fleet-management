@@ -15,13 +15,13 @@ from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.models import DeviceShadow, Device
+from app.models import DeviceShadow
 from app.schemas import ShadowUpdateRequest, DeviceShadowResponse
 from app.utils import utcnow
 from app.audit import log_action
 from app.mqtt_client import mqtt_client
 from app.metrics import shadow_updates_total
-from app.deps import require_user, require_role
+from app.deps import require_user, require_role, get_scoped_device
 
 logger = logging.getLogger(__name__)
 
@@ -31,8 +31,7 @@ router = APIRouter(prefix="/shadow", tags=["shadow"])
 @router.get("/{device_id}")
 async def get_shadow(device_id: str, principal: dict = Depends(require_user()), db: AsyncSession = Depends(get_db)):
     """Get the latest desired and reported shadow states for a device."""
-    dev_result = await db.execute(select(Device).where(Device.id == device_id))
-    if not dev_result.scalar_one_or_none():
+    if not await get_scoped_device(db, device_id, principal):
         raise HTTPException(status_code=404, detail="Device not found")
 
     desired_result = await db.execute(
@@ -76,8 +75,7 @@ async def update_shadow(
         raise HTTPException(status_code=422, detail="state must be desired or reported")
     if (req.source or "cloud") not in ("cloud", "edge", "device"):
         raise HTTPException(status_code=422, detail="source must be cloud, edge or device")
-    dev_result = await db.execute(select(Device).where(Device.id == device_id))
-    device = dev_result.scalar_one_or_none()
+    device = await get_scoped_device(db, device_id, principal)
     if not device:
         raise HTTPException(status_code=404, detail="Device not found")
 
@@ -136,6 +134,8 @@ async def get_shadow_history(
     principal: dict = Depends(require_user()),
     db: AsyncSession = Depends(get_db),
 ):
+    if not await get_scoped_device(db, device_id, principal):
+        raise HTTPException(status_code=404, detail="Device not found")
     query = select(DeviceShadow).where(DeviceShadow.device_id == device_id)
     if state:
         query = query.where(DeviceShadow.state == state)

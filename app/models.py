@@ -540,6 +540,9 @@ class EventLog(Base):
     delivered = Column(Integer, default=0)  # count of successful webhook deliveries
     failed = Column(Integer, default=0)
     timestamp = Column(DateTime, default=utcnow, index=True)
+    # Tenancy: webhook fan-out and the event feed are scoped through this.
+    # Child of the emitting device/org; system-wide events use org-default.
+    org_id = Column(String, ForeignKey("organizations.id"), default=DEFAULT_ORG_ID, index=True)
 
 
 # ── SRS Idea 4: Smart Cargo & Environmental Monitoring ─────────────────────────

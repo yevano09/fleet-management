@@ -16,7 +16,7 @@ from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db, async_session_factory
-from app.models import OtaSchedule, ScheduleStatus, Device, DeviceStatus, OtaDeployment, OtaStatus
+from app.models import OtaSchedule, ScheduleStatus, Device, DeviceStatus, OtaDeployment, OtaStatus, Firmware
 from app.schemas import OtaScheduleCreateRequest, OtaScheduleResponse, OtaScheduleListResponse
 from app.utils import utcnow
 from app.audit import log_action
@@ -24,11 +24,29 @@ from app.mqtt_client import mqtt_client
 from app.ota_manager import ota_timeout_watcher
 from app.metrics import ota_scheduled_total, ota_deployments_total, ota_deployments_in_progress
 from app.event_emitter import emit_event
-from app.deps import require_user, require_role
+from app.deps import require_user, require_role, allowed_orgs
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/ota/schedules", tags=["scheduled-ota"])
+
+
+def _scope_schedules(query, principal: dict):
+    """Tenant filter for OtaSchedule queries (None = super-admin)."""
+    orgs = allowed_orgs(principal)
+    if orgs is not None:
+        query = query.where(OtaSchedule.org_id.in_(orgs))
+    return query
+
+
+async def _get_scoped_schedule(db, schedule_id: str, principal: dict):
+    """Fetch a schedule only if the principal's org scope may touch it."""
+    result = await db.execute(
+        _scope_schedules(
+            select(OtaSchedule).where(OtaSchedule.id == schedule_id), principal
+        )
+    )
+    return result.scalar_one_or_none()
 
 
 @router.post("", response_model=OtaScheduleResponse, status_code=201)
@@ -38,6 +56,13 @@ async def create_schedule(
     db: AsyncSession = Depends(get_db),
 ):
     """Create a scheduled OTA campaign."""
+    # The firmware must exist inside the caller's org — otherwise a campaign
+    # could stage another org's artifact for devices in this org.
+    fw_result = await db.execute(select(Firmware).where(Firmware.id == req.firmware_id))
+    firmware = fw_result.scalar_one_or_none()
+    fw_scope = allowed_orgs(principal)
+    if not firmware or (fw_scope is not None and firmware.org_id not in fw_scope):
+        raise HTTPException(status_code=404, detail="Firmware not found")
     schedule = OtaSchedule(
         name=req.name,
         firmware_id=req.firmware_id,
@@ -67,8 +92,10 @@ async def list_schedules(
     principal: dict = Depends(require_user()),
     db: AsyncSession = Depends(get_db),
 ):
-    query = select(OtaSchedule)
-    count_query = select(func.count()).select_from(OtaSchedule)
+    query = _scope_schedules(select(OtaSchedule), principal)
+    count_query = _scope_schedules(
+        select(func.count()).select_from(OtaSchedule), principal
+    )
     if status:
         query = query.where(OtaSchedule.status == ScheduleStatus(status))
         count_query = count_query.where(OtaSchedule.status == ScheduleStatus(status))
@@ -85,8 +112,7 @@ async def list_schedules(
 
 @router.get("/{schedule_id}", response_model=OtaScheduleResponse)
 async def get_schedule(schedule_id: str, principal: dict = Depends(require_user()), db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(OtaSchedule).where(OtaSchedule.id == schedule_id))
-    schedule = result.scalar_one_or_none()
+    schedule = await _get_scoped_schedule(db, schedule_id, principal)
     if not schedule:
         raise HTTPException(status_code=404, detail="Schedule not found")
     return OtaScheduleResponse.model_validate(schedule)
@@ -94,8 +120,7 @@ async def get_schedule(schedule_id: str, principal: dict = Depends(require_user(
 
 @router.post("/{schedule_id}/cancel")
 async def cancel_schedule(schedule_id: str, principal: dict = Depends(require_role("fleet_manager")), db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(OtaSchedule).where(OtaSchedule.id == schedule_id))
-    schedule = result.scalar_one_or_none()
+    schedule = await _get_scoped_schedule(db, schedule_id, principal)
     if not schedule:
         raise HTTPException(status_code=404, detail="Schedule not found")
     if schedule.status not in (ScheduleStatus.scheduled, ScheduleStatus.paused):
@@ -109,8 +134,7 @@ async def cancel_schedule(schedule_id: str, principal: dict = Depends(require_ro
 
 @router.post("/{schedule_id}/pause")
 async def pause_schedule(schedule_id: str, principal: dict = Depends(require_role("fleet_manager")), db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(OtaSchedule).where(OtaSchedule.id == schedule_id))
-    schedule = result.scalar_one_or_none()
+    schedule = await _get_scoped_schedule(db, schedule_id, principal)
     if not schedule:
         raise HTTPException(status_code=404, detail="Schedule not found")
     if schedule.status != ScheduleStatus.scheduled:
@@ -122,8 +146,7 @@ async def pause_schedule(schedule_id: str, principal: dict = Depends(require_rol
 
 @router.post("/{schedule_id}/resume")
 async def resume_schedule(schedule_id: str, principal: dict = Depends(require_role("fleet_manager")), db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(OtaSchedule).where(OtaSchedule.id == schedule_id))
-    schedule = result.scalar_one_or_none()
+    schedule = await _get_scoped_schedule(db, schedule_id, principal)
     if not schedule:
         raise HTTPException(status_code=404, detail="Schedule not found")
     if schedule.status != ScheduleStatus.paused:
@@ -135,8 +158,7 @@ async def resume_schedule(schedule_id: str, principal: dict = Depends(require_ro
 
 @router.delete("/{schedule_id}")
 async def delete_schedule(schedule_id: str, principal: dict = Depends(require_role("fleet_manager")), db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(OtaSchedule).where(OtaSchedule.id == schedule_id))
-    schedule = result.scalar_one_or_none()
+    schedule = await _get_scoped_schedule(db, schedule_id, principal)
     if not schedule:
         raise HTTPException(status_code=404, detail="Schedule not found")
     await db.delete(schedule)
@@ -183,9 +205,16 @@ async def run_due_schedules(db: AsyncSession):
                 ota_scheduled_total.labels(status="failed").inc()
                 continue
 
-            # Resolve devices
+            # Resolve devices — confined to the schedule's own org so a
+            # campaign created in org-A can never roll out to org-B assets,
+            # even if device_ids were tampered with out of band.
             if schedule.all_devices:
-                dev_result = await db.execute(select(Device).where(Device.status == DeviceStatus.online))
+                dev_result = await db.execute(
+                    select(Device).where(
+                        Device.status == DeviceStatus.online,
+                        Device.org_id == schedule.org_id,
+                    )
+                )
                 devices = dev_result.scalars().all()
             else:
                 ids = [d.strip() for d in schedule.device_ids.split(",") if d.strip()]
@@ -196,7 +225,12 @@ async def run_due_schedules(db: AsyncSession):
                     await db.commit()
                     ota_scheduled_total.labels(status="failed").inc()
                     continue
-                dev_result = await db.execute(select(Device).where(Device.id.in_(ids)))
+                dev_result = await db.execute(
+                    select(Device).where(
+                        Device.id.in_(ids),
+                        Device.org_id == schedule.org_id,
+                    )
+                )
                 devices = dev_result.scalars().all()
 
             if not devices:
@@ -232,7 +266,7 @@ async def run_due_schedules(db: AsyncSession):
             await emit_event(db, "ota.schedule_completed", {
                 "schedule_id": schedule.id, "name": schedule.name,
                 "deployments": len(deployment_ids),
-            })
+            }, org_id=schedule.org_id)
             logger.info("Schedule %s completed: %d deployments", schedule.id[:8], len(deployment_ids))
         except Exception as e:
             schedule.status = ScheduleStatus.failed

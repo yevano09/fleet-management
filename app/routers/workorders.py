@@ -70,7 +70,13 @@ async def create_work_order(
     """Manually open a work order, optionally linked to an alert."""
     alert = None
     if req.alert_id:
-        result = await db.execute(select(Alert).where(Alert.id == req.alert_id))
+        alert_stmt = select(Alert).where(Alert.id == req.alert_id)
+        create_orgs = allowed_orgs(principal)
+        if create_orgs is not None:
+            # A foreign alert id reads as 404 — it can neither be linked nor
+            # have its title/severity/device list copied into this org.
+            alert_stmt = alert_stmt.where(Alert.org_id.in_(create_orgs))
+        result = await db.execute(alert_stmt)
         alert = result.scalar_one_or_none()
         if not alert:
             raise HTTPException(status_code=404, detail="Alert not found")
@@ -109,7 +115,11 @@ async def get_work_order(
     principal: dict = Depends(require_user()),
     db: AsyncSession = Depends(get_db),
 ):
-    result = await db.execute(select(WorkOrder).where(WorkOrder.id == work_order_id))
+    stmt = select(WorkOrder).where(WorkOrder.id == work_order_id)
+    get_orgs = allowed_orgs(principal)
+    if get_orgs is not None:
+        stmt = stmt.where(WorkOrder.org_id.in_(get_orgs))
+    result = await db.execute(stmt)
     wo = result.scalar_one_or_none()
     if not wo:
         raise HTTPException(status_code=404, detail="Work order not found")
@@ -124,7 +134,11 @@ async def close_work_order(
     db: AsyncSession = Depends(get_db),
 ):
     """Close with a resolution note — feeds MTTR and LOOP-01 labels."""
-    result = await db.execute(select(WorkOrder).where(WorkOrder.id == work_order_id))
+    close_stmt = select(WorkOrder).where(WorkOrder.id == work_order_id)
+    close_orgs = allowed_orgs(principal)
+    if close_orgs is not None:
+        close_stmt = close_stmt.where(WorkOrder.org_id.in_(close_orgs))
+    result = await db.execute(close_stmt)
     wo = result.scalar_one_or_none()
     if not wo:
         raise HTTPException(status_code=404, detail="Work order not found")

@@ -25,6 +25,31 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/ota", tags=["ota"])
 
+_UPLOAD_CHUNK_BYTES = 1024 * 1024  # 1 MiB streaming chunks
+
+
+async def _read_upload_capped(file: UploadFile, max_mb: int) -> bytes:
+    """Stream an upload into memory with an enforced size cap.
+
+    Reads in 1 MiB chunks so an oversized artifact is rejected as soon as it
+    crosses the cap instead of after buffering the whole body into RAM.
+    """
+    cap = max_mb * 1024 * 1024
+    chunks: list[bytes] = []
+    total = 0
+    while True:
+        chunk = await file.read(_UPLOAD_CHUNK_BYTES)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > cap:
+            raise HTTPException(
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                detail=f"File size exceeds {max_mb}MB limit",
+            )
+        chunks.append(chunk)
+    return b"".join(chunks)
+
 
 @router.post("/upload", response_model=FirmwareUploadResponse)
 async def upload_firmware(
@@ -46,14 +71,10 @@ async def upload_firmware(
             detail=f"Firmware version '{version}' already exists",
         )
 
-    content = await file.read()
-    if len(content) > settings.max_upload_size_mb * 1024 * 1024:
-        raise HTTPException(
-            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-            detail=f"File size exceeds {settings.max_upload_size_mb}MB limit",
-        )
+    content = await _read_upload_capped(file, settings.max_upload_size_mb)
     sha256_hash = hashlib.sha256(content).hexdigest()
     safe_filename = os.path.basename(file.filename or "firmware.bin")
+    os.makedirs(settings.firmware_storage_path, exist_ok=True)
     file_path = os.path.join(settings.firmware_storage_path, safe_filename)
 
     with open(file_path, "wb") as f:
@@ -191,7 +212,7 @@ async def trigger_ota(
     await emit_event(db, "ota.triggered", {
         "firmware_id": firmware.id, "firmware_version": firmware.version,
         "device_count": len(devices), "deployment_ids": deployment_ids,
-    })
+    }, org_id=firmware.org_id)
 
     logger.info("OTA triggered for %s devices with firmware %s", len(devices), firmware.version)
     return {
@@ -208,9 +229,15 @@ async def get_ota_status(
     principal: dict = Depends(require_user()),
     db: AsyncSession = Depends(get_db),
 ):
-    result = await db.execute(
-        select(OtaDeployment).order_by(OtaDeployment.created_at.desc())
+    # Deployments inherit tenancy through their device — join and filter so
+    # one org never sees another org's rollout history.
+    query = (
+        select(OtaDeployment)
+        .join(Device, OtaDeployment.device_id == Device.id)
+        .order_by(OtaDeployment.created_at.desc())
     )
+    query = scope_devices(query, principal)
+    result = await db.execute(query)
     deployments = result.scalars().all()
 
     success_count = sum(1 for d in deployments if d.status == OtaStatus.success)
@@ -254,6 +281,11 @@ async def delete_firmware(
     result = await db.execute(select(Firmware).where(Firmware.id == firmware_id))
     firmware = result.scalar_one_or_none()
     if not firmware:
+        raise HTTPException(status_code=404, detail="Firmware not found")
+
+    # Tenancy: firmware rows are org-scoped — cross-tenant ids read as 404.
+    fw_scope = allowed_orgs(principal)
+    if fw_scope is not None and firmware.org_id not in fw_scope:
         raise HTTPException(status_code=404, detail="Firmware not found")
 
     # Check if any deployment references this firmware

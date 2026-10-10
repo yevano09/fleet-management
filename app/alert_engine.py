@@ -11,6 +11,7 @@ Usage:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 import os
@@ -83,6 +84,25 @@ class AlertChannel:
         raise NotImplementedError
 
 
+def _post_json(url: str, payload: dict, timeout: int = 10):
+    """Synchronous JSON POST — always invoked via asyncio.to_thread."""
+    import requests
+
+    return requests.post(url, json=payload, timeout=timeout,
+                         headers={"Content-Type": "application/json"})
+
+
+def _send_smtp_message(host: str, port: int, username: str, password: str, msg):
+    """Synchronous SMTP send — always invoked via asyncio.to_thread."""
+    import smtplib
+
+    with smtplib.SMTP(host, port) as server:
+        if username:
+            server.starttls()
+            server.login(username, password)
+        server.send_message(msg)
+
+
 class SlackChannel(AlertChannel):
     """Send alerts to Slack via webhook."""
 
@@ -92,25 +112,23 @@ class SlackChannel(AlertChannel):
             logger.info("[Slack disabled] %s: %s", alert.get("severity"), alert.get("message"))
             return False
         try:
-            import requests
             color = {"info": "#36a64f", "warning": "#f59f00", "critical": "#f03e3e"}
-            resp = requests.post(
-                url,
-                json={
-                    "attachments": [{
-                        "color": color.get(alert.get("severity", "info"), "#36a64f"),
-                        "title": f"Fleet Commander — {alert.get('severity', 'INFO').upper()}",
-                        "text": alert.get("message", ""),
-                        "fields": [
-                            {"title": "Type", "value": alert.get("type", "unknown"), "short": True},
-                            {"title": "Count", "value": str(alert.get("count", 1)), "short": True},
-                            {"title": "Devices", "value": alert.get("device_ids", "") or "none", "short": False},
-                        ],
-                        "ts": datetime.now(timezone.utc).timestamp(),
-                    }]
-                },
-                timeout=10,
-            )
+            payload = {
+                "attachments": [{
+                    "color": color.get(alert.get("severity", "info"), "#36a64f"),
+                    "title": f"Fleet Commander — {alert.get('severity', 'INFO').upper()}",
+                    "text": alert.get("message", ""),
+                    "fields": [
+                        {"title": "Type", "value": alert.get("type", "unknown"), "short": True},
+                        {"title": "Count", "value": str(alert.get("count", 1)), "short": True},
+                        {"title": "Devices", "value": alert.get("device_ids", "") or "none", "short": False},
+                    ],
+                    "ts": datetime.now(timezone.utc).timestamp(),
+                }]
+            }
+            # requests is synchronous — run off the event loop so one slow
+            # Slack webhook never stalls telemetry/MQTT handling.
+            resp = await asyncio.to_thread(_post_json, url, payload)
             return resp.status_code == 200
         except Exception:
             logger.exception("Failed to send Slack alert")
@@ -125,7 +143,6 @@ class EmailChannel(AlertChannel):
             logger.info("[Email disabled] %s: %s", alert.get("severity"), alert.get("message"))
             return False
         try:
-            import smtplib
             from email.mime.text import MIMEText
             from email.mime.multipart import MIMEMultipart
 
@@ -144,11 +161,15 @@ Time: {utcnow().isoformat()}
 """
             msg.attach(MIMEText(body, "plain"))
 
-            with smtplib.SMTP(settings.smtp_host, settings.smtp_port) as server:
-                if settings.smtp_username:
-                    server.starttls()
-                    server.login(settings.smtp_username, settings.smtp_password)
-                server.send_message(msg)
+            # smtplib is blocking — run off the event loop.
+            await asyncio.to_thread(
+                _send_smtp_message,
+                settings.smtp_host,
+                settings.smtp_port,
+                settings.smtp_username,
+                settings.smtp_password,
+                msg,
+            )
             return True
         except Exception:
             logger.exception("Failed to send email alert")
@@ -164,22 +185,18 @@ class WebhookChannel(AlertChannel):
             logger.info("[Webhook disabled] %s: %s", alert.get("severity"), alert.get("message"))
             return False
         try:
-            import requests
-            resp = requests.post(
-                url,
-                json={
-                    "source": "fleet-commander",
-                    "alert_id": alert.get("id", ""),
-                    "type": alert.get("type", "unknown"),
-                    "severity": alert.get("severity", "info"),
-                    "message": alert.get("message", ""),
-                    "device_ids": alert.get("device_ids", ""),
-                    "count": alert.get("count", 1),
-                    "timestamp": utcnow().isoformat(),
-                },
-                timeout=10,
-                headers={"Content-Type": "application/json"},
-            )
+            payload = {
+                "source": "fleet-commander",
+                "alert_id": alert.get("id", ""),
+                "type": alert.get("type", "unknown"),
+                "severity": alert.get("severity", "info"),
+                "message": alert.get("message", ""),
+                "device_ids": alert.get("device_ids", ""),
+                "count": alert.get("count", 1),
+                "timestamp": utcnow().isoformat(),
+            }
+            # requests is synchronous — run off the event loop.
+            resp = await asyncio.to_thread(_post_json, url, payload)
             return resp.status_code in (200, 201, 202, 204)
         except Exception:
             logger.exception("Failed to send webhook alert")
@@ -391,12 +408,21 @@ class AlertEngine:
 
         return processed
 
-    async def acknowledge_alert(self, alert_id: str, user: str) -> bool:
-        """Acknowledge an active alert."""
+    async def acknowledge_alert(
+        self, alert_id: str, user: str, orgs: Optional[list[str]] = None
+    ) -> bool:
+        """Acknowledge an active alert.
+
+        orgs scopes the write: a foreign alert id matches zero rows (False),
+        so cross-tenant acks read as "not found" instead of mutating.
+        """
+        stmt = update(Alert).where(
+            Alert.id == alert_id, Alert.status == AlertStatus.active
+        )
+        if orgs is not None:
+            stmt = stmt.where(Alert.org_id.in_(orgs))
         result = await self.db.execute(
-            update(Alert)
-            .where(Alert.id == alert_id, Alert.status == AlertStatus.active)
-            .values(
+            stmt.values(
                 status=AlertStatus.acknowledged,
                 acknowledged_by=user,
                 acknowledged_at=utcnow(),
@@ -405,12 +431,15 @@ class AlertEngine:
         await self.db.commit()
         return result.rowcount > 0
 
-    async def resolve_alert(self, alert_id: str) -> bool:
-        """Resolve an alert."""
+    async def resolve_alert(
+        self, alert_id: str, orgs: Optional[list[str]] = None
+    ) -> bool:
+        """Resolve an alert (org-scoped like acknowledge)."""
+        stmt = update(Alert).where(Alert.id == alert_id)
+        if orgs is not None:
+            stmt = stmt.where(Alert.org_id.in_(orgs))
         result = await self.db.execute(
-            update(Alert)
-            .where(Alert.id == alert_id)
-            .values(
+            stmt.values(
                 status=AlertStatus.resolved,
                 resolved_at=utcnow(),
             )
@@ -418,11 +447,15 @@ class AlertEngine:
         await self.db.commit()
         return result.rowcount > 0
 
-    async def get_active_alerts(self, severity: Optional[str] = None) -> list[dict]:
-        """Fetch active alerts, optionally filtered by severity."""
+    async def get_active_alerts(
+        self, severity: Optional[str] = None, orgs: Optional[list[str]] = None
+    ) -> list[dict]:
+        """Fetch active alerts, optionally filtered by severity and org scope."""
         query = select(Alert).where(
             Alert.status.in_([AlertStatus.active, AlertStatus.acknowledged])
         )
+        if orgs is not None:
+            query = query.where(Alert.org_id.in_(orgs))
         if severity:
             query = query.where(Alert.severity == severity)
         query = query.order_by(Alert.created_at.desc())
@@ -451,9 +484,12 @@ class AlertEngine:
         alert_type: Optional[str] = None,
         limit: int = 100,
         offset: int = 0,
+        orgs: Optional[list[str]] = None,
     ) -> dict:
-        """Fetch paginated alert history."""
+        """Fetch paginated alert history, optionally scoped to caller orgs."""
         query = select(Alert)
+        if orgs is not None:
+            query = query.where(Alert.org_id.in_(orgs))
         if status:
             query = query.where(Alert.status == status)
         if severity:
@@ -464,6 +500,8 @@ class AlertEngine:
 
         # Count total
         count_query = select(func.count()).select_from(Alert)
+        if orgs is not None:
+            count_query = count_query.where(Alert.org_id.in_(orgs))
         if status:
             count_query = count_query.where(Alert.status == status)
         if severity:
@@ -497,15 +535,18 @@ class AlertEngine:
             "offset": offset,
         }
 
-    async def prune_old_alerts(self, days: int = 7) -> int:
-        """Delete resolved alerts older than N days."""
+    async def prune_old_alerts(
+        self, days: int = 7, orgs: Optional[list[str]] = None
+    ) -> int:
+        """Delete resolved alerts older than N days (optionally org-scoped)."""
         from datetime import timedelta
         cutoff = utcnow() - timedelta(days=days)
-        result = await self.db.execute(
-            delete(Alert).where(
-                Alert.status == AlertStatus.resolved,
-                Alert.resolved_at < cutoff,
-            )
+        stmt = delete(Alert).where(
+            Alert.status == AlertStatus.resolved,
+            Alert.resolved_at < cutoff,
         )
+        if orgs is not None:
+            stmt = stmt.where(Alert.org_id.in_(orgs))
+        result = await self.db.execute(stmt)
         await self.db.commit()
         return result.rowcount

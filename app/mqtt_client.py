@@ -91,7 +91,7 @@ class MqttClient:
         try:
             payload = json.loads(msg.payload.decode())
             topic_parts = msg.topic.split("/")
-            logger.debug(f"MQTT message received: topic={msg.topic}, parts={len(topic_parts)}")
+            logger.debug("MQTT message received: topic=%s, parts=%d", msg.topic, len(topic_parts))
 
             if msg.topic.endswith("/status/ota") and len(topic_parts) >= 5:
                 device_id = topic_parts[2]
@@ -175,7 +175,7 @@ class MqttClient:
             self.client.connect(settings.mqtt_broker_host, settings.mqtt_broker_port, keepalive=60)
             self.client.loop_start()
         except Exception as e:
-            logger.warning(f"Could not connect to MQTT broker: {e}")
+            logger.warning("Could not connect to MQTT broker: %s", e)
 
     def disconnect(self):
         if self.client:
@@ -211,7 +211,7 @@ class MqttClient:
             payload_dict["token_exp"] = token_exp
         payload = json.dumps(payload_dict)
         result = self.client.publish(topic, payload, qos=1)
-        logger.info(f"Published OTA command to {topic}: result={result.rc}")
+        logger.info("Published OTA command to %s: result=%s", topic, result.rc)
         return result.rc == 0
 
     def publish_v2g_command(self, device_id: str, action: str, power_kw: float, duration_minutes: int):

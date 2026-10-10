@@ -12,7 +12,7 @@ import secrets
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -30,9 +30,9 @@ KEY_PREFIX = "fck_"
 
 
 class ApiKeyCreateRequest(BaseModel):
-    name: str
-    role: str = "viewer"
-    org_id: str = DEFAULT_ORG_ID
+    name: str = Field(min_length=1, max_length=128)
+    role: str = Field(default="viewer", max_length=32)
+    org_id: str = Field(default=DEFAULT_ORG_ID, max_length=64)
 
 
 class ApiKeyResponse(BaseModel):
@@ -103,7 +103,12 @@ async def list_api_keys(
     principal: dict = Depends(require_admin()),
     db: AsyncSession = Depends(get_db),
 ):
-    result = await db.execute(select(ApiKey).order_by(ApiKey.created_at.desc()))
+    # Even admins only list keys in their own org scope (super-admin '*' sees all).
+    query = select(ApiKey).order_by(ApiKey.created_at.desc())
+    key_scope = allowed_orgs(principal)
+    if key_scope is not None:
+        query = query.where(ApiKey.org_id.in_(key_scope))
+    result = await db.execute(query)
     return [ApiKeyResponse.model_validate(k) for k in result.scalars().all()]
 
 
@@ -113,7 +118,11 @@ async def revoke_api_key(
     principal: dict = Depends(require_admin()),
     db: AsyncSession = Depends(get_db),
 ):
-    result = await db.execute(select(ApiKey).where(ApiKey.id == key_id))
+    stmt = select(ApiKey).where(ApiKey.id == key_id)
+    revoke_scope = allowed_orgs(principal)
+    if revoke_scope is not None:
+        stmt = stmt.where(ApiKey.org_id.in_(revoke_scope))
+    result = await db.execute(stmt)
     row = result.scalar_one_or_none()
     if not row:
         raise HTTPException(status_code=404, detail="API key not found")

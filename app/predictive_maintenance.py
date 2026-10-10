@@ -295,10 +295,19 @@ async def get_predictions(
     min_risk: float = 0.0,
     limit: int = 50,
     offset: int = 0,
+    orgs: Optional[list[str]] = None,
 ) -> dict:
-    """Fetch predictions with filtering."""
+    """Fetch predictions with filtering, optionally scoped to caller orgs.
+
+    Predictions inherit tenancy through their device (no org column of their
+    own) — non-admin callers only see predictions for their own org's devices.
+    """
     query = select(PredictedFailure)
     count_query = select(func.count()).select_from(PredictedFailure)
+    if orgs is not None:
+        device_ids_sub = select(Device.id).where(Device.org_id.in_(orgs))
+        query = query.where(PredictedFailure.device_id.in_(device_ids_sub))
+        count_query = count_query.where(PredictedFailure.device_id.in_(device_ids_sub))
     if device_id:
         query = query.where(PredictedFailure.device_id == device_id)
         count_query = count_query.where(PredictedFailure.device_id == device_id)

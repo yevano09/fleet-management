@@ -25,13 +25,12 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.deps import require_user
+from app.deps import require_user, allowed_orgs, get_scoped_device
 from app.models import (
     Alert,
     AlertStatus,
     CargoProfile,
     CargoReading,
-    Device,
     DeviceStatus,
     DeviceShadow,
     OtaSchedule,
@@ -63,8 +62,9 @@ async def get_twin(
     principal: dict = Depends(require_user()),
     db: AsyncSession = Depends(get_db),
 ):
-    dev_result = await db.execute(select(Device).where(Device.id == device_id))
-    device = dev_result.scalar_one_or_none()
+    # Tenancy gate: the twin aggregates shadows/risks/alerts/V2G for one
+    # asset — a device outside the caller's org reads as 404 (never 403).
+    device = await get_scoped_device(db, device_id, principal)
     if not device:
         raise HTTPException(status_code=404, detail="Device not found")
 
@@ -88,19 +88,30 @@ async def get_twin(
     )
     risks = risks_res.scalars().all()
 
-    alerts_res = await db.execute(
-        select(Alert).where(
-            Alert.status.in_([AlertStatus.active, AlertStatus.acknowledged]),
-            Alert.device_ids.like(f"%{device_id}%"),
-        )
+    alerts_query = select(Alert).where(
+        Alert.status.in_([AlertStatus.active, AlertStatus.acknowledged]),
     )
-    alerts = alerts_res.scalars().all()
+    # Alerts are org-scoped rows; device_ids is a comma-joined list, so match
+    # membership exactly in Python — a LIKE '%id%' would false-positive on
+    # substrings ('12' vs '123') and leak other orgs' alerts.
+    alert_orgs = allowed_orgs(principal)
+    if alert_orgs is not None:
+        alerts_query = alerts_query.where(Alert.org_id.in_(alert_orgs))
+    alerts_res = await db.execute(alerts_query)
+    alerts = [
+        a for a in alerts_res.scalars().all()
+        if device_id in (a.device_ids or "").split(",")
+    ]
 
-    sched_res = await db.execute(
-        select(OtaSchedule).where(
-            OtaSchedule.status.in_([ScheduleStatus.scheduled, ScheduleStatus.running])
-        )
+    sched_query = select(OtaSchedule).where(
+        OtaSchedule.status.in_([ScheduleStatus.scheduled, ScheduleStatus.running])
     )
+    # Schedules are fleet-wide rows — scope them so one org never sees
+    # another org's campaign names/windows in the twin view.
+    sched_orgs = allowed_orgs(principal)
+    if sched_orgs is not None:
+        sched_query = sched_query.where(OtaSchedule.org_id.in_(sched_orgs))
+    sched_res = await db.execute(sched_query)
     schedules = [
         s for s in sched_res.scalars().all()
         if s.all_devices or (s.device_ids and device_id in s.device_ids.split(","))

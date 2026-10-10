@@ -1,7 +1,7 @@
 # Fleet Commander — Customer User Documentation (CUDO)
 
-> **Version:** 2.0.0  
-> **Document Date:** 2026-06-21  
+> **Version:** 2.1.0  
+> **Document Date:** 2026-10-10  
 > **System:** Fleet Commander IoT Device Management Module
 
 ---
@@ -404,7 +404,7 @@ The system calculates the **SHA256 hash** of the uploaded binary and stores it f
 
 **Boundary conditions:**
 - Firmware version must be unique (cannot upload the same version twice)
-- Maximum file size is limited only by disk space (checked at application level — no explicit cap in code; ensure your reverse proxy or load balancer has appropriate limits)
+- Maximum file size is enforced by `MAX_UPLOAD_SIZE_MB` (default 100 MB, HTTP 413 beyond); uploads stream in 1 MiB chunks so oversized artifacts are rejected before buffering into RAM
 - Supported file types: any binary format (no restrictions)
 
 ### 6.3 Triggering an OTA Update
@@ -791,6 +791,18 @@ curl -X POST http://localhost:8181/webhooks/test/{id}
 ### 15.3 Event Types
 
 Events emitted include: `device.registered`, `device.reconnected`, `device.decommissioned`, `device.claimed`, `device.bulk_imported`, `ota.triggered`, `ota.schedule_completed`, `geofence.event`, `webhook.test`.
+
+### 15.4 Webhook Target Validation (SSRF Guard)
+
+The backend POSTs event payloads to the registered URL, so targets are validated at creation time (HTTP 422 otherwise):
+
+- Only `http`/`https` schemes; no embedded credentials (`user:pass@host`)
+- Cloud metadata hosts are always rejected (`169.254.169.254`, `metadata.google.internal`, Alibaba `100.100.100.200`, …)
+- IP-literal and DNS-resolved targets must be globally routable; private/loopback/link-local targets are additionally rejected when `WEBHOOK_ALLOW_PRIVATE_IPS=false` (set this in production)
+
+### 15.5 Multi-Tenancy
+
+Webhook subscriptions, the event feed (`GET /webhooks/events`), and event fan-out are scoped per organization: an event is delivered only to webhooks in the same org, and each org sees only its own subscriptions and history. The same org scoping applies across devices, telemetry, geofences, shadows, commands, OTA, alerts, predictions, and work orders — cross-org IDs read as 404 (never 403), so tenant existence is not leaked.
 
 ---
 
@@ -1212,8 +1224,10 @@ All endpoints return standard HTTP errors:
 | Status | Meaning |
 |---|---|
 | 400 | Bad request (e.g., missing required fields) |
-| 404 | Resource not found (device, firmware, etc.) |
-| 422 | Validation error (Pydantic schema validation) |
+| 401 | Authentication failed (e.g., bad admin credentials, invalid firmware token) |
+| 404 | Resource not found (device, firmware, etc.) — also returned for cross-tenant IDs |
+| 422 | Validation error (Pydantic schema validation, unsafe webhook URL) |
+| 429 | Too many login attempts (admin-login rate budget exhausted) |
 | 500 | Internal server error |
 
 Error body:
@@ -1317,6 +1331,13 @@ Changes are **not persisted** across container restarts unless you create a new 
 | `SOH_MIN_DISCHARGE` | `0.7` | Minimum SOH for discharge | 0.0–1.0 |
 | `SOH_DEG_THRESHOLD` | `0.8` | SOH degradation threshold | 0.0–1.0 |
 | `SPOT_PRICE_URL` | — | Spot price API URL | Empty = uses mock prices |
+| `AUTH_MODE` | `open` | API auth mode: `open` (demo, unauthenticated) or `strict` (RBAC enforced) | `open` only valid with SQLite; forced to `strict` for network databases |
+| `JWT_SECRET_KEY` / `ADMIN_PASSWORD` | `change-me-…` / `adminadmin` | Signing secret + admin password | Must be non-default in `strict` (refused at startup); change even in demo |
+| `CORS_ALLOWED_ORIGINS` | `http://localhost:8181,http://localhost:3000` | Explicit browser origins | Empty = same-origin only; never `*` with credentials |
+| `TRUSTED_HOSTS` | `*` | Host-header allowlist | `*` disables; set explicit hosts in production |
+| `ADMIN_LOGIN_MAX_ATTEMPTS` / `ADMIN_LOGIN_WINDOW_SECONDS` | `10` / `60` | Admin-login brute-force budget per IP | HTTP 429 beyond budget; failures return 401 |
+| `WEBHOOK_ALLOW_PRIVATE_IPS` | `true` | Allow private/loopback webhook targets | Set `false` in production (metadata hosts always blocked) |
+| `MAX_UPLOAD_SIZE_MB` | `100` | Firmware upload size cap | HTTP 413 beyond cap |
 | `V2G_HORIZON_HOURS` | `24` | V2G optimisation horizon | 1–168 (7 days) |
 | `V2G_TIME_STEP_MINUTES` | `60` | V2G optimisation time step | Must evenly divide 60 |
 | `PROMETHEUS_MULTIPROC_DIR` | `/tmp` | Prometheus multiproc directory | Must be writable |
@@ -1378,14 +1399,14 @@ Set the default role for new OAuth users via `DEFAULT_USER_ROLE` (default: `view
 | Prometheus retention | 7 days | Configurable via `--storage.tsdb.retention.time` |
 | Concurrent OTA | Unlimited | Each OTA is an async task; CPU-bound on large fleets |
 | Database size | SQLite: ~10 GB | Beyond that, migrate to PostgreSQL |
-| Firmware file size | No code limit | Set limits at reverse proxy level |
+| Firmware file size | Capped by `MAX_UPLOAD_SIZE_MB` (default 100 MB, HTTP 413) | Lower the cap and/or set limits at reverse proxy level |
 
 ### 14.2 Known Limitations
 
 | Limitation | Details | Workaround |
 |---|---|---|
 | Metrics reset on restart | Prometheus Gauge/Counter values are in-memory | Use persistent Prometheus volume; metrics re-populate as devices re-register |
-| No authentication built-in | Dev mode uses no MQTT or API auth | See SECURITY.md for production hardening |
+| No authentication built-in | Demo profile runs `AUTH_MODE=open` (unauthenticated REST, anonymous MQTT) | Use `strict` + RBAC/API keys/OAuth beyond localhost; `open` is refused with non-SQLite databases |
 | Single MQTT broker | Not clustered out of the box | Use MQTT bridge or cluster config for HA |
 | Health check on restart | No warm-up period for OTA retry timers | First OTA after restart uses fresh counters |
 | V2G heuristic (not MILP) | Greedy algorithm may miss global optimum | Planned MILP upgrade in SCALING.md |
@@ -1554,11 +1575,15 @@ For production deployment, see the full `SECURITY.md` file. Key measures include
 | MQTT TLS | mTLS on port 8883 with CRL + topic ACLs (shipped) |
 | MQTT Auth | Client certificates (CN-bound topics); demo broker stays anonymous |
 | API Security | `AUTH_MODE=open` (demo) vs `strict` (RBAC roles, API keys, OAuth/admin JWT) |
+| Admin Login | Failed logins return 401 (not 200); per-IP budget (`ADMIN_LOGIN_MAX_ATTEMPTS`/`WINDOW_SECONDS`) returns 429 |
+| OAuth CSRF | Google OAuth round-trip carries a `state` nonce (short HttpOnly cookie, verified in `/callback`) |
+| Webhook SSRF | Target validation at creation (422 on metadata/internal targets); `WEBHOOK_ALLOW_PRIVATE_IPS=false` in prod |
+| Tenant Isolation | Org-scoped queries everywhere; cross-tenant IDs return 404, never 403 |
 | Grafana | Change default admin password |
 | Secrets | Use Docker secrets or vault for passwords |
 | Network | Use Docker internal network; restrict port exposure |
-| CORS | Configure CORS origins in production |
-| Rate Limiting | Add reverse proxy (nginx) with rate limits |
+| CORS | Explicit origins via `CORS_ALLOWED_ORIGINS` (empty = same-origin only) + `TrustedHostMiddleware` via `TRUSTED_HOSTS` |
+| Rate Limiting | Built-in per-IP budget on admin login; add reverse proxy (nginx) with rate limits for the rest |
 
 ### 16.3 OTA Security
 
@@ -1717,6 +1742,7 @@ fleet-management/
 │   ├── metrics.py             # ~50 Prometheus metrics
 │   ├── audit.py               # Audit log helper
 │   ├── event_emitter.py       # Webhook event fan-out with HMAC
+│   ├── webhook_security.py    # Webhook SSRF target validation
 │   ├── firmware_signing.py    # Ed25519 sign/verify
 │   ├── geofence_checker.py    # Geofence math (haversine, point-in-polygon)
 │   ├── predictive_maintenance.py  # Telemetry trend analysis (legacy slopes)
@@ -1749,4 +1775,4 @@ fleet-management/
 
 ---
 
-*Document generated from code version 2.0.0 — Fleet Commander IoT Device Management Module*
+*Document generated from code version 2.1.0 — Fleet Commander IoT Device Management Module*

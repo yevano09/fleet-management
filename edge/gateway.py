@@ -28,6 +28,7 @@ import logging
 import math
 import os
 import sqlite3
+import threading
 import time
 from collections import defaultdict, deque
 from datetime import datetime, timezone
@@ -161,31 +162,40 @@ def score_window(points, pack, session):
 
 
 class Outbox:
-    """Durable spillover for verdicts while the broker is unreachable."""
+    """Durable spillover for verdicts while the broker is unreachable.
+
+    Thread-safe: the paho network thread (spill via on_message) and the
+    reconnect path (replay via on_connect) share one sqlite connection, so
+    every statement runs under a single lock.
+    """
 
     def __init__(self, path):
         os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+        self._lock = threading.Lock()
         self.db = sqlite3.connect(path, check_same_thread=False)
-        self.db.execute("CREATE TABLE IF NOT EXISTS verdicts "
-                        "(id INTEGER PRIMARY KEY AUTOINCREMENT, topic TEXT, payload TEXT)")
+        with self._lock:
+            self.db.execute("CREATE TABLE IF NOT EXISTS verdicts "
+                            "(id INTEGER PRIMARY KEY AUTOINCREMENT, topic TEXT, payload TEXT)")
 
     def spill(self, topic, payload):
-        self.db.execute("INSERT INTO verdicts (topic, payload) VALUES (?, ?)", (topic, payload))
-        self.db.commit()
+        with self._lock:
+            self.db.execute("INSERT INTO verdicts (topic, payload) VALUES (?, ?)", (topic, payload))
+            self.db.commit()
 
     def replay(self, publish):
-        rows = self.db.execute("SELECT id, topic, payload FROM verdicts ORDER BY id").fetchall()
-        for rid, topic, payload in rows:
-            try:
-                doc = json.loads(payload)
-                doc["replayed"] = True
-                if publish(topic, json.dumps(doc)):
-                    self.db.execute("DELETE FROM verdicts WHERE id = ?", (rid,))
-            except Exception:
-                logger.exception("replay of outbox row %s failed", rid)
-                break
-        self.db.commit()
-        return len(rows)
+        with self._lock:
+            rows = self.db.execute("SELECT id, topic, payload FROM verdicts ORDER BY id").fetchall()
+            for rid, topic, payload in rows:
+                try:
+                    doc = json.loads(payload)
+                    doc["replayed"] = True
+                    if publish(topic, json.dumps(doc)):
+                        self.db.execute("DELETE FROM verdicts WHERE id = ?", (rid,))
+                except Exception:
+                    logger.exception("replay of outbox row %s failed", rid)
+                    break
+            self.db.commit()
+            return len(rows)
 
 
 def now_iso():

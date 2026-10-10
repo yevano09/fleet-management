@@ -22,7 +22,8 @@ from app.utils import utcnow
 from app.audit import log_action
 from app.metrics import active_devices, total_devices
 from app.event_emitter import emit_event
-from app.deps import require_role
+from app.deps import require_role, allowed_orgs, scope_devices
+from app.config import DEFAULT_ORG_ID
 
 logger = logging.getLogger(__name__)
 
@@ -59,8 +60,14 @@ async def bulk_import_devices(
             skipped += 1
             continue
 
-        # Check for duplicate name
-        dup_result = await db.execute(select(Device).where(Device.name == name))
+        # Duplicate check is org-scoped (same rule as POST /devices/register):
+        # a same-named device in another org is invisible, never hijacked.
+        # Imported rows land in the caller's organization.
+        import_orgs = allowed_orgs(principal)
+        import_org_id = import_orgs[0] if import_orgs else DEFAULT_ORG_ID
+        dup_result = await db.execute(
+            scope_devices(select(Device).where(Device.name == name), principal)
+        )
         if dup_result.scalar_one_or_none():
             errors.append(f"Row {row_num}: device '{name}' already exists")
             skipped += 1
@@ -76,6 +83,7 @@ async def bulk_import_devices(
             lifecycle_status=DeviceLifecycle.active,
             last_seen=utcnow(),
             claim_token=secrets.token_urlsafe(16),
+            org_id=import_org_id,
         )
         db.add(device)
         await db.flush()
@@ -87,7 +95,11 @@ async def bulk_import_devices(
     await db.commit()
     if imported:
         await log_action(db, principal["email"], "device.bulk_import", "device", None, {"imported": imported, "skipped": skipped})
-        await emit_event(db, "device.bulk_imported", {"imported": imported, "skipped": skipped})
+        _scope = allowed_orgs(principal)
+        await emit_event(
+            db, "device.bulk_imported", {"imported": imported, "skipped": skipped},
+            org_id=_scope[0] if _scope else DEFAULT_ORG_ID,
+        )
 
     return BulkImportResponse(
         imported=imported, skipped=skipped, errors=errors, device_ids=device_ids,

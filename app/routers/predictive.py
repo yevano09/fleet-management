@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.predictive_maintenance import run_prediction_cycle, get_predictions
 from app.schemas import PredictedFailureResponse, PredictedFailureListResponse
-from app.deps import require_user, require_role
+from app.deps import require_user, require_role, allowed_orgs, get_scoped_device
 
 logger = logging.getLogger(__name__)
 
@@ -30,8 +30,14 @@ async def list_predictions(
     principal: dict = Depends(require_user()),
     db: AsyncSession = Depends(get_db),
 ):
+    orgs = allowed_orgs(principal)
+    if device_id and orgs is not None:
+        # Explicit device filter is gated: a foreign device yields an empty
+        # list, never another org's predictions.
+        if not await get_scoped_device(db, device_id, principal):
+            return PredictedFailureListResponse(predictions=[], total=0)
     result = await get_predictions(db, device_id=device_id, resolved=resolved, min_risk=min_risk,
-                                   limit=limit, offset=offset)
+                                   limit=limit, offset=offset, orgs=orgs)
     return PredictedFailureListResponse(
         predictions=[PredictedFailureResponse.model_validate(p) for p in result["predictions"]],
         total=result["total"],
@@ -76,6 +82,10 @@ async def resolve_prediction(
     result = await db.execute(select(PredictedFailure).where(PredictedFailure.id == prediction_id))
     pred = result.scalar_one_or_none()
     if not pred:
+        raise HTTPException(status_code=404, detail="Prediction not found")
+    # Predictions inherit tenancy via their device — resolving a foreign
+    # prediction reads as 404.
+    if not await get_scoped_device(db, pred.device_id, principal):
         raise HTTPException(status_code=404, detail="Prediction not found")
     pred.resolved = True
     await db.commit()

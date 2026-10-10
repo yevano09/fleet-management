@@ -20,21 +20,34 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import WebhookSubscription, EventLog
 from app.utils import utcnow
+from app.config import DEFAULT_ORG_ID
 from app.metrics import events_emitted_total, webhook_deliveries_total
 
 logger = logging.getLogger(__name__)
+
+# Bound concurrent webhook deliveries: without this, one popular event fans
+# out to an unbounded number of tasks and can exhaust the loop / sockets.
+_WEBHOOK_FANOUT_SEM = asyncio.Semaphore(10)
 
 
 async def emit_event(
     db: AsyncSession,
     event_type: str,
     payload: dict,
+    org_id: Optional[str] = None,
 ) -> EventLog:
-    """Record an event and fan out to matching webhook subscriptions."""
+    """Record an event and fan out to matching webhook subscriptions.
+
+    Tenancy: the event is stamped with org_id and fans out ONLY to webhook
+    subscriptions in the same org — one org's event payloads never POST to
+    another org's URLs. org_id=None preserves the legacy global fan-out for
+    call sites without an org context (they should pass one when they can).
+    """
     entry = EventLog(
         event_type=event_type,
         payload=json.dumps(payload),
         timestamp=utcnow(),
+        org_id=org_id or DEFAULT_ORG_ID,
     )
     db.add(entry)
     await db.commit()
@@ -42,15 +55,25 @@ async def emit_event(
     events_emitted_total.labels(event_type=event_type).inc()
 
     # Fan out to matching webhooks in a background thread
-    result = await db.execute(select(WebhookSubscription).where(WebhookSubscription.enabled == True))
+    subs_query = select(WebhookSubscription).where(WebhookSubscription.enabled == True)
+    if org_id is not None:
+        subs_query = subs_query.where(WebhookSubscription.org_id == org_id)
+    result = await db.execute(subs_query)
     subs = result.scalars().all()
 
     for sub in subs:
         if sub.event_types != "*" and event_type not in sub.event_types.split(","):
             continue
-        asyncio.create_task(_deliver_webhook(sub, entry.id, event_type, payload, db))
+        asyncio.create_task(_deliver_webhook_bounded(sub, entry.id, event_type, payload))
 
     return entry
+
+
+async def _deliver_webhook_bounded(sub, event_id: str, event_type: str, payload: dict):
+    async with _WEBHOOK_FANOUT_SEM:
+        # NOTE: no `db` session is passed — delivering on the request's session
+        # across threads is unsafe. _deliver_webhook opens its own session.
+        await _deliver_webhook(sub, event_id, event_type, payload)
 
 
 async def _deliver_webhook(
@@ -58,7 +81,6 @@ async def _deliver_webhook(
     event_id: str,
     event_type: str,
     payload: dict,
-    db: AsyncSession,
 ):
     """Deliver a single webhook with HMAC signing."""
     body = json.dumps({
@@ -96,7 +118,7 @@ async def _deliver_webhook(
                     entry.failed += 1
                 await sess.commit()
     except Exception:
-        logger.debug("Could not update event delivery counts")
+        logger.warning("Could not update event delivery counts", exc_info=True)
 
 
 async def get_events(
@@ -104,11 +126,19 @@ async def get_events(
     event_type: Optional[str] = None,
     limit: int = 100,
     offset: int = 0,
+    orgs: Optional[list[str]] = None,
 ) -> dict:
-    """Fetch paginated event log."""
+    """Fetch paginated event log, optionally scoped to caller orgs.
+
+    orgs=None (super-admin) reads the whole feed; otherwise only rows in the
+    caller's organizations are returned.
+    """
     from sqlalchemy import func
     query = select(EventLog)
     count_query = select(func.count()).select_from(EventLog)
+    if orgs is not None:
+        query = query.where(EventLog.org_id.in_(orgs))
+        count_query = count_query.where(EventLog.org_id.in_(orgs))
     if event_type:
         query = query.where(EventLog.event_type == event_type)
         count_query = count_query.where(EventLog.event_type == event_type)

@@ -15,8 +15,8 @@ from sqlalchemy import select, delete, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db, async_session_factory
-from app.deps import require_user, require_role
-from app.models import Telemetry, Device
+from app.deps import require_user, require_role, get_scoped_device
+from app.models import Telemetry
 from app.schemas import TelemetrySeriesResponse, TelemetryPoint
 from app.utils import utcnow
 from app.config import settings
@@ -38,9 +38,11 @@ async def get_telemetry(
 
     P-ret-1 tiered reads: windows within hot_hours come from raw rows;
     older windows come from 5-minute rollups (same shape, summary values).
+
+    Tenancy: the device lookup is org-scoped — a device outside the caller's
+    org reads as 404 (never 403), so cross-tenant ids stay invisible.
     """
-    dev_result = await db.execute(select(Device).where(Device.id == device_id))
-    if not dev_result.scalar_one_or_none():
+    if not await get_scoped_device(db, device_id, principal):
         raise HTTPException(status_code=404, detail="Device not found")
 
     cutoff = utcnow() - timedelta(hours=hours)
@@ -91,6 +93,8 @@ async def get_latest_telemetry(
     db: AsyncSession = Depends(get_db),
 ):
     """Fetch the most recent telemetry point for a device."""
+    if not await get_scoped_device(db, device_id, principal):
+        raise HTTPException(status_code=404, detail="Device not found")
     result = await db.execute(
         select(Telemetry)
         .where(Telemetry.device_id == device_id)
@@ -111,6 +115,8 @@ async def prune_telemetry(
     db: AsyncSession = Depends(get_db),
 ):
     """Delete telemetry older than N days for a device."""
+    if not await get_scoped_device(db, device_id, principal):
+        raise HTTPException(status_code=404, detail="Device not found")
     cutoff = utcnow() - timedelta(days=days)
     result = await db.execute(
         delete(Telemetry).where(Telemetry.device_id == device_id, Telemetry.timestamp < cutoff)
@@ -127,6 +133,8 @@ async def get_telemetry_stats(
     db: AsyncSession = Depends(get_db),
 ):
     """Compute summary statistics over the telemetry window."""
+    if not await get_scoped_device(db, device_id, principal):
+        raise HTTPException(status_code=404, detail="Device not found")
     cutoff = utcnow() - timedelta(hours=hours)
     result = await db.execute(
         select(

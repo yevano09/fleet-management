@@ -8,44 +8,75 @@ import logging
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Query, HTTPException
-from sqlalchemy import select, delete, func
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.models import WebhookSubscription, EventLog
+from app.models import WebhookSubscription
 from app.schemas import WebhookCreateRequest, WebhookResponse, EventLogResponse
 from app.audit import log_action
 from app.event_emitter import get_events
-from app.deps import require_user, require_role
+from app.deps import require_user, require_role, allowed_orgs
+from app.config import settings, DEFAULT_ORG_ID
+from app.webhook_security import validate_webhook_url
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/webhooks", tags=["webhooks"])
 
 
+def _scope_webhooks(query, principal: dict):
+    """Tenant filter for WebhookSubscription queries (None = super-admin)."""
+    orgs = allowed_orgs(principal)
+    if orgs is not None:
+        query = query.where(WebhookSubscription.org_id.in_(orgs))
+    return query
+
+
+async def _get_scoped_webhook(db, webhook_id: str, principal: dict):
+    """Fetch a webhook only if the principal's org scope may touch it."""
+    result = await db.execute(
+        _scope_webhooks(
+            select(WebhookSubscription).where(WebhookSubscription.id == webhook_id),
+            principal,
+        )
+    )
+    return result.scalar_one_or_none()
+
+
 @router.get("", response_model=list[WebhookResponse])
 async def list_webhooks(principal: dict = Depends(require_user()), db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(WebhookSubscription).order_by(WebhookSubscription.created_at.desc()))
+    result = await db.execute(
+        _scope_webhooks(
+            select(WebhookSubscription).order_by(WebhookSubscription.created_at.desc()),
+            principal,
+        )
+    )
     return [WebhookResponse.model_validate(w) for w in result.scalars().all()]
 
 
 @router.post("", response_model=WebhookResponse, status_code=201)
 async def create_webhook(req: WebhookCreateRequest, principal: dict = Depends(require_role("fleet_manager")), db: AsyncSession = Depends(get_db)):
+    # SSRF guard: the backend POSTs to this URL — refuse metadata/internal targets.
+    safe_url = validate_webhook_url(
+        str(req.url), allow_private=settings.webhook_allow_private_ips
+    )
+    orgs = allowed_orgs(principal)
     sub = WebhookSubscription(
-        name=req.name, url=req.url, event_types=req.event_types,
+        name=req.name, url=safe_url, event_types=req.event_types,
         secret=req.secret, enabled=req.enabled,
+        org_id=orgs[0] if orgs else DEFAULT_ORG_ID,
     )
     db.add(sub)
     await db.commit()
     await db.refresh(sub)
-    await log_action(db, principal["email"], "webhook.create", "webhook", sub.id, {"name": req.name, "url": req.url})
+    await log_action(db, principal["email"], "webhook.create", "webhook", sub.id, {"name": req.name, "url": safe_url})
     return WebhookResponse.model_validate(sub)
 
 
 @router.delete("/{webhook_id}")
 async def delete_webhook(webhook_id: str, principal: dict = Depends(require_role("fleet_manager")), db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(WebhookSubscription).where(WebhookSubscription.id == webhook_id))
-    sub = result.scalar_one_or_none()
+    sub = await _get_scoped_webhook(db, webhook_id, principal)
     if not sub:
         raise HTTPException(status_code=404, detail="Webhook not found")
     await db.delete(sub)
@@ -55,8 +86,7 @@ async def delete_webhook(webhook_id: str, principal: dict = Depends(require_role
 
 @router.patch("/{webhook_id}/toggle")
 async def toggle_webhook(webhook_id: str, enabled: bool = True, principal: dict = Depends(require_role("fleet_manager")), db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(WebhookSubscription).where(WebhookSubscription.id == webhook_id))
-    sub = result.scalar_one_or_none()
+    sub = await _get_scoped_webhook(db, webhook_id, principal)
     if not sub:
         raise HTTPException(status_code=404, detail="Webhook not found")
     sub.enabled = enabled
@@ -72,17 +102,26 @@ async def list_events(
     principal: dict = Depends(require_user()),
     db: AsyncSession = Depends(get_db),
 ):
-    result = await get_events(db, event_type=event_type, limit=limit, offset=offset)
+    result = await get_events(
+        db,
+        event_type=event_type,
+        limit=limit,
+        offset=offset,
+        orgs=allowed_orgs(principal),
+    )
     return [EventLogResponse.model_validate(e) for e in result["events"]]
 
 
 @router.post("/test/{webhook_id}")
 async def test_webhook(webhook_id: str, principal: dict = Depends(require_role("fleet_manager")), db: AsyncSession = Depends(get_db)):
     """Send a test event to a webhook subscription."""
-    result = await db.execute(select(WebhookSubscription).where(WebhookSubscription.id == webhook_id))
-    sub = result.scalar_one_or_none()
+    sub = await _get_scoped_webhook(db, webhook_id, principal)
     if not sub:
         raise HTTPException(status_code=404, detail="Webhook not found")
     from app.event_emitter import emit_event
-    await emit_event(db, "webhook.test", {"webhook_id": webhook_id, "message": "Test delivery"})
+    await emit_event(
+        db, "webhook.test",
+        {"webhook_id": webhook_id, "message": "Test delivery"},
+        org_id=sub.org_id,
+    )
     return {"message": "Test event emitted", "webhook_id": webhook_id}

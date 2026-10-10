@@ -22,7 +22,7 @@ from app.utils import utcnow
 from app.config import settings
 from app.audit import log_action
 from app.metrics import command_queue_delivered_total
-from app.deps import require_user, require_role
+from app.deps import require_user, require_role, allowed_orgs, get_scoped_device
 
 logger = logging.getLogger(__name__)
 
@@ -36,8 +36,7 @@ async def queue_command(
     db: AsyncSession = Depends(get_db),
 ):
     """Queue a command for delivery to a device (immediately if online, on reconnect if offline)."""
-    dev_result = await db.execute(select(Device).where(Device.id == req.device_id))
-    device = dev_result.scalar_one_or_none()
+    device = await get_scoped_device(db, req.device_id, principal)
     if not device:
         raise HTTPException(status_code=404, detail="Device not found")
 
@@ -79,11 +78,28 @@ async def list_commands(
     principal: dict = Depends(require_user()),
     db: AsyncSession = Depends(get_db),
 ):
+    # Commands inherit tenancy through their device — non-admin callers only
+    # see commands for devices in their own org.
+    orgs = allowed_orgs(principal)
     query = select(CommandQueue)
     count_query = select(func.count()).select_from(CommandQueue)
+    if orgs is not None:
+        device_ids_sub = select(Device.id).where(Device.org_id.in_(orgs))
+        query = query.where(CommandQueue.device_id.in_(device_ids_sub))
+        count_query = count_query.where(CommandQueue.device_id.in_(device_ids_sub))
     if device_id:
+        # The explicit device filter is additionally gated: a device outside
+        # the caller's org yields an empty list, never another org's rows.
         query = query.where(CommandQueue.device_id == device_id)
         count_query = count_query.where(CommandQueue.device_id == device_id)
+        if orgs is not None:
+            result = await db.execute(
+                select(Device.id).where(
+                    Device.id == device_id, Device.org_id.in_(orgs)
+                )
+            )
+            if not result.scalar_one_or_none():
+                return CommandQueueListResponse(commands=[], total=0)
     if status:
         query = query.where(CommandQueue.status == CommandStatus(status))
         count_query = count_query.where(CommandQueue.status == CommandStatus(status))
@@ -104,7 +120,22 @@ async def get_command(command_id: str, principal: dict = Depends(require_user())
     cmd = result.scalar_one_or_none()
     if not cmd:
         raise HTTPException(status_code=404, detail="Command not found")
+    await _require_command_scope(db, cmd, principal)
     return CommandQueueResponse.model_validate(cmd)
+
+
+async def _require_command_scope(db: AsyncSession, cmd: CommandQueue, principal: dict) -> None:
+    """404 unless the command's device is inside the caller's org scope."""
+    orgs = allowed_orgs(principal)
+    if orgs is None:
+        return
+    result = await db.execute(
+        select(Device.id).where(
+            Device.id == cmd.device_id, Device.org_id.in_(orgs)
+        )
+    )
+    if not result.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="Command not found")
 
 
 @router.post("/{command_id}/retry")
@@ -114,6 +145,7 @@ async def retry_command(command_id: str, principal: dict = Depends(require_role(
     cmd = result.scalar_one_or_none()
     if not cmd:
         raise HTTPException(status_code=404, detail="Command not found")
+    await _require_command_scope(db, cmd, principal)
     from app.mqtt_client import mqtt_client
     topic = f"iot/fleet/{cmd.device_id}/command/{cmd.command_type}"
     payload = json.loads(cmd.payload)
@@ -135,6 +167,7 @@ async def cancel_command(command_id: str, principal: dict = Depends(require_role
     cmd = result.scalar_one_or_none()
     if not cmd:
         raise HTTPException(status_code=404, detail="Command not found")
+    await _require_command_scope(db, cmd, principal)
     await db.delete(cmd)
     await db.commit()
     return {"message": "Command cancelled", "command_id": command_id}
@@ -143,6 +176,8 @@ async def cancel_command(command_id: str, principal: dict = Depends(require_role
 @router.get("/pending/{device_id}", response_model=CommandQueueListResponse)
 async def get_pending_commands(device_id: str, principal: dict = Depends(require_user()), db: AsyncSession = Depends(get_db)):
     """List all queued (undelivered) commands for a device."""
+    if not await get_scoped_device(db, device_id, principal):
+        raise HTTPException(status_code=404, detail="Device not found")
     result = await db.execute(
         select(CommandQueue)
         .where(CommandQueue.device_id == device_id, CommandQueue.status == CommandStatus.queued)

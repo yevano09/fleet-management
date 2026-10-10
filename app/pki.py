@@ -22,7 +22,7 @@ import os
 from typing import Optional, Tuple
 
 from app.config import settings, DEFAULT_ORG_ID
-from app.utils import utcnow
+from app.utils import utcnow_aware
 
 logger = logging.getLogger(__name__)
 
@@ -80,7 +80,7 @@ def _load_or_create_ca() -> Tuple["x509.Certificate", "ed25519.Ed25519PrivateKey
         x509.NameAttribute(NameOID.COMMON_NAME, u"Fleet Commander Internal CA"),
         x509.NameAttribute(NameOID.ORGANIZATION_NAME, u"Fleet Commander"),
     ])
-    now = utcnow().replace(tzinfo=datetime.timezone.utc)
+    now = utcnow_aware()
     cert = (
         x509.CertificateBuilder()
         .subject_name(name)
@@ -129,7 +129,7 @@ def issue_device_cert(
 
     key = ed25519.Ed25519PrivateKey.generate()
     name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, device_id)])
-    now = utcnow().replace(tzinfo=datetime.timezone.utc)
+    now = utcnow_aware()
 
     cert = (
         x509.CertificateBuilder()
@@ -174,7 +174,7 @@ def build_and_write_crl(revoked_serials: list[str]) -> str:
         raise RuntimeError("cryptography package required for CRL generation")
 
     ca_cert, ca_key = _load_or_create_ca()
-    now = utcnow().replace(tzinfo=datetime.timezone.utc)
+    now = utcnow_aware()
 
     builder = (
         x509.CertificateRevocationListBuilder()

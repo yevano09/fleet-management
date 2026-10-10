@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.alert_engine import AlertEngine
-from app.deps import require_user, require_role
+from app.deps import require_user, require_role, allowed_orgs
 from app.schemas import AlertListResponse, AlertResponse, AcknowledgeRequest
 
 logger = logging.getLogger(__name__)
@@ -36,7 +36,7 @@ async def list_alerts(
     engine = AlertEngine(db)
     history = await engine.get_alert_history(
         status=status, severity=severity, alert_type=alert_type,
-        limit=limit, offset=offset,
+        limit=limit, offset=offset, orgs=allowed_orgs(principal),
     )
     return {
         "alerts": history.get("alerts", []),
@@ -52,7 +52,9 @@ async def active_alerts(
 ):
     """List active (and acknowledged) alerts only."""
     engine = AlertEngine(db)
-    alerts = await engine.get_active_alerts(severity=severity)
+    alerts = await engine.get_active_alerts(
+        severity=severity, orgs=allowed_orgs(principal)
+    )
     return {
         "alerts": alerts,
         "total": len(alerts),
@@ -68,7 +70,7 @@ async def acknowledge_alert(
 ):
     """Acknowledge an active alert."""
     engine = AlertEngine(db)
-    ok = await engine.acknowledge_alert(alert_id, req.user)
+    ok = await engine.acknowledge_alert(alert_id, req.user, orgs=allowed_orgs(principal))
     if not ok:
         return {"error": "Alert not found or already acknowledged"}
     return {"message": "Alert acknowledged", "alert_id": alert_id, "user": req.user}
@@ -82,7 +84,7 @@ async def resolve_alert(
 ):
     """Resolve an alert."""
     engine = AlertEngine(db)
-    ok = await engine.resolve_alert(alert_id)
+    ok = await engine.resolve_alert(alert_id, orgs=allowed_orgs(principal))
     if not ok:
         return {"error": "Alert not found"}
     return {"message": "Alert resolved", "alert_id": alert_id}
@@ -97,7 +99,11 @@ async def re_notify_alert(
     """Force re-notification of an alert."""
     from sqlalchemy import select as sel
     from app.models import Alert
-    result = await db.execute(sel(Alert).where(Alert.id == alert_id))
+    stmt = sel(Alert).where(Alert.id == alert_id)
+    renotify_orgs = allowed_orgs(principal)
+    if renotify_orgs is not None:
+        stmt = stmt.where(Alert.org_id.in_(renotify_orgs))
+    result = await db.execute(stmt)
     alert = result.scalar_one_or_none()
     if not alert:
         raise HTTPException(status_code=404, detail="Alert not found")
@@ -114,5 +120,5 @@ async def prune_old_alerts(
 ):
     """Prune resolved alerts older than N days."""
     engine = AlertEngine(db)
-    deleted = await engine.prune_old_alerts(days=days)
+    deleted = await engine.prune_old_alerts(days=days, orgs=allowed_orgs(principal))
     return {"deleted": deleted, "days": days}

@@ -1,7 +1,9 @@
 import logging
+import secrets
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Optional
+from urllib.parse import urlencode
 
 import jwt
 from fastapi import Request, HTTPException
@@ -21,6 +23,8 @@ GOOGLE_USERINFO_URL = "https://www.googleapis.com/oauth2/v2/userinfo"
 
 COOKIE_NAME = "fleet_token"
 ADMIN_COOKIE_NAME = "fleet_admin_token"
+OAUTH_STATE_COOKIE = "fleet_oauth_state"
+OAUTH_STATE_TTL_SECONDS = 300
 
 
 # ── JWT helpers ──────────────────────────────────────────────────────────
@@ -161,16 +165,43 @@ def get_google_redirect_uri() -> str:
     return settings.google_redirect_uri
 
 
-def get_google_auth_url() -> str:
-    params = (
-        f"client_id={settings.google_client_id}"
-        f"&redirect_uri={get_google_redirect_uri()}"
-        f"&response_type=code"
-        f"&scope=openid%20email%20profile"
-        f"&access_type=offline"
-        f"&prompt=consent"
+def get_google_auth_url(state: Optional[str] = None) -> str:
+    params = {
+        "client_id": settings.google_client_id,
+        "redirect_uri": get_google_redirect_uri(),
+        "response_type": "code",
+        "scope": "openid email profile",
+        "access_type": "offline",
+        "prompt": "consent",
+    }
+    if state:
+        params["state"] = state
+    return f"{GOOGLE_AUTH_URL}?{urlencode(params)}"
+
+
+def new_oauth_state() -> str:
+    """CSRF nonce for the Google OAuth round-trip (stored in a short cookie)."""
+    return secrets.token_urlsafe(32)
+
+
+def set_oauth_state_cookie(response, state: str):
+    response.set_cookie(
+        key=OAUTH_STATE_COOKIE,
+        value=state,
+        httponly=True,
+        samesite="lax",
+        max_age=OAUTH_STATE_TTL_SECONDS,
+        secure=settings.secure_cookies,
     )
-    return f"{GOOGLE_AUTH_URL}?{params}"
+
+
+def clear_oauth_state_cookie(response):
+    response.delete_cookie(
+        key=OAUTH_STATE_COOKIE,
+        httponly=True,
+        samesite="lax",
+        secure=settings.secure_cookies,
+    )
 
 
 async def exchange_code_for_token(code: str) -> Optional[dict]:

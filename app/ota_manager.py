@@ -53,13 +53,13 @@ class OtaStateMachine:
             )
             deployment = result.scalar_one_or_none()
             if not deployment:
-                logger.error(f"OTA deployment {deployment_id} not found")
+                logger.error("OTA deployment %s not found", deployment_id)
                 return None
 
             if not OtaStateMachine.can_transition(deployment.status, new_status):
                 logger.warning(
-                    f"Invalid state transition: {deployment.status.value} -> {new_status.value} "
-                    f"for deployment {deployment_id}"
+                    "Invalid state transition: %s -> %s for deployment %s",
+                    deployment.status.value, new_status.value, deployment_id,
                 )
                 return None
 
@@ -91,7 +91,7 @@ class OtaStateMachine:
 
             await session.commit()
             await session.refresh(deployment)
-            logger.info(f"OTA deployment {deployment_id} -> {new_status.value}")
+            logger.info("OTA deployment %s -> %s", deployment_id, new_status.value)
             return deployment
 
     @staticmethod
@@ -112,12 +112,12 @@ class OtaStateMachine:
 
         new_status = status_map.get(status)
         if new_status is None:
-            logger.warning(f"Unknown OTA status from device {device_id}: {status}")
+            logger.warning("Unknown OTA status from device %s: %s", device_id, status)
             return
 
         if new_status == OtaStatus.hash_mismatch:
             error_msg = payload.get("error", "SHA256 hash mismatch")
-            logger.warning(f"Device {device_id} reported hash mismatch: {error_msg}")
+            logger.warning("Device %s reported hash mismatch: %s", device_id, error_msg)
             await OtaStateMachine.update_deployment_status(deployment_id, OtaStatus.hash_mismatch, error_msg)
             await OtaStateMachine.update_deployment_status(deployment_id, OtaStatus.rollback)
             await OtaStateMachine.update_deployment_status(deployment_id, OtaStatus.rolled_back)
@@ -142,7 +142,7 @@ class OtaTimeoutWatcher:
             if deployment and deployment.status not in (
                 OtaStatus.success, OtaStatus.rolled_back, OtaStatus.failed, OtaStatus.hash_mismatch
             ):
-                logger.warning(f"OTA deployment {deployment_id} timed out for device {device_id}")
+                logger.warning("OTA deployment %s timed out for device %s", deployment_id, device_id)
                 if deployment.retry_count < settings.max_retry_count:
                     deployment.retry_count += 1
                     deployment.status = OtaStatus.pending
@@ -189,16 +189,19 @@ class OtaTimeoutWatcher:
                     )
 
     def start_watch(self, deployment_id: str, device_id: str):
-        if deployment_id in self._tasks:
-            self._tasks[deployment_id].cancel()
+        # pop-then-replace is atomic on the loop thread: no TOCTOU between a
+        # membership check and cancel/del across concurrent start/cancel calls.
+        stale = self._tasks.pop(deployment_id, None)
+        if stale is not None:
+            stale.cancel()
         self._tasks[deployment_id] = asyncio.create_task(
             self.watch_deployment(deployment_id, device_id)
         )
 
     def cancel_watch(self, deployment_id: str):
-        if deployment_id in self._tasks:
-            self._tasks[deployment_id].cancel()
-            del self._tasks[deployment_id]
+        stale = self._tasks.pop(deployment_id, None)
+        if stale is not None:
+            stale.cancel()
 
 
 ota_timeout_watcher = OtaTimeoutWatcher()

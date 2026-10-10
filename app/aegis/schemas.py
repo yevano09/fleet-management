@@ -10,9 +10,9 @@ class RemediationSignal(BaseModel):
     threshold: float
     severity: str
     timestamp: datetime
-    device_ids: List[str] = []
+    device_ids: List[str] = Field(default_factory=list)
     window_seconds: int = 60
-    metadata: dict = {}
+    metadata: dict = Field(default_factory=dict)
 
 
 class RemediationResponse(BaseModel):
@@ -49,6 +49,6 @@ class IngestRequest(BaseModel):
     value: float
     threshold: float = 0.0
     severity: str = "warning"
-    device_ids: List[str] = []
+    device_ids: List[str] = Field(default_factory=list)
     window_seconds: int = 60
-    metadata: dict = {}
+    metadata: dict = Field(default_factory=dict)

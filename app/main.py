@@ -9,6 +9,8 @@ from datetime import datetime, timedelta, timezone
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import RedirectResponse
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
@@ -133,7 +135,10 @@ async def _record_telemetry(device: Device, payload: dict, timestamp=None):
             await db.commit()
         telemetry_points_total.labels(device=device.name).inc()
     except Exception:
-        logger.debug("Telemetry record failed", exc_info=True)
+        # Inline path drops are operator-visible: count + warn (the batch path
+        # already counts every drop — see _telemetry_flusher).
+        telemetry_rejected_total.labels(reason="inline_commit_failed").inc()
+        logger.warning("Telemetry record failed for device %s", device.id, exc_info=True)
 
 
 # ── P0-A2: bounded batch ingest ───────────────────────────────────────────────
@@ -218,9 +223,9 @@ async def _check_geofences(device_id: str):
                 await emit_event(db, "geofence.event", {
                     "device_id": device_id,
                     "events": [{"geofence_id": e.geofence_id, "type": e.event_type} for e in events],
-                })
+                }, org_id=device.org_id)
     except Exception:
-        logger.debug("Geofence check failed", exc_info=True)
+        logger.warning("Geofence check failed for device %s", device_id, exc_info=True)
 
 
 async def _flush_command_queue(device_id: str):
@@ -259,7 +264,7 @@ async def _flush_command_queue(device_id: str):
                 logger.info("Flushed %d queued commands to device %s", delivered, device_id)
                 await _update_queue_depth()
     except Exception:
-        logger.debug("Command queue flush failed", exc_info=True)
+        logger.warning("Command queue flush failed for device %s", device_id, exc_info=True)
 
 
 async def _update_queue_depth():
@@ -271,7 +276,7 @@ async def _update_queue_depth():
             )
             command_queue_depth.set(len(result.scalars().all()))
     except Exception:
-        pass
+        logger.debug("Queue depth gauge update failed", exc_info=True)
 
 
 async def _sync_shadow_to_device(device_id: str):
@@ -290,7 +295,7 @@ async def _sync_shadow_to_device(device_id: str):
                 mqtt_client.publish_shadow_desired(device_id, state)
                 logger.info("Synced desired shadow v%d to device %s", shadow.version, device_id)
     except Exception:
-        logger.debug("Shadow sync failed", exc_info=True)
+        logger.warning("Shadow sync failed for device %s", device_id, exc_info=True)
 
 
 async def _revoked_device_ids() -> set[str]:
@@ -315,6 +320,9 @@ async def _revoked_device_ids() -> set[str]:
                 d for d, sts in statuses.items() if "active" not in sts
             }
     except Exception:
+        # Fail visible, not silent: an empty set disables the revoked-device
+        # heartbeat gate, so operators must see this in logs/metrics.
+        logger.warning("Revoked-device scan failed (gate running open)", exc_info=True)
         return set()
 
 
@@ -392,7 +400,7 @@ async def handle_mqtt_register(payload: dict, verified_id: str | None = None):
                 asyncio.create_task(_sync_shadow_to_device(existing.id))
             await db.commit()
             await log_action(db, "system", "device.reconnect", "device", existing.id, {"name": name})
-            await emit_event(db, "device.reconnected", {"device_id": existing.id, "name": name})
+            await emit_event(db, "device.reconnected", {"device_id": existing.id, "name": name}, org_id=existing.org_id)
         else:
             # JITP (UC-25): resolve the org from the device's issued certificate.
             org_id = DEFAULT_ORG_ID
@@ -435,7 +443,7 @@ async def handle_mqtt_register(payload: dict, verified_id: str | None = None):
             total_devices.inc()
             await log_action(db, "system", "device.register", "device", device.id,
                              {"name": name, "city": city, "org_id": org_id})
-            await emit_event(db, "device.registered", {"device_id": device.id, "name": name, "city": city})
+            await emit_event(db, "device.registered", {"device_id": device.id, "name": name, "city": city}, org_id=org_id)
             logger.info("MQTT auto-registered device: %s (id=%s, mqtt_id=%s, org=%s)",
                         name, device_id, mqtt_id, org_id)
     mqtt_messages_received.labels(topic="register").inc()
@@ -450,12 +458,20 @@ _obd_last_odo: dict = {}
 
 
 def _obd_event_time(payload: dict):
-    """Producer event-time when the feed carries it, else server time."""
+    """Producer event-time when the feed carries it, else server time.
+
+    Always normalized to the naive-UTC DB contract (see app.utils.utcnow):
+    an aware producer timestamp is converted, never stored with tzinfo.
+    """
+    from app.utils import as_utcnaive
+
     raw = payload.get("event_time")
     if raw:
         try:
             ts = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
-            return ts if ts.tzinfo else ts.replace(tzinfo=timezone.utc)
+            if ts.tzinfo is None:
+                ts = ts.replace(tzinfo=timezone.utc)
+            return as_utcnaive(ts)
         except Exception:
             logger.debug("Bad event_time %r, using server time", raw)
     return utcnow()
@@ -538,8 +554,6 @@ async def handle_mqtt_cargo(device_id: str, payload: dict):
     Accepts bay climate + door + shock summary + edge ai_inference block.
     Unknown devices are rejected (counted); tenant stamped from device row.
     """
-    import json as _json
-
     async with async_session_factory() as db:
         result = await db.execute(select(Device).where(Device.id == device_id))
         device = result.scalar_one_or_none()
@@ -556,7 +570,7 @@ async def handle_mqtt_cargo(device_id: str, payload: dict):
             door_open=bool(payload.get("door_open", sensors.get("door_open", False))),
             shock_g=payload.get("shock_g"),
             source=payload.get("source", "sim"),
-            ai_inference=_json.dumps(ai_block) if ai_block is not None else None,
+            ai_inference=json.dumps(ai_block) if ai_block is not None else None,
             tenant_id=device.org_id,
         )
         db.add(row)
@@ -642,7 +656,7 @@ async def handle_mqtt_v2g_status(device_id: str, payload: dict):
             shadow_updates_total.labels(state="reported").inc()
             logger.debug("V2G status from %s: action=%s", device_id, action)
     except Exception:
-        logger.debug("V2G status handler failed", exc_info=True)
+        logger.warning("V2G status handler failed for device %s", device_id, exc_info=True)
     mqtt_messages_received.labels(topic="status_v2g").inc()
 
 
@@ -875,6 +889,29 @@ app = FastAPI(
 
 app.middleware("http")(metrics_middleware)
 
+
+def _parse_host_list(value: str) -> list[str]:
+    return [h.strip() for h in (value or "").split(",") if h.strip()]
+
+
+# Explicit-origin CORS (no wildcard-with-credentials). Empty
+# CORS_ALLOWED_ORIGINS = same-origin only, no CORS headers emitted.
+_cors_origins = _parse_host_list(settings.cors_allowed_origins)
+if _cors_origins:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=_cors_origins,
+        allow_credentials=True,
+        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
+        allow_headers=["Authorization", "X-API-Key", "Content-Type"],
+    )
+# Host-header validation (dev default "*" = off; set TRUSTED_HOSTS in prod).
+# Added after CORS so it runs outermost.
+app.add_middleware(
+    TrustedHostMiddleware,
+    allowed_hosts=_parse_host_list(settings.trusted_hosts) or ["*"],
+)
+
 # Phase 0 Tailwind: compiled stylesheet served alongside the legacy inline
 # <style> block (removed in Phase 3). Local dev: `npm run dev:css`.
 # Versioned URL (?v=content-hash) busts CDN/edge caches on every rebuild.
@@ -970,7 +1007,12 @@ async def serve_firmware(filename: str, request: Request):
         if result is None:
             raise HTTPException(status_code=404, detail="Firmware file not found")
         sha256_hash = result
-        if not did or not verify_firmware_download_token(did, sha256_hash, int(exp or 0), token):
+        try:
+            exp_int = int(exp or 0)
+        except (TypeError, ValueError):
+            device_cert_rejected_total.labels(reason="firmware_token_invalid").inc()
+            raise HTTPException(status_code=401, detail="Invalid or expired firmware token")
+        if not did or not verify_firmware_download_token(did, sha256_hash, exp_int, token):
             device_cert_rejected_total.labels(reason="firmware_token_invalid").inc()
             raise HTTPException(status_code=401, detail="Invalid or expired firmware token")
 

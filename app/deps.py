@@ -193,3 +193,17 @@ def scope_devices(query, principal: dict):
     if orgs is not None:
         query = query.where(Device.org_id.in_(orgs))
     return query
+
+
+async def get_scoped_device(db: AsyncSession, device_id: str, principal: dict):
+    """Fetch a Device only if the principal's org scope may touch it.
+
+    Cross-tenant ids are invisible (None → caller raises 404), never 403 —
+    this avoids leaking device-id existence across organizations.
+    """
+    from app.models import Device
+
+    result = await db.execute(
+        scope_devices(select(Device).where(Device.id == device_id), principal)
+    )
+    return result.scalar_one_or_none()

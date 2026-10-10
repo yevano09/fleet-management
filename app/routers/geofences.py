@@ -10,7 +10,7 @@ import logging
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Query, HTTPException
-from sqlalchemy import select, delete, func
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -20,14 +20,31 @@ from app.schemas import (
     GeofenceEventResponse,
 )
 from app.utils import utcnow
-from app.deps import require_user, require_role
-from app.deps import require_user, require_role
+from app.deps import require_user, require_role, allowed_orgs
 from app.audit import log_action
 from app.metrics import geofence_active
+
+from app.config import DEFAULT_ORG_ID
+
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/geofences", tags=["geofences"])
+
+
+def _scope_geofences(query, principal: dict):
+    """Tenant filter for Geofence queries (None scope = super-admin, unfiltered)."""
+    orgs = allowed_orgs(principal)
+    if orgs is not None:
+        query = query.where(Geofence.org_id.in_(orgs))
+    return query
+
+
+async def _get_scoped_geofence(db, geofence_id: str, principal: dict):
+    """Fetch a geofence only if the principal's org scope may touch it."""
+    query = _scope_geofences(select(Geofence).where(Geofence.id == geofence_id), principal)
+    result = await db.execute(query)
+    return result.scalar_one_or_none()
 
 
 @router.get("", response_model=GeofenceListResponse)
@@ -36,7 +53,7 @@ async def list_geofences(
     principal: dict = Depends(require_user()),
     db: AsyncSession = Depends(get_db),
 ):
-    query = select(Geofence)
+    query = _scope_geofences(select(Geofence), principal)
     if enabled is not None:
         query = query.where(Geofence.enabled == enabled)
     result = await db.execute(query.order_by(Geofence.created_at.desc()))
@@ -59,6 +76,7 @@ async def create_geofence(
     if req.shape == "polygon" and not req.polygon_coords:
         raise HTTPException(status_code=400, detail="Polygon geofence requires polygon_coords")
 
+    orgs = allowed_orgs(principal)
     gf = Geofence(
         name=req.name,
         shape=GeofenceShape(req.shape),
@@ -71,6 +89,7 @@ async def create_geofence(
         alert_on_exit=req.alert_on_exit,
         color=req.color,
         enabled=req.enabled,
+        org_id=orgs[0] if orgs else DEFAULT_ORG_ID,
     )
     db.add(gf)
     await db.commit()
@@ -81,8 +100,7 @@ async def create_geofence(
 
 @router.get("/{geofence_id}", response_model=GeofenceResponse)
 async def get_geofence(geofence_id: str, principal: dict = Depends(require_user()), db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(Geofence).where(Geofence.id == geofence_id))
-    gf = result.scalar_one_or_none()
+    gf = await _get_scoped_geofence(db, geofence_id, principal)
     if not gf:
         raise HTTPException(status_code=404, detail="Geofence not found")
     return GeofenceResponse.model_validate(gf)
@@ -90,8 +108,7 @@ async def get_geofence(geofence_id: str, principal: dict = Depends(require_user(
 
 @router.delete("/{geofence_id}")
 async def delete_geofence(geofence_id: str, principal: dict = Depends(require_role("operator")), db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(Geofence).where(Geofence.id == geofence_id))
-    gf = result.scalar_one_or_none()
+    gf = await _get_scoped_geofence(db, geofence_id, principal)
     if not gf:
         raise HTTPException(status_code=404, detail="Geofence not found")
     await db.delete(gf)
@@ -102,8 +119,7 @@ async def delete_geofence(geofence_id: str, principal: dict = Depends(require_ro
 
 @router.patch("/{geofence_id}/toggle")
 async def toggle_geofence(geofence_id: str, enabled: bool = True, principal: dict = Depends(require_role("operator")), db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(Geofence).where(Geofence.id == geofence_id))
-    gf = result.scalar_one_or_none()
+    gf = await _get_scoped_geofence(db, geofence_id, principal)
     if not gf:
         raise HTTPException(status_code=404, detail="Geofence not found")
     gf.enabled = enabled
@@ -118,6 +134,10 @@ async def get_geofence_events(
     principal: dict = Depends(require_user()),
     db: AsyncSession = Depends(get_db),
 ):
+    # Events inherit tenancy through their geofence — verify scope first so one
+    # org cannot enumerate another org's geofence history by id.
+    if not await _get_scoped_geofence(db, geofence_id, principal):
+        raise HTTPException(status_code=404, detail="Geofence not found")
     result = await db.execute(
         select(GeofenceEvent)
         .where(GeofenceEvent.geofence_id == geofence_id)
@@ -136,7 +156,12 @@ async def get_all_events(
     principal: dict = Depends(require_user()),
     db: AsyncSession = Depends(get_db),
 ):
-    query = select(GeofenceEvent)
+    # Fleet-wide event feed inherits tenancy via join — non-admin callers only
+    # see events for geofences in their own org.
+    query = select(GeofenceEvent).join(Geofence, GeofenceEvent.geofence_id == Geofence.id)
+    orgs = allowed_orgs(principal)
+    if orgs is not None:
+        query = query.where(Geofence.org_id.in_(orgs))
     if device_id:
         query = query.where(GeofenceEvent.device_id == device_id)
     if event_type:

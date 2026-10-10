@@ -6,7 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.deps import require_role, require_user, allowed_orgs, scope_devices
+from app.deps import require_role, require_user, allowed_orgs, scope_devices, get_scoped_device
 from app.models import Device, DeviceStatus, Telemetry
 from app.schemas import (
     DeviceRegisterRequest, DeviceRegisterResponse,
@@ -33,7 +33,11 @@ async def register_device(
     scope = allowed_orgs(principal)
     org_id = scope[0] if scope else DEFAULT_ORG_ID
 
-    result = await db.execute(select(Device).where(Device.name == req.name))
+    # Name lookup is org-scoped: a duplicate name in ANOTHER org is invisible
+    # here, so re-register can never hijack a foreign device row.
+    result = await db.execute(
+        scope_devices(select(Device).where(Device.name == req.name), principal)
+    )
     existing = result.scalar_one_or_none()
 
     if existing:
@@ -120,9 +124,9 @@ async def device_heartbeat(
     principal: dict = Depends(require_role("operator")),
     db: AsyncSession = Depends(get_db),
 ):
-    result = await db.execute(select(Device).where(Device.id == device_id))
-    device = result.scalar_one_or_none()
-
+    # Tenancy gate: heartbeats write to the device row + mint telemetry, so a
+    # device outside the caller's org must read as 404 (never 403).
+    device = await get_scoped_device(db, device_id, principal)
     if not device:
         raise HTTPException(status_code=404, detail="Device not found")
 
@@ -186,8 +190,13 @@ async def push_remote_config(
     device_id: str,
     req: RemoteConfigRequest,
     principal: dict = Depends(require_role("operator")),
+    db: AsyncSession = Depends(get_db),
 ):
     """Push a remote configuration to a device via MQTT."""
+    # Tenancy gate: publishing to an MQTT command topic is a write to the
+    # asset — a device outside the caller's org reads as 404.
+    if not await get_scoped_device(db, device_id, principal):
+        raise HTTPException(status_code=404, detail="Device not found")
     mqtt_topic_id = device_id
     success = mqtt_client.publish_remote_config(mqtt_topic_id, req.config)
     if not success:

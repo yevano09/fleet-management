@@ -17,8 +17,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.deps import require_role, require_user, allowed_orgs
-from app.models import CargoProfile, CargoReading, Device, ShockEvent
+from app.deps import require_role, require_user, allowed_orgs, get_scoped_device
+from app.models import CargoProfile, CargoReading, ShockEvent
 from app.schemas import (
     CargoProfileResponse,
     CargoProfileUpdate,
@@ -47,6 +47,10 @@ async def get_profile(
     principal: dict = Depends(require_user()),
     db: AsyncSession = Depends(get_db),
 ):
+    # Device gate first: without it an unknown / foreign id falls through to
+    # the default-contract 200 below instead of the 404 used everywhere else.
+    if not await get_scoped_device(db, device_id, principal):
+        raise HTTPException(status_code=404, detail="Device not found")
     result = await db.execute(
         _scope_profile(select(CargoProfile).where(CargoProfile.device_id == device_id), principal)
     )
@@ -64,11 +68,12 @@ async def upsert_profile(
     principal: dict = Depends(require_role("operator")),
     db: AsyncSession = Depends(get_db),
 ):
-    dev = await db.execute(select(Device).where(Device.id == device_id))
-    device = dev.scalar_one_or_none()
+    device = await get_scoped_device(db, device_id, principal)
     if not device:
         raise HTTPException(status_code=404, detail="Device not found")
-    result = await db.execute(select(CargoProfile).where(CargoProfile.device_id == device_id))
+    result = await db.execute(
+        _scope_profile(select(CargoProfile).where(CargoProfile.device_id == device_id), principal)
+    )
     profile = result.scalar_one_or_none()
     if not profile:
         orgs = allowed_orgs(principal)
@@ -91,8 +96,7 @@ async def ingest_reading(
     db: AsyncSession = Depends(get_db),
 ):
     """REST ingest mirror of the MQTT +/cargo path (tooling/tests/offline replay)."""
-    dev = await db.execute(select(Device).where(Device.id == device_id))
-    device = dev.scalar_one_or_none()
+    device = await get_scoped_device(db, device_id, principal)
     if not device:
         raise HTTPException(status_code=404, detail="Device not found")
     row = CargoReading(
@@ -123,6 +127,8 @@ async def list_readings(
 ):
     from datetime import timedelta
 
+    if not await get_scoped_device(db, device_id, principal):
+        raise HTTPException(status_code=404, detail="Device not found")
     cutoff = utcnow() - timedelta(hours=hours)
     result = await db.execute(
         select(CargoReading)
@@ -146,6 +152,8 @@ async def list_shocks(
     principal: dict = Depends(require_user()),
     db: AsyncSession = Depends(get_db),
 ):
+    if not await get_scoped_device(db, device_id, principal):
+        raise HTTPException(status_code=404, detail="Device not found")
     query = select(ShockEvent).where(ShockEvent.device_id == device_id)
     if event_class:
         query = query.where(ShockEvent.event_class == event_class)
@@ -169,13 +177,22 @@ async def cargo_overview(
     result = await db.execute(_scope_profile(select(CargoProfile), principal))
     profs = result.scalars().all()
     loads = []
-    for p in profs:
-        rows = (await db.execute(
+    # One batched query for the latest rows of every in-scope device (avoids
+    # N+1 per-device round-trips while preserving "latest 12 per device").
+    rows_by_device: dict[str, list] = {}
+    profile_ids = [p.device_id for p in profs]
+    if profile_ids:
+        all_rows = (await db.execute(
             select(CargoReading)
-            .where(CargoReading.device_id == p.device_id)
-            .order_by(CargoReading.timestamp.desc())
-            .limit(12)
+            .where(CargoReading.device_id.in_(profile_ids))
+            .order_by(CargoReading.device_id.asc(), CargoReading.timestamp.desc())
         )).scalars().all()
+        for r in all_rows:
+            bucket = rows_by_device.setdefault(r.device_id, [])
+            if len(bucket) < 12:
+                bucket.append(r)
+    for p in profs:
+        rows = rows_by_device.get(p.device_id, [])
         if not rows:
             loads.append({"device_id": p.device_id, "commodity": p.commodity,
                           "bay_temp_c": None, "tts_minutes": None, "risk": "UNKNOWN",

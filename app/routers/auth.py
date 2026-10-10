@@ -1,6 +1,8 @@
+import asyncio
 import secrets
 import logging
 import html
+import time
 
 from fastapi import APIRouter, Request, HTTPException, Form
 from fastapi.responses import RedirectResponse, HTMLResponse
@@ -19,6 +21,10 @@ from app.auth import (
     revoke_session,
     get_current_user,
     get_current_admin,
+    new_oauth_state,
+    set_oauth_state_cookie,
+    clear_oauth_state_cookie,
+    OAUTH_STATE_COOKIE,
     COOKIE_NAME,
 )
 from app.config import settings
@@ -26,6 +32,36 @@ from app.config import settings
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+# ── Admin-login brute-force guard ──────────────────────────────────────────
+# In-memory per-IP attempt timestamps (process-local; sufficient as a first
+# layer in front of a single admin credential — production should add a
+# shared limiter). Entries are pruned on each check so the dict stays small.
+_login_attempts: dict[str, list[float]] = {}
+_login_lock = asyncio.Lock()
+
+
+async def _check_login_rate_limit(request: Request) -> None:
+    """Raise 429 when this IP exhausted its admin-login budget."""
+    ip = request.client.host if request.client else "unknown"
+    now = time.monotonic()
+    window = settings.admin_login_window_seconds
+    async with _login_lock:
+        attempts = [t for t in _login_attempts.get(ip, []) if now - t < window]
+        if len(attempts) >= settings.admin_login_max_attempts:
+            raise HTTPException(
+                status_code=429,
+                detail="Too many login attempts — try again later",
+            )
+        attempts.append(now)
+        _login_attempts[ip] = attempts
+
+
+async def _reset_login_attempts(request: Request) -> None:
+    """Clear the budget after a successful login (don't punish legit users)."""
+    ip = request.client.host if request.client else "unknown"
+    async with _login_lock:
+        _login_attempts.pop(ip, None)
 
 
 # ── Google OAuth routes (user dashboard) ────────────────────────────────
@@ -37,14 +73,29 @@ async def login():
 
 @router.get("/google/login")
 async def google_login():
-    return RedirectResponse(url=get_google_auth_url())
+    # CSRF protection (OAuth `state`): the nonce is stored in a short-lived
+    # HttpOnly cookie and verified in /callback before any token exchange.
+    state = new_oauth_state()
+    response = RedirectResponse(url=get_google_auth_url(state=state))
+    set_oauth_state_cookie(response, state)
+    return response
 
 
 @router.get("/callback")
-async def callback(code: str = None, error: str = None, request: Request = None):
+async def callback(
+    code: str = None,
+    error: str = None,
+    state: str = None,
+    request: Request = None,
+):
     if error:
         logger.error("Google OAuth error: %s", error)
         return HTMLResponse(content=f"<h1>Authentication failed</h1><p>{html.escape(error)}</p>", status_code=400)
+
+    expected_state = request.cookies.get(OAUTH_STATE_COOKIE) if request else None
+    if not state or not expected_state or not secrets.compare_digest(state, expected_state):
+        logger.warning("Google OAuth state mismatch — possible CSRF")
+        return HTMLResponse(content="<h1>Invalid OAuth state</h1>", status_code=400)
 
     if not code:
         return HTMLResponse(content="<h1>Missing authorization code</h1>", status_code=400)
@@ -67,6 +118,7 @@ async def callback(code: str = None, error: str = None, request: Request = None)
 
     response = RedirectResponse(url="/", status_code=302)
     set_auth_cookie(response, jwt_token)
+    clear_oauth_state_cookie(response)
     logger.info("User authenticated: %s (%s)", name, email)
     return response
 
@@ -117,11 +169,16 @@ async def admin_login_page():
 
 @router.post("/admin/login")
 async def admin_login(
+    request: Request,
     username: str = Form(...),
     password: str = Form(...),
 ):
+    await _check_login_rate_limit(request)
     if not secrets.compare_digest(username, settings.admin_username) or not secrets.compare_digest(password, settings.admin_password):
-        return HTMLResponse(content=ADMIN_LOGIN_ERROR, status_code=200)
+        # 401 (not 200): failures must be distinguishable for monitoring and
+        # must not render as a successful page load.
+        return HTMLResponse(content=ADMIN_LOGIN_ERROR, status_code=401)
+    await _reset_login_attempts(request)
 
     token = create_admin_jwt_token(username=username)
     response = RedirectResponse(url="/", status_code=302)

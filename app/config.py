@@ -31,6 +31,20 @@ class Settings(BaseSettings):
     auth_mode: str = "open"
     # HA split (UC-27): leader owns MQTT loop + schedulers; api replicas serve HTTP only.
     role: str = "leader"  # leader | api
+    # ── Hardening knobs (python-review) ────────────────────────────────────
+    # Comma-separated explicit origins for CORS. Empty = no CORS headers
+    # (same-origin only). Never use "*" with credentials.
+    cors_allowed_origins: str = "http://localhost:8181,http://localhost:3000"
+    # Comma-separated hosts accepted by TrustedHostMiddleware. "*" disables
+    # the check (dev default); set explicitly in production.
+    trusted_hosts: str = "*"
+    # Admin-login brute-force guard: max attempts per IP per window.
+    admin_login_max_attempts: int = 10
+    admin_login_window_seconds: int = 60
+    # Webhook SSRF guard: when False, webhook targets resolving to private /
+    # loopback / link-local addresses are rejected. Default True for local
+    # dev (docker-compose targets); set False in production.
+    webhook_allow_private_ips: bool = True
     # UC-24: MQTT TLS client material (backend connects to broker on 8883)
     mqtt_tls_enabled: bool = False
     mqtt_ca_cert: str = ""
@@ -142,6 +156,15 @@ class Settings(BaseSettings):
         if "AUTH_MODE" not in os.environ and not self.database_url.startswith("sqlite"):
             object.__setattr__(self, "auth_mode", "strict")
             logger.info("AUTH_MODE unset with non-sqlite DB → defaulting auth_mode=strict")
+        # Fail closed: an explicit AUTH_MODE=open against a network database is
+        # almost certainly a misconfiguration — unauthenticated REST + anonymous
+        # MQTT must never front Postgres. Force strict instead of serving open.
+        if self.auth_mode == "open" and not self.database_url.startswith("sqlite"):
+            object.__setattr__(self, "auth_mode", "strict")
+            logger.error(
+                "AUTH_MODE=open refused with non-sqlite DATABASE_URL — "
+                "forcing auth_mode=strict. Set AUTH_MODE explicitly only for local sqlite dev."
+            )
 
 
 settings = Settings()
@@ -156,7 +179,12 @@ def validate_settings():
     if not settings.secure_cookies and settings.jwt_secret_key != DEFAULT_JWT_SECRET:
         warnings.append("SECURE_COOKIES is False — set to True when using HTTPS")
     for w in warnings:
-        logger.warning("Settings: %s", w)
+        if settings.auth_mode == "open":
+            # Open mode serves unauthenticated admin: default secrets there mean
+            # anyone with the repo can forge sessions — escalate past warning.
+            logger.error("Settings (AUTH_MODE=open, DO NOT expose beyond localhost): %s", w)
+        else:
+            logger.warning("Settings: %s", w)
     # P0 UC-23 rule: strict mode refuses insecure defaults outright.
     if settings.auth_mode == "strict":
         errors = []

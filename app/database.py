@@ -33,6 +33,11 @@ async def get_db() -> AsyncSession:
     async with async_session_factory() as session:
         try:
             yield session
+        except Exception:
+            # Roll back the open transaction so a failed request never holds
+            # Postgres locks / SQLite journals for the next checkout.
+            await session.rollback()
+            raise
         finally:
             await session.close()
 
@@ -48,6 +53,7 @@ _TENANT_TABLES = (
     "webhook_subscriptions",
     "ota_schedules",
     "alerts",
+    "event_log",
 )
 
 
