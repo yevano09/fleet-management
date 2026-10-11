@@ -1,22 +1,29 @@
 #include <ArduinoOTA.h>
 #include <ESP8266WiFi.h>
+#include <WiFiClientSecure.h>
 #include <PubSubClient.h>
 #include <ArduinoJson.h>
 #include <Updater.h>
 #include <ESP8266HTTPClient.h>
+#include <time.h>
+
+// ESP8266 core has no UPDATE_SIZE_UNKNOWN (ESP32-only). Map to max size_t.
+#ifndef UPDATE_SIZE_UNKNOWN
+#define UPDATE_SIZE_UNKNOWN ((size_t)-1)
+#endif
 
 // ===== CONFIGURATION =====
-const char* WIFI_SSID     = "";
-const char* WIFI_PASSWORD = "";
+const char* WIFI_SSID     = "XXXX";
+const char* WIFI_PASSWORD = "XXXX";
 
-const char* MQTT_BROKER   = "";  // IP or hostname of Mosquitto
+const char* MQTT_BROKER   = "0.0.0.0";  // IP or hostname of Mosquitto
 const int   MQTT_PORT     = 1883;
 const char* MQTT_USER     = "";                 // leave empty if anonymous
 const char* MQTT_PASS     = "";
 
 // Device identity — set these per device
 const char* DEVICE_NAME   = "ESP8266-Garage-001-REAL";
-const char* FW_VERSION    = "1.0.2";
+const char* FW_VERSION    = "1.0.0";
 
 // ===== EDGE AI (threshold verdict engine, P0-E) =====
 #define HAS_SENSORS 0
@@ -66,7 +73,7 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
   String topicStr = String(topic);
   Serial.printf("Topic is : %s\n", topicStr.c_str());
   
-  StaticJsonDocument<512> doc;
+  StaticJsonDocument<1024> doc;
   DeserializationError err = deserializeJson(doc, payload, length);
   if (err) {
     Serial.printf("MQTT JSON parse error: %s\n", err.c_str());
@@ -190,77 +197,204 @@ void reportOtaStatus(const char* status, const char* error = nullptr) {
   Serial.printf("OTA status: %s\n", status);
 }
 
-// ===== REAL OTA UPDATE (ESP8266 FLASH) =====
-void startOsUpdate() {} // Placeholder if needed
-
+// ===== REAL OTA UPDATE (ESP8266 HTTP/HTTPS FLASH) =====
 void startOtaUpdate() {
+  Serial.printf("OTA start: url=%s\n", otaFirmwareUrl.c_str());
   reportOtaStatus("downloading");
   mqtt.loop();
 
+  if (otaFirmwareUrl.length() == 0) {
+    Serial.println("OTA: empty firmware URL");
+    reportOtaStatus("failed", "Empty firmware URL");
+    mqtt.loop();
+    return;
+  }
+
+  // Free heap for BearSSL: disconnect MQTT during flash download.
+  // (ESP-12E has ~40KB heap; MQTT + TLS simultaneously causes OOM/handshake fail.)
+  mqtt.disconnect();
+  delay(100);
+
+  WiFiClient plainClient;
+  WiFiClientSecure secureClient;
+  secureClient.setInsecure();
+  // Large buffers needed for fast servers; keeps BearSSL from stalling.
+  secureClient.setBufferSizes(4096, 1024);
+
   HTTPClient http;
   http.setTimeout(30000);
-  
-  // ESP8266 requires passing the WiFiClient instance directly into begin()
-  http.begin(wifiClient, otaFirmwareUrl);
-  int httpCode = http.GET();
+  // Manual redirect handling below (auto-follow can't switch http<->https
+  // clients, so a http->https 301 comes back as a hard "HTTP 301" failure).
+  http.setFollowRedirects(HTTPC_DISABLE_FOLLOW_REDIRECTS);
+  http.setReuse(false);
 
-  if (httpCode != 200) {
-    Serial.printf("OTA download failed: HTTP %d\n", httpCode);
-    reportOtaStatus("failed", "HTTP download error");
-    mqtt.loop();
+  String url = otaFirmwareUrl;
+  url.trim();
+  int httpCode = -1;
+  const int MAX_REDIRECTS = 5;
+  for (int r = 0; r <= MAX_REDIRECTS; r++) {
+    bool useHttps = url.startsWith("https://");
+    const char* hdrKeys[] = {"Location"};
+    http.collectHeaders(hdrKeys, 1);
+    bool begun = useHttps ? http.begin(secureClient, url)
+                          : http.begin(plainClient, url);
+    if (!begun) {
+      Serial.println("OTA: http.begin failed (bad URL?)");
+      reportOtaStatus("failed", "http.begin failed");
+      connectMqtt();
+      return;
+    }
+    httpCode = http.GET();
+    if (httpCode == HTTP_CODE_MOVED_PERMANENTLY || httpCode == HTTP_CODE_FOUND ||
+        httpCode == HTTP_CODE_SEE_OTHER || httpCode == HTTP_CODE_TEMPORARY_REDIRECT ||
+        httpCode == HTTP_CODE_PERMANENT_REDIRECT) {
+      String loc = http.header("Location");
+      Serial.printf("OTA redirect %d -> %s\n", httpCode, loc.c_str());
+      http.end();
+      if (loc.length() == 0 || r == MAX_REDIRECTS) break;
+      loc.trim();
+      if (loc.startsWith("/")) {
+        int schemeEnd = url.indexOf("://");
+        int pathStart = url.indexOf('/', schemeEnd + 3);
+        String base = (pathStart > 0) ? url.substring(0, pathStart) : url;
+        url = base + loc;
+      } else if (loc.startsWith("http")) {
+        url = loc;
+      } else {
+        url = loc; // best effort
+      }
+      Serial.printf("OTA follow -> %s\n", url.c_str());
+      continue;
+    }
+    break; // got final response (200 or real error)
+  }
+
+  if (httpCode != HTTP_CODE_OK) {
+    Serial.printf("OTA download failed: HTTP %d %s\n", httpCode, http.errorToString(httpCode).c_str());
+    char errMsg[64];
+    snprintf(errMsg, sizeof(errMsg), "HTTP error %d", httpCode);
+    // Must reconnect before reporting so publish actually goes out
     http.end();
+    connectMqtt();
+    reportOtaStatus("failed", errMsg);
+    mqtt.loop();
     return;
   }
 
   int contentLength = http.getSize();
-  if (contentLength <= 0) {
-    Serial.println("OTA: invalid content length");
+  Serial.printf("OTA: contentLength=%d\n", contentLength);
+  Serial.printf("OTA: freeHeap=%u freeSketch=%u\n", ESP.getFreeHeap(), ESP.getFreeSketchSpace());
+
+  if (contentLength == 0) {
+    Serial.println("OTA: invalid content length 0");
+    http.end();
+    connectMqtt();
     reportOtaStatus("failed", "Invalid content length");
     mqtt.loop();
-    http.end();
     return;
   }
 
-  bool canBegin = Update.begin(contentLength);
+  // contentLength == -1 means chunked transfer (no Content-Length header).
+  bool canBegin;
+  if (contentLength > 0) {
+    if ((size_t)contentLength > ESP.getFreeSketchSpace()) {
+      Serial.printf("OTA: bin %d > freeSketch %u, check Flash Size menu (need 4M)\n",
+                    contentLength, ESP.getFreeSketchSpace());
+    }
+    canBegin = Update.begin((size_t)contentLength, U_FLASH);
+  } else {
+    Serial.println("OTA: chunked/unknown length, using UPDATE_SIZE_UNKNOWN");
+    canBegin = Update.begin(UPDATE_SIZE_UNKNOWN, U_FLASH);
+  }
   if (!canBegin) {
-    Serial.println("OTA: not enough space");
-    reportOtaStatus("failed", "Insufficient flash space");
-    mqtt.loop();
+    Serial.printf("OTA: Update.begin failed, error %d\n", Update.getError());
+    char errMsg[64];
+    snprintf(errMsg, sizeof(errMsg), "Update.begin failed err=%d", Update.getError());
     http.end();
+    connectMqtt();
+    reportOtaStatus("failed", errMsg);
+    mqtt.loop();
     return;
   }
 
   WiFiClient* stream = http.getStreamPtr();
-  size_t written = Update.writeStream(*stream);
+  // Manual WDT-safe loop. Update.writeStream() blocks for 420KB+ and trips
+  // the ESP8266 watchdog (no Serial progress, looks hung after "downloading").
+  uint8_t buff[1460];
+  size_t written = 0;
+  size_t total = (contentLength > 0) ? (size_t)contentLength : UPDATE_SIZE_UNKNOWN;
+  unsigned long lastData = millis();
+  unsigned long lastLog = millis();
+  while (written < total) {
+    size_t avail = stream->available();
+    if (avail) {
+      size_t toRead = avail > sizeof(buff) ? sizeof(buff) : avail;
+      int n = stream->readBytes(buff, toRead);
+      if (n <= 0) break;
+      if (Update.write(buff, (size_t)n) != (size_t)n) {
+        Serial.printf("OTA: flash write failed at %u, err=%d\n", (unsigned int)written, Update.getError());
+        break;
+      }
+      written += (size_t)n;
+      lastData = millis();
+      if (millis() - lastLog > 2000) {
+        lastLog = millis();
+        if (contentLength > 0) {
+          Serial.printf("OTA: %u / %d bytes (heap %u)\n", (unsigned int)written, contentLength, ESP.getFreeHeap());
+        } else {
+          Serial.printf("OTA: %u bytes (heap %u)\n", (unsigned int)written, ESP.getFreeHeap());
+        }
+      }
+    } else {
+      if (millis() - lastData > 20000UL) {
+        Serial.println("OTA: 20s stall, aborting");
+        break;
+      }
+      delay(1);
+    }
+    yield();
+    ESP.wdtFeed();
+    // Exit chunked stream cleanly once server closes connection
+    if (contentLength < 0 && !http.connected() && stream->available() == 0) break;
+  }
+  Serial.printf("OTA: written %u bytes\n", (unsigned int)written);
 
-  if (written != (size_t)contentLength) {
+  if (contentLength > 0 && written != (size_t)contentLength) {
     Serial.printf("OTA: wrote %u of %d bytes\n", (unsigned int)written, contentLength);
-    reportOtaStatus("failed", "Partial write");
-    mqtt.loop();
+    Update.end();
     http.end();
+    connectMqtt();
+    reportOtaStatus("failed", "Partial write or timeout");
+    mqtt.loop();
     return;
   }
 
   if (!Update.end()) {
-    Serial.printf("OTA: Update.end error\n");
-    reportOtaStatus("failed", "Update end failed");
-    mqtt.loop();
+    Serial.printf("OTA: Update.end error %d\n", Update.getError());
+    char errMsg[64];
+    snprintf(errMsg, sizeof(errMsg), "Update.end err=%d", Update.getError());
     http.end();
+    connectMqtt();
+    reportOtaStatus("failed", errMsg);
+    mqtt.loop();
     return;
   }
 
   if (!Update.isFinished()) {
     Serial.println("OTA: Update not finished");
+    http.end();
+    connectMqtt();
     reportOtaStatus("failed", "Update not finished");
     mqtt.loop();
-    http.end();
     return;
   }
 
+  // Reconnect so "success" is actually delivered before reboot
+  http.end();
+  connectMqtt();
   reportOtaStatus("success");
   mqtt.loop();
-
-  http.end();
+  delay(200);
 
   Serial.println("OTA success! Rebooting in 3 seconds...");
   delay(3000);
@@ -360,6 +494,7 @@ void setup() {
   delay(100);
   Serial.println("\n\nFleet Commander ESP8266 Client - via OTA update");
 
+  // Connect WiFi
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
@@ -367,13 +502,22 @@ void setup() {
   }
   Serial.printf("\nWiFi connected: %s\n", WiFi.localIP().toString().c_str());
 
+  // Configure NTP time sync for secure TLS handshakes
+  configTime(0, 0, "pool.ntp.org", "time.nist.gov");
+  Serial.print("Waiting for NTP time sync");
+  while (time(nullptr) < 1700000000) {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println("\nTime synchronized via NTP!");
+
   deviceId = getDeviceId();
   Serial.printf("Device ID: %s\n", deviceId.c_str());
   Serial.printf("Device Name: %s\n", DEVICE_NAME);
   Serial.printf("Firmware: %s\n", FW_VERSION);
 
   mqtt.setServer(MQTT_BROKER, MQTT_PORT);
-  mqtt.setBufferSize(512);
+  mqtt.setBufferSize(1024);
   mqtt.setCallback(mqttCallback);
   mqtt.setKeepAlive(30);
 }
