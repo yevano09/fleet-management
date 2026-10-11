@@ -7,10 +7,10 @@
 #include <HTTPClient.h>
 
 // ===== CONFIGURATION =====
-const char* WIFI_SSID     = "";
-const char* WIFI_PASSWORD = "";
+const char* WIFI_SSID     = "Phoenix_Guest";
+const char* WIFI_PASSWORD = "g0d!$guest";
 
-const char* MQTT_BROKER   = "192.168.0.135";  // IP or hostname of Mosquitto
+const char* MQTT_BROKER   = "103.212.120.150";  // IP or hostname of Mosquitto
 const int   MQTT_PORT     = 1883;
 const char* MQTT_USER     = "";                // leave empty if anonymous
 const char* MQTT_PASS     = "";
