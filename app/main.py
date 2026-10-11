@@ -1021,7 +1021,14 @@ async def serve_firmware(filename: str, request: Request):
 
 async def db_lookup_firmware_hash(filename: str):
     async with async_session_factory() as db:
-        result = await db.execute(select(Firmware).where(Firmware.filename == filename))
+        # Newest-first with LIMIT 1: legacy databases may hold several rows
+        # sharing one filename (pre-unique-name uploads); serve the latest.
+        result = await db.execute(
+            select(Firmware)
+            .where(Firmware.filename == filename)
+            .order_by(Firmware.created_at.desc())
+            .limit(1)
+        )
         fw = result.scalar_one_or_none()
         return fw.sha256_hash if fw else None
 

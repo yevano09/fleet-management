@@ -1,10 +1,11 @@
 import os
+import re
 import hashlib
 import logging
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Request, status
-from sqlalchemy import select, and_
+from sqlalchemy import select, and_, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -73,7 +74,13 @@ async def upload_firmware(
 
     content = await _read_upload_capped(file, settings.max_upload_size_mb)
     sha256_hash = hashlib.sha256(content).hexdigest()
-    safe_filename = os.path.basename(file.filename or "firmware.bin")
+    # Unique stored filename per upload: the same client-side name re-uploaded
+    # under a new version must never overwrite (or be served as) an older
+    # artifact. Versions are unique (409 above), so a version prefix plus a
+    # sanitized basename is collision-free and keeps the original name visible.
+    safe_base = os.path.basename(file.filename or "firmware.bin")
+    safe_version = re.sub(r"[^A-Za-z0-9._-]+", "_", version).strip("._") or "fw"
+    safe_filename = f"{safe_version}_{safe_base}"[-200:]
     os.makedirs(settings.firmware_storage_path, exist_ok=True)
     file_path = os.path.join(settings.firmware_storage_path, safe_filename)
 
@@ -288,12 +295,32 @@ async def delete_firmware(
     if fw_scope is not None and firmware.org_id not in fw_scope:
         raise HTTPException(status_code=404, detail="Firmware not found")
 
-    # Check if any deployment references this firmware
-    dep_result = await db.execute(
-        select(OtaDeployment).where(OtaDeployment.firmware_id == firmware_id).limit(1)
+    # Delete is blocked only by IN-PROGRESS deployments. Terminal history rows
+    # (success/failed/rolled back) for this artifact are removed with it —
+    # the audit log keeps the who/when record, and per-device rows without
+    # their binary are meaningless. Previously ANY deployment row (including
+    # ancient terminal ones) made every firmware permanently undeletable.
+    active_statuses = (
+        OtaStatus.pending, OtaStatus.downloading,
+        OtaStatus.applying, OtaStatus.verifying,
     )
-    if dep_result.scalar_one_or_none():
-        raise HTTPException(status_code=409, detail="Cannot delete firmware with existing deployments")
+    active_result = await db.execute(
+        select(OtaDeployment)
+        .where(
+            OtaDeployment.firmware_id == firmware_id,
+            OtaDeployment.status.in_(active_statuses),
+        )
+        .limit(1)
+    )
+    if active_result.scalar_one_or_none():
+        raise HTTPException(
+            status_code=409,
+            detail="Cannot delete firmware with in-progress deployments",
+        )
+    history_result = await db.execute(
+        delete(OtaDeployment).where(OtaDeployment.firmware_id == firmware_id)
+    )
+    history_rows = history_result.rowcount or 0
 
     # Remove the binary file
     if os.path.exists(firmware.binary_path):
@@ -303,5 +330,8 @@ async def delete_firmware(
     await db.commit()
 
     await log_action(db, principal["email"], "firmware.delete", "firmware", firmware_id)
-    logger.info("Firmware deleted: %s (%s)", firmware.version, firmware.filename)
+    logger.info(
+        "Firmware deleted: %s (%s), pruned %d terminal deployment rows",
+        firmware.version, firmware.filename, history_rows,
+    )
     return {"message": f"Firmware {firmware.version} deleted"}
