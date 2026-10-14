@@ -5,6 +5,7 @@
 #include <ArduinoJson.h>
 #include <Updater.h>
 #include <ESP8266HTTPClient.h>
+#include <BearSSLHelpers.h>  // BearSSL::HashSHA256 for streaming SHA256 verify
 #include <time.h>
 
 // ESP8266 core has no UPDATE_SIZE_UNKNOWN (ESP32-only). Map to max size_t.
@@ -223,7 +224,9 @@ void sendHeartbeat() {
 }
 
 // ===== OTA STATUS REPORT =====
-void reportOtaStatus(const char* status, const char* error = nullptr) {
+// NOTE: PubSubClient publishes at QoS 0, so a single mqtt.loop() routinely
+// lost reports (esp. the pre-reboot "success"). Always pump the loop here.
+void reportOtaStatus(const char* status, const char* error = nullptr, unsigned long flushMs = 800) {
   StaticJsonDocument<256> doc;
   doc["status"]        = status;
   doc["deployment_id"] = otaDeploymentId;
@@ -236,8 +239,17 @@ void reportOtaStatus(const char* status, const char* error = nullptr) {
   char buffer[256];
   size_t n = serializeJson(doc, buffer);
   String topic = "iot/fleet/" + deviceId + "/status/ota";
-  
-  mqtt.publish(topic.c_str(), (const uint8_t*)buffer, n, false);
+
+  if (mqtt.connected()) {
+    mqtt.publish(topic.c_str(), (const uint8_t*)buffer, n, false);
+    unsigned long start = millis();
+    while ((millis() - start) < flushMs) {
+      mqtt.loop();
+      delay(10);
+    }
+  } else {
+    Serial.println("OTA status NOT sent (MQTT disconnected)");
+  }
   Serial.printf("OTA status: %s\n", status);
 }
 
@@ -274,6 +286,12 @@ void startOtaUpdate() {
 
   String url = otaFirmwareUrl;
   url.trim();
+  if (url.startsWith("https://")) {
+    // Known hazard: the BearSSL TLS handshake for a 400KB+ download blocks
+    // without yielding and trips the Soft WDT (reboot, old fw keeps running).
+    // Prefer plain http + the SHA256 check below for ESP8266 OTA.
+    Serial.println("OTA: WARNING https may Soft-WDT this chip; prefer plain http URLs");
+  }
   int httpCode = -1;
   const int MAX_REDIRECTS = 5;
   for (int r = 0; r <= MAX_REDIRECTS; r++) {
@@ -361,6 +379,20 @@ void startOtaUpdate() {
     return;
   }
 
+  // Streaming SHA256 over the exact bytes written to flash. The backend
+  // delivers the expected hex digest in the OTA command (sha256_hash).
+  // Memory-safe: 32-byte state, no full-image buffering (~40KB heap).
+  String expectedHash = otaExpectedHash;
+  expectedHash.trim();
+  expectedHash.toLowerCase();
+  bool verifyHash = (expectedHash.length() == 64);
+  BearSSL::HashSHA256 otaSha256;
+  if (verifyHash) {
+    otaSha256.begin();
+  } else {
+    Serial.println("OTA: no valid SHA256 in OTA command, skipping verification");
+  }
+
   WiFiClient* stream = http.getStreamPtr();
   // Manual WDT-safe loop. Update.writeStream() blocks for 420KB+ and trips
   // the ESP8266 watchdog (no Serial progress, looks hung after "downloading").
@@ -379,6 +411,7 @@ void startOtaUpdate() {
         Serial.printf("OTA: flash write failed at %u, err=%d\n", (unsigned int)written, Update.getError());
         break;
       }
+      if (verifyHash) otaSha256.update(buff, (size_t)n);
       written += (size_t)n;
       lastData = millis();
       if (millis() - lastLog > 2000) {
@@ -413,6 +446,27 @@ void startOtaUpdate() {
     return;
   }
 
+  // Verify BEFORE committing. Skipping Update.end() on mismatch leaves the
+  // old firmware intact (nothing to roll back) and the backend records
+  // hash_mismatch for its rollback bookkeeping.
+  if (verifyHash) {
+    uint8_t digest[32];
+    otaSha256.end(digest);
+    char actualHex[65];
+    for (int i = 0; i < 32; i++) sprintf(actualHex + 2 * i, "%02x", digest[i]);
+    actualHex[64] = '\0';
+    if (expectedHash != String(actualHex)) {
+      Serial.printf("OTA: SHA256 MISMATCH exp=%.16s... got=%.16s...\n", expectedHash.c_str(), actualHex);
+      char errMsg[96];
+      snprintf(errMsg, sizeof(errMsg), "SHA256 mismatch got=%.16s...", actualHex);
+      http.end();
+      connectMqtt();
+      reportOtaStatus("hash_mismatch", errMsg);
+      return;
+    }
+    Serial.println("OTA: SHA256 verified");
+  }
+
   if (!Update.end()) {
     Serial.printf("OTA: Update.end error %d\n", Update.getError());
     char errMsg[64];
@@ -436,12 +490,9 @@ void startOtaUpdate() {
   // Reconnect so "success" is actually delivered before reboot
   http.end();
   connectMqtt();
-  reportOtaStatus("success");
-  mqtt.loop();
-  delay(200);
-
+  reportOtaStatus("success", nullptr, 1500);
   Serial.println("OTA success! Rebooting in 3 seconds...");
-  delay(3000);
+  for (int i = 0; i < 30; i++) { mqtt.loop(); delay(100); }
   ESP.restart();
 }
 
