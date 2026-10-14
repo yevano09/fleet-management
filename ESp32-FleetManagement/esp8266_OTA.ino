@@ -42,6 +42,41 @@ float cargoTemp = 3.0, cargoHum = 68.0;
 bool  cargoDoor = false;
 float lastShockG = 0.2;
 
+// ===== GPS (simulated fix vs real receiver) =====
+// Compile-time flag: uncomment to send a wandering simulated GPS fix in
+// every heartbeat (geofence demo / testing without hardware GPS).
+// Leave commented on a real tracker build.
+//#define SIMULATEGPS
+
+#ifdef SIMULATEGPS
+#define SIM_GPS_BASE_LAT 19.0760   // centre of the wander circle — set to your site
+#define SIM_GPS_BASE_LNG 72.8777
+#define SIM_GPS_RADIUS_M 80.0      // circle radius; crosses a fence edge for demo
+#define SIM_GPS_STEP_DEG 12.0      // arc advanced per heartbeat (12 deg x 15 s)
+float simGpsAngleDeg = 0.0;
+#endif
+
+// Fill *lat/*lng and return true when a fix is available.
+// Simulated circle when SIMULATEGPS is defined; otherwise this is the hook
+// point for a real receiver (e.g. TinyGPS++ / NEO-6M) — return false until
+// the receiver reports a valid fix so no stale coordinates are sent.
+bool readGps(float* lat, float* lng) {
+#ifdef SIMULATEGPS
+  simGpsAngleDeg += (float)SIM_GPS_STEP_DEG;
+  if (simGpsAngleDeg >= 360.0f) simGpsAngleDeg -= 360.0f;
+  float rad = simGpsAngleDeg * PI / 180.0f;
+  float jitterM = ((float)random(-30, 31)) / 10.0f;  // +/-3 m, looks alive
+  float r = (float)SIM_GPS_RADIUS_M + jitterM;
+  *lat = (float)SIM_GPS_BASE_LAT + (r / 111320.0f) * cos(rad);
+  *lng = (float)SIM_GPS_BASE_LNG
+       + (r / (111320.0f * cos((float)SIM_GPS_BASE_LAT * PI / 180.0f))) * sin(rad);
+  return true;
+#else
+  (void)lat; (void)lng;
+  return false;
+#endif
+}
+
 // ===== GLOBALS =====
 WiFiClient  wifiClient;
 PubSubClient mqtt(wifiClient);
@@ -167,11 +202,20 @@ void sendHeartbeat() {
   int rssi = WiFi.RSSI();
   int signalStrength = constrain(rssi, -100, -30);
 
-  StaticJsonDocument<128> doc;
+  StaticJsonDocument<192> doc;
   doc["uptime_percentage"] = uptime;
   doc["signal_strength"]   = signalStrength;
 
-  char buffer[128];
+  float gpsLat, gpsLng;
+  if (readGps(&gpsLat, &gpsLng)) {
+    doc["latitude"]  = gpsLat;
+    doc["longitude"] = gpsLng;
+#ifdef SIMULATEGPS
+    Serial.printf("GPS(sim): %.6f, %.6f\n", gpsLat, gpsLng);
+#endif
+  }
+
+  char buffer[192];
   size_t n = serializeJson(doc, buffer);
   String topic = "iot/fleet/" + deviceId + "/heartbeat";
   

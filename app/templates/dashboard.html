@@ -215,12 +215,18 @@ td code { font-family:var(--font-mono); font-size:0.78em; background:rgba(45,212
   <div style="display:flex;align-items:center;gap:0.75rem;">
     {% if user.picture %}
     <img src="{{ user.picture }}" alt="" style="width:32px;height:32px;border-radius:50%;border:2px solid #38bdf8;">
+    {% else %}
+    <div style="width:32px;height:32px;border-radius:50%;border:2px solid #2DD4BF;display:flex;align-items:center;justify-content:center;font-size:0.875rem;font-weight:700;color:#2DD4BF;">{{ (user.username or user.name or user.email or 'A')[:1] | upper }}</div>
     {% endif %}
     <div style="text-align:right;">
-      <div style="font-size:0.875rem;font-weight:600;color:#e2e8f0;">{{ user.name }}</div>
-      <div style="font-size:0.7rem;color:#94a3b8;">{{ user.email }}</div>
+      <div style="font-size:0.875rem;font-weight:600;color:#e2e8f0;">{{ user.name or user.username or user.email }}</div>
+      <div style="font-size:0.7rem;color:#94a3b8;">{% if user.role == 'admin' %}Local admin · {{ user.username }}{% else %}{{ user.email }}{% endif %}</div>
     </div>
+    {% if user.role == 'admin' %}
+    <a href="/auth/admin/logout" class="btn btn-outline" style="text-decoration:none;font-size:0.75rem;padding:0.25rem 0.75rem;">Logout</a>
+    {% else %}
     <a href="/auth/logout" class="btn btn-outline" style="text-decoration:none;font-size:0.75rem;padding:0.25rem 0.75rem;">Logout</a>
+    {% endif %}
   </div>
   {% else %}
   <a href="/auth/login" class="btn btn-primary" style="text-decoration:none;font-size:0.875rem;">Sign in with Google</a>
