@@ -411,7 +411,7 @@ void startOtaUpdate() {
         Serial.printf("OTA: flash write failed at %u, err=%d\n", (unsigned int)written, Update.getError());
         break;
       }
-      if (verifyHash) otaSha256.update(buff, (size_t)n);
+      if (verifyHash) otaSha256.add(buff, (uint32_t)n);
       written += (size_t)n;
       lastData = millis();
       if (millis() - lastLog > 2000) {
@@ -451,7 +451,8 @@ void startOtaUpdate() {
   // hash_mismatch for its rollback bookkeeping.
   if (verifyHash) {
     uint8_t digest[32];
-    otaSha256.end(digest);
+    otaSha256.end();
+    memcpy(digest, otaSha256.hash(), sizeof(digest));
     char actualHex[65];
     for (int i = 0; i < 32; i++) sprintf(actualHex + 2 * i, "%02x", digest[i]);
     actualHex[64] = '\0';
