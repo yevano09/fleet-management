@@ -242,6 +242,8 @@ services:
       - GF_SECURITY_ADMIN_USER=admin
       - GF_SECURITY_ADMIN_PASSWORD=admin
       - GF_INSTALL_PLUGINS=
+      - GF_SERVER_ROOT_URL=https://yevano.iot-forge.in/grafana/
+      - GF_SERVER_SERVE_FROM_SUB_PATH=true
     volumes:
       - ./docker/grafana/provisioning:/etc/grafana/provisioning:ro
       - ./docker/grafana/dashboards:/etc/grafana/dashboards:ro
